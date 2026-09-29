@@ -32,7 +32,7 @@ export function CompactBrandTitle(
   return (
     <View
       aria-level={1}
-      accessibilityLabel="T3 Code, Threads"
+      accessibilityLabel="Necode, Threads"
       accessible
       role="heading"
       className="flex-row items-center gap-1.5"
@@ -44,7 +44,7 @@ export function CompactBrandTitle(
         className="font-t3-medium text-foreground-muted"
         style={{ fontSize: 21 * scale, letterSpacing: -0.5 * scale }}
       >
-        Code
+        Necode
       </Text>
       <View
         className="rounded-full bg-subtle px-1.5 py-0.5"
