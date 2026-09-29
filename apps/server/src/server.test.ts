@@ -179,6 +179,7 @@ import * as SourceControlRepositoryService from "./sourceControl/SourceControlRe
 import { REPLAY_MARKER_MAX_AGE } from "./auth/replayMarkers.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import * as TeamService from "./team/TeamService.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
@@ -406,13 +407,17 @@ const browserOtlpTracingLayer = Layer.mergeAll(
 );
 
 const makeAuthTestLayer = () =>
-  EnvironmentAuth.layer.pipe(
-    Layer.provideMerge(SqlitePersistenceMemory),
-    Layer.provide(ServerSecretStore.layer),
-    Layer.provide(
-      Layer.mock(ServerEnvironment.ServerEnvironmentIdentity)({
-        getEnvironmentId: Effect.succeed(testEnvironmentDescriptor.environmentId),
-      }),
+  TeamService.layer.pipe(
+    Layer.provideMerge(
+      EnvironmentAuth.layer.pipe(
+        Layer.provideMerge(SqlitePersistenceMemory),
+        Layer.provide(ServerSecretStore.layer),
+        Layer.provide(
+          Layer.mock(ServerEnvironment.ServerEnvironmentIdentity)({
+            getEnvironmentId: Effect.succeed(testEnvironmentDescriptor.environmentId),
+          }),
+        ),
+      ),
     ),
   );
 

@@ -703,6 +703,67 @@ describe("orchestration projector", () => {
     expect(message?.updatedAt).toBe(completeAt);
   });
 
+  it("attributes user messages to the team member who sent them", async () => {
+    const createdAt = "2026-02-23T10:00:00.000Z";
+    const threadCreated = makeEvent({
+      sequence: 1,
+      type: "thread.created",
+      aggregateKind: "thread",
+      aggregateId: "thread-1",
+      occurredAt: createdAt,
+      commandId: "cmd-create",
+      payload: {
+        threadId: "thread-1",
+        projectId: "project-1",
+        title: "demo",
+        modelSelection: { provider: ProviderDriverKind.make("codex"), model: "gpt-5.3-codex" },
+        runtimeMode: "full-access",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+        updatedAt: createdAt,
+      },
+    });
+    const sent = (sequence: number, role: "user" | "assistant", messageId: string) => ({
+      ...makeEvent({
+        sequence,
+        type: "thread.message-sent",
+        aggregateKind: "thread",
+        aggregateId: "thread-1",
+        occurredAt: createdAt,
+        commandId: `cmd-${sequence}`,
+        payload: {
+          threadId: "thread-1",
+          messageId,
+          role,
+          text: "hi",
+          turnId: null,
+          streaming: false,
+          createdAt,
+          updatedAt: createdAt,
+        },
+      }),
+      metadata: { origin: { memberId: "member-ana" } },
+    });
+
+    let model = await Effect.runPromise(
+      projectEvent(createEmptyReadModel(createdAt), threadCreated),
+    );
+    model = await Effect.runPromise(
+      projectEvent(model, sent(2, "user", "user-1") as OrchestrationEvent),
+    );
+    model = await Effect.runPromise(
+      projectEvent(model, sent(3, "assistant", "assistant-1") as OrchestrationEvent),
+    );
+
+    const messages = model.threads[0]?.messages ?? [];
+    expect(messages.find((message) => message.id === "user-1")?.authorMemberId).toBe("member-ana");
+    // Provider output triggered by that member is not theirs.
+    expect(
+      messages.find((message) => message.id === "assistant-1")?.authorMemberId,
+    ).toBeUndefined();
+  });
+
   it("prunes reverted turn messages from in-memory thread snapshot", async () => {
     const createdAt = "2026-02-23T10:00:00.000Z";
     const model = createEmptyReadModel(createdAt);

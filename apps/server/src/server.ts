@@ -128,6 +128,7 @@ import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http
 import * as ReplayMarkers from "./auth/replayMarkers.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import * as TeamService from "./team/TeamService.ts";
 import {
   connectHttpApiLayer,
   pendingServiceUpdateExists,
@@ -554,6 +555,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(Layer.mergeAll(NativeAppIconResolver.layer, ProjectFaviconResolverLayerLive)),
   Layer.provideMerge(RepositoryIdentityResolverLayerLive),
   Layer.provideMerge(ServerEnvironmentLayerLive),
+  Layer.provideMerge(TeamService.layer),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(ServerSecretStore.layer),
   Layer.provideMerge(
@@ -691,12 +693,14 @@ const makeServerLayer = Layer.unwrap(
                 localPort,
                 servePort: config.tailscaleServePort,
                 localHost: "127.0.0.1",
+                publicAccess: config.tailscaleFunnelEnabled ?? true,
               }).pipe(
                 Effect.as({ localPort, servePort: config.tailscaleServePort }),
                 Effect.tap(() =>
-                  Effect.logInfo("Tailscale Serve configured", {
+                  Effect.logInfo("Tailscale HTTPS configured", {
                     localPort,
                     servePort: config.tailscaleServePort,
+                    publicAccess: config.tailscaleFunnelEnabled ?? true,
                   }),
                 ),
                 Effect.catch((cause) =>
@@ -710,7 +714,10 @@ const makeServerLayer = Layer.unwrap(
             }),
             (configured) =>
               configured
-                ? disableTailscaleServe({ servePort: configured.servePort }).pipe(
+                ? disableTailscaleServe({
+                    servePort: configured.servePort,
+                    publicAccess: config.tailscaleFunnelEnabled ?? true,
+                  }).pipe(
                     Effect.tap(() =>
                       Effect.logInfo("Tailscale Serve disabled", {
                         servePort: configured.servePort,

@@ -17,6 +17,7 @@ import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as TeamService from "./team/TeamService.ts";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
   AuthAccessStreamError,
@@ -79,6 +80,7 @@ import {
   WORKTREE_SETUP_ACTIVITY_KIND,
   worktreeSetupActivityId,
   type WorktreeSetupSnapshot,
+  teamMemberIdFromSubject,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
@@ -496,6 +498,7 @@ function readClientAnalyticsProps(request: HttpServerRequest.HttpServerRequest) 
 
 const makeWsRpcLayer = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
+  connectionId: string,
   clientOrigin: OrchestrationClientOrigin,
   clientAnalyticsProps: Readonly<Record<string, unknown>>,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
@@ -522,15 +525,22 @@ const makeWsRpcLayer = (
       // Every command dispatched on this connection carries the connecting
       // client's origin, including server-generated bootstrap sub-commands:
       // the client's request caused them.
+      // The author is derived from the authenticated session, never from the client.
+      const memberId = teamMemberIdFromSubject(currentSession.subject);
+      const attributedOrigin: OrchestrationClientOrigin =
+        memberId === null ? clientOrigin : { ...clientOrigin, memberId };
       const hasClientOrigin =
-        clientOrigin.surface !== undefined || clientOrigin.appVersion !== undefined;
+        attributedOrigin.surface !== undefined ||
+        attributedOrigin.appVersion !== undefined ||
+        attributedOrigin.memberId !== undefined;
       const dispatchFromClient: OrchestrationEngine.OrchestrationEngineShape["dispatch"] = (
         command,
       ) =>
         orchestrationEngine.dispatch(
           command,
-          hasClientOrigin ? { origin: clientOrigin } : undefined,
+          hasClientOrigin ? { origin: attributedOrigin } : undefined,
         );
+      const team = yield* TeamService.TeamService;
       const recordClientCommandAnalytics = (command: OrchestrationCommand) => {
         switch (command.type) {
           case "thread.create":
@@ -3762,6 +3772,30 @@ const makeWsRpcLayer = (
             }),
             { "rpc.aggregate": "auth" },
           ),
+        [WS_METHODS.teamSubscribe]: (_input) =>
+          observeRpcStream(WS_METHODS.teamSubscribe, team.subscribe(currentSession.subject), {
+            "rpc.aggregate": "team",
+          }),
+        [WS_METHODS.teamSetViewing]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.teamSetViewing,
+            team.setViewing(connectionId, input.threadId).pipe(Effect.as({})),
+            { "rpc.aggregate": "team" },
+          ),
+        [WS_METHODS.teamInvite]: (input) =>
+          observeRpcEffect(WS_METHODS.teamInvite, team.invite(input), {
+            "rpc.aggregate": "team",
+          }),
+        [WS_METHODS.teamRevokeMember]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.teamRevokeMember,
+            team.revokeMember(input.memberId).pipe(Effect.map((revoked) => ({ revoked }))),
+            { "rpc.aggregate": "team" },
+          ),
+        [WS_METHODS.teamUpdateMember]: (input) =>
+          observeRpcEffect(WS_METHODS.teamUpdateMember, team.updateMember(input), {
+            "rpc.aggregate": "team",
+          }),
         [WS_METHODS.subscribeBackgroundPolicy]: (_input) =>
           observeRpcStream(
             WS_METHODS.subscribeBackgroundPolicy,
@@ -3838,6 +3872,8 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         );
         const clientOrigin = readClientConnectionOrigin(request);
         const clientAnalyticsProps = readClientAnalyticsProps(request);
+        const team = yield* TeamService.TeamService;
+        const connectionId = yield* (yield* Crypto.Crypto).randomUUIDv4.pipe(Effect.orDie);
         yield* sessions.recordClientConnection(session.sessionId, clientOrigin);
         yield* analytics.record("client.connected", clientAnalyticsProps);
         const rpcWebSocketHttpEffect = yield* Effect.gen(function* () {
@@ -3852,6 +3888,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           Effect.provide(
             makeWsRpcLayer(
               session,
+              connectionId,
               clientOrigin,
               clientAnalyticsProps,
               previewAutomationBroker,
@@ -3888,10 +3925,23 @@ export const websocketRpcRouteLayer = Layer.unwrap(
             ),
           ),
         );
+        // Revoking a session (or removing a team member) must cut an open socket,
+        // not just future requests.
+        const revoked = sessions.streamChanges.pipe(
+          Stream.filter(
+            (change) => change.type === "clientRemoved" && change.sessionId === session.sessionId,
+          ),
+          Stream.runHead,
+        );
         return yield* Effect.acquireUseRelease(
-          sessions.markConnected(session.sessionId),
-          () => rpcWebSocketHttpEffect,
-          () => sessions.markDisconnected(session.sessionId),
+          sessions
+            .markConnected(session.sessionId)
+            .pipe(Effect.andThen(team.connect({ connectionId, subject: session.subject }))),
+          () => Effect.raceFirst(rpcWebSocketHttpEffect, Effect.andThen(revoked, Effect.interrupt)),
+          () =>
+            sessions
+              .markDisconnected(session.sessionId)
+              .pipe(Effect.andThen(team.disconnect(connectionId))),
         );
       }).pipe(
         Effect.catchTags({

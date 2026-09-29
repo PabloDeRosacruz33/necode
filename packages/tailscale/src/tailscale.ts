@@ -19,7 +19,7 @@ const tailscaleCommandForPlatform = (platform: NodeJS.Platform): "tailscale" | "
 
 const TailscaleCommandContext = {
   executable: Schema.Literals(["tailscale", "tailscale.exe"]),
-  subcommand: Schema.Literals(["status", "serve"]),
+  subcommand: Schema.Literals(["status", "serve", "funnel"]),
   argumentCount: Schema.Number,
 };
 
@@ -286,7 +286,7 @@ export function buildTailscaleHttpsBaseUrl(input: {
 }
 
 const runTailscaleCommand = (
-  args: readonly string[],
+  args: readonly [TailscaleExposureCommand, ...string[]],
   timeoutInput: Duration.Input,
 ): Effect.Effect<void, TailscaleCommandError, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
@@ -295,7 +295,7 @@ const runTailscaleCommand = (
     const executable = tailscaleCommandForPlatform(hostPlatform);
     const commandContext = {
       executable,
-      subcommand: "serve" as const,
+      subcommand: args[0],
       argumentCount: args.length,
     };
     const timeout = Duration.fromInputUnsafe(timeoutInput);
@@ -338,26 +338,45 @@ const runTailscaleCommand = (
     );
   });
 
+/**
+ * `serve` publishes on the tailnet only; `funnel` publishes the same HTTPS
+ * hostname on the public internet (ports 443, 8443 or 10000) so devices
+ * without Tailscale can reach it. Environment auth still guards every request.
+ */
+type TailscaleExposureCommand = "serve" | "funnel";
+
+const exposureCommand = (publicAccess: boolean | undefined): TailscaleExposureCommand =>
+  publicAccess ? "funnel" : "serve";
+
 export const ensureTailscaleServe = (input: {
   readonly localPort: number;
   readonly servePort?: number;
   readonly localHost?: string;
+  readonly publicAccess?: boolean;
 }): Effect.Effect<void, TailscaleCommandError, ChildProcessSpawner.ChildProcessSpawner> => {
   const servePort = input.servePort ?? DEFAULT_TAILSCALE_SERVE_PORT;
   const localHost = input.localHost ?? "127.0.0.1";
-  const args = ["serve", "--bg", `--https=${servePort}`, `http://${localHost}:${input.localPort}`];
-  return runTailscaleCommand(args, TAILSCALE_SERVE_TIMEOUT);
+  return runTailscaleCommand(
+    [
+      exposureCommand(input.publicAccess),
+      "--bg",
+      `--https=${servePort}`,
+      `http://${localHost}:${input.localPort}`,
+    ],
+    TAILSCALE_SERVE_TIMEOUT,
+  );
 };
 
 export const disableTailscaleServe = (
   input: {
     readonly servePort?: number;
+    readonly publicAccess?: boolean;
   } = {},
 ): Effect.Effect<void, TailscaleCommandError, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const servePort = input.servePort ?? DEFAULT_TAILSCALE_SERVE_PORT;
     return yield* runTailscaleCommand(
-      ["serve", `--https=${servePort}`, "off"],
+      [exposureCommand(input.publicAccess), `--https=${servePort}`, "off"],
       TAILSCALE_SERVE_TIMEOUT,
     );
   });

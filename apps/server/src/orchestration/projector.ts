@@ -795,6 +795,9 @@ export function projectEvent(
             text: payload.text,
             ...(payload.attachments !== undefined ? { attachments: payload.attachments } : {}),
             ...(payload.context !== undefined ? { context: payload.context } : {}),
+            ...(payload.role === "user" && event.metadata?.origin?.memberId !== undefined
+              ? { authorMemberId: event.metadata.origin.memberId }
+              : {}),
             turnId: payload.turnId,
             streaming: payload.streaming,
             createdAt: payload.createdAt,

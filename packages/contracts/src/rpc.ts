@@ -3,6 +3,16 @@ import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
+  TeamError,
+  TeamInviteInput,
+  TeamInviteResult,
+  TeamMember,
+  TeamRevokeMemberInput,
+  TeamSetViewingInput,
+  TeamSnapshot,
+  TeamUpdateMemberInput,
+} from "./team.ts";
+import {
   ProviderAuthCancelInput,
   ProviderAuthCompleteInput,
   ProviderAuthState,
@@ -441,6 +451,13 @@ export const WS_METHODS = {
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
+
+  // Team (members, invites, presence)
+  teamSubscribe: "team.subscribe",
+  teamSetViewing: "team.setViewing",
+  teamInvite: "team.invite",
+  teamRevokeMember: "team.revokeMember",
+  teamUpdateMember: "team.updateMember",
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
 } as const;
@@ -1377,6 +1394,37 @@ const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess, {
   stream: true,
 });
 
+const WsTeamSubscribeRpc = Rpc.make(WS_METHODS.teamSubscribe, {
+  payload: Schema.Struct({}),
+  success: TeamSnapshot,
+  error: Schema.Union([TeamError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+const WsTeamSetViewingRpc = Rpc.make(WS_METHODS.teamSetViewing, {
+  payload: TeamSetViewingInput,
+  success: Schema.Struct({}),
+  error: EnvironmentAuthorizationError,
+});
+
+const WsTeamInviteRpc = Rpc.make(WS_METHODS.teamInvite, {
+  payload: TeamInviteInput,
+  success: TeamInviteResult,
+  error: Schema.Union([TeamError, EnvironmentAuthorizationError]),
+});
+
+const WsTeamRevokeMemberRpc = Rpc.make(WS_METHODS.teamRevokeMember, {
+  payload: TeamRevokeMemberInput,
+  success: Schema.Struct({ revoked: Schema.Boolean }),
+  error: Schema.Union([TeamError, EnvironmentAuthorizationError]),
+});
+
+const WsTeamUpdateMemberRpc = Rpc.make(WS_METHODS.teamUpdateMember, {
+  payload: TeamUpdateMemberInput,
+  success: TeamMember,
+  error: Schema.Union([TeamError, EnvironmentAuthorizationError]),
+});
+
 const WsSubscribeBackgroundPolicyRpc = Rpc.make(WS_METHODS.subscribeBackgroundPolicy, {
   payload: Schema.Struct({}),
   success: BackgroundPolicySnapshot,
@@ -1526,6 +1574,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,
+  WsTeamSubscribeRpc,
+  WsTeamSetViewingRpc,
+  WsTeamInviteRpc,
+  WsTeamRevokeMemberRpc,
+  WsTeamUpdateMemberRpc,
   WsSubscribeBackgroundPolicyRpc,
   WsSubscribeResourceTelemetryRpc,
   WsOrchestrationDispatchCommandRpc,

@@ -162,6 +162,9 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  // Necode publishes the Tailscale HTTPS endpoint with Funnel so teammates without
+  // Tailscale can join; set T3CODE_TAILSCALE_FUNNEL=false to keep it tailnet-only.
+  tailscaleFunnelEnabled: Config.Boolean("T3CODE_TAILSCALE_FUNNEL").pipe(Config.withDefault(true)),
 });
 
 const DevAuthTokenConfig = Config.Redacted("T3CODE_DEV_AUTH_TOKEN").pipe(
@@ -458,6 +461,7 @@ export const resolveServerConfig = (
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
+      tailscaleFunnelEnabled: env.tailscaleFunnelEnabled,
     };
 
     return config;

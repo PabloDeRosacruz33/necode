@@ -1,6 +1,7 @@
 import {
   type DeviceListInput,
   AuthAccessReadScope,
+  AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthRelayReadScope,
@@ -169,6 +170,13 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.subscribeServerConfig]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeServerLifecycle]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeAuthAccess]: AuthAccessReadScope,
+  // Everyone on the team can see who is here and say what they are looking at;
+  // managing people needs access:write.
+  [WS_METHODS.teamSubscribe]: AuthOrchestrationReadScope,
+  [WS_METHODS.teamSetViewing]: AuthOrchestrationReadScope,
+  [WS_METHODS.teamInvite]: AuthAccessWriteScope,
+  [WS_METHODS.teamRevokeMember]: AuthAccessWriteScope,
+  [WS_METHODS.teamUpdateMember]: AuthAccessWriteScope,
   [WS_METHODS.subscribeBackgroundPolicy]: AuthOrchestrationReadScope,
 } as const satisfies Readonly<Record<WsRpcMethod, AuthEnvironmentScope>>;
 

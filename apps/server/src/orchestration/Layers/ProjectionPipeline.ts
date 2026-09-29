@@ -1144,6 +1144,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
 
         case "thread.message-sent": {
+          const authorMemberId =
+            event.payload.role === "user" ? event.metadata?.origin?.memberId : undefined;
           if (event.payload.streaming) {
             const attachments =
               event.payload.attachments !== undefined
@@ -1159,6 +1161,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               text: event.payload.text,
               ...(attachments !== undefined ? { attachments: [...attachments] } : {}),
               ...(event.payload.context !== undefined ? { context: event.payload.context } : {}),
+              ...(authorMemberId !== undefined ? { authorMemberId } : {}),
               createdAt: event.payload.createdAt,
               updatedAt: event.payload.updatedAt,
             });
@@ -1189,6 +1192,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(nextAttachments !== undefined ? { attachments: [...nextAttachments] } : {}),
             ...((event.payload.context ?? previousMessage?.context) !== undefined
               ? { context: event.payload.context ?? previousMessage?.context }
+              : {}),
+            ...((authorMemberId ?? previousMessage?.authorMemberId) !== undefined
+              ? { authorMemberId: authorMemberId ?? previousMessage?.authorMemberId }
               : {}),
             isStreaming: false,
             createdAt: previousMessage?.createdAt ?? event.payload.createdAt,

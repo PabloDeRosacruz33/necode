@@ -105,6 +105,8 @@ import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Root, RootContent } from "mdast";
+import { findTeamMember, shouldLabelMessageAuthor } from "@t3tools/client-runtime/state/team";
+import { useTeamSnapshot } from "~/state/team";
 import { T3Wordmark } from "../T3Wordmark";
 import {
   BotIcon,
@@ -135,6 +137,7 @@ import type {
   ComposerContextId,
   ComposerContextRecord,
   KnownComposerContextRecord,
+  TeamMember,
 } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import type { QueuedComposerMessage } from "../../queuedMessageStore";
@@ -1947,6 +1950,16 @@ function UserVideoAttachment({ file }: { readonly file: ChatFileAttachment }) {
 // from selection so sighted users and copied text are unaffected.
 const MESSAGE_HEADING_LEVEL = 3;
 
+/** Names the teammate behind a user message; the viewer's own messages stay unlabelled. */
+function TeamMessageAuthor({ member }: { member: TeamMember }) {
+  return (
+    <div className="flex items-center gap-1.5 pr-1 text-xs text-muted-foreground" aria-hidden>
+      <span className="size-2 rounded-full" style={{ backgroundColor: member.color }} />
+      {member.name}
+    </div>
+  );
+}
+
 function MessageAuthorHeading({ children }: { children: string }) {
   return <h3 className="sr-only select-none">{children}</h3>;
 }
@@ -1954,6 +1967,11 @@ function MessageAuthorHeading({ children }: { children: string }) {
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const { onImageExpand, onFileOpen } = ctx;
+  const team = useTeamSnapshot(ctx.activeThreadEnvironmentId);
+  const author = shouldLabelMessageAuthor(team, row.message.authorMemberId)
+    ? findTeamMember(team, row.message.authorMemberId)
+    : undefined;
+  const authoredBySomeoneElse = author !== undefined && author.memberId !== team.selfMemberId;
   const resources = useMemo(
     () => selectMessageImageResources(row.message.attachments),
     [row.message.attachments],
@@ -2109,8 +2127,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
+      {authoredBySomeoneElse ? <TeamMessageAuthor member={author} /> : null}
       <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
-        <MessageAuthorHeading>You</MessageAuthorHeading>
+        <MessageAuthorHeading>{authoredBySomeoneElse ? author.name : "You"}</MessageAuthorHeading>
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[210px] grid-cols-2 gap-2">
             {regularImages.map((image) => (

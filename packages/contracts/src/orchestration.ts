@@ -577,6 +577,8 @@ export const OrchestrationMessage = Schema.Struct({
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
   context: Schema.optional(OrchestrationMessageContext),
+  /** Team member who sent this user message. Absent for provider output and older history. */
+  authorMemberId: Schema.optional(TrimmedNonEmptyString),
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
   createdAt: IsoDateTime,
@@ -2009,6 +2011,8 @@ export const ThreadActivityAppendedPayload = Schema.Struct({
 export const OrchestrationClientOrigin = Schema.Struct({
   surface: Schema.optional(ClientSurface),
   appVersion: Schema.optional(TrimmedNonEmptyString),
+  /** Team member behind the connection, derived by the server from the session, never the client. */
+  memberId: Schema.optional(TrimmedNonEmptyString),
 });
 export type OrchestrationClientOrigin = typeof OrchestrationClientOrigin.Type;
 

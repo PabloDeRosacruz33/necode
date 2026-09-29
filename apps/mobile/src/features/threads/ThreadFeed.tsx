@@ -13,9 +13,11 @@ import type {
   EnvironmentId,
   MessageId,
   OrchestrationMessageContext,
+  TeamSnapshot,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
+import { findTeamMember, shouldLabelMessageAuthor } from "@t3tools/client-runtime/state/team";
 import { renderAssistantCitationsAsText } from "@t3tools/shared/assistantCitations";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
 import {
@@ -181,6 +183,7 @@ import {
   useRefreshAssetUrl,
 } from "../../state/assets";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
+import { useReportTeamViewing, useTeamSnapshot } from "../../state/team";
 import { usePreparedConnection } from "../../state/session";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { composerDocumentAttachmentRecord } from "../../lib/composerContext";
@@ -1388,6 +1391,7 @@ function renderFeedEntry(
     readonly userBubbleMaxWidth: number;
     /** Width assistant markdown lays out in, so images can size their frame before layout. */
     readonly markdownContentWidth: number;
+    readonly team: TeamSnapshot;
   },
 ) {
   const entry = info.item;
@@ -1550,8 +1554,22 @@ function renderFeedEntry(
       const visibleAttachments = attachments.filter(
         (attachment) => isImageAttachment(attachment) || !inlineAttachmentIds.has(attachment.id),
       );
+      const author = shouldLabelMessageAuthor(props.team, message.authorMemberId)
+        ? findTeamMember(props.team, message.authorMemberId)
+        : undefined;
+      const teammateAuthor =
+        author !== undefined && author.memberId !== props.team.selfMemberId ? author : undefined;
       return (
         <View className="mb-5 items-end">
+          {teammateAuthor ? (
+            <View className="mb-1 flex-row items-center gap-1.5 pr-1">
+              <View
+                className="size-2 rounded-full"
+                style={{ backgroundColor: teammateAuthor.color }}
+              />
+              <Text className="text-xs text-foreground-muted">{teammateAuthor.name}</Text>
+            </View>
+          ) : null}
           <View
             className="min-w-0 gap-2 rounded-[20px] px-3.5 py-2.5"
             style={{
@@ -1949,6 +1967,8 @@ function ThreadFeedPlaceholder(props: {
 
 export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const navigation = useNavigation();
+  const team = useTeamSnapshot(props.environmentId);
+  useReportTeamViewing(props.environmentId, props.threadId);
   const { themeAppearance } = useAppearancePreferences();
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const disclosureSettleFrameRef = useRef<number | null>(null);
@@ -2784,6 +2804,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             themeAppearance,
             userBubbleMaxWidth,
             markdownContentWidth,
+            team,
             skills: props.skills,
             onUseArtifactTemplate: props.onUseArtifactTemplate,
           })}
@@ -2820,6 +2841,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       themeAppearance,
       userBubbleMaxWidth,
       markdownContentWidth,
+      team,
       onCopyWorkRow,
       markdownLinkHandlers,
       onPressPreview,
