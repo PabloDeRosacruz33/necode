@@ -37,6 +37,7 @@ import {
 } from "../logicalProject";
 import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
 import { useUiStateStore } from "../uiStateStore";
+import { useContinueThreadWith } from "./useContinueThreadWith";
 import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
@@ -97,6 +98,7 @@ export function useThreadActionMenu(input: {
     reportFailure: false,
   });
   const handleNewThread = useNewThreadHandler();
+  const { targetsFor: handoffTargetsFor, continueWith } = useContinueThreadWith();
   const markThreadUnread = useUiStateStore((s) => s.markThreadUnread);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
@@ -155,6 +157,10 @@ export function useThreadActionMenu(input: {
           isRunning: thread.session?.status === "running" && thread.session.activeTurnId != null,
           supports,
           snoozePresets,
+          continueWith: handoffTargetsFor(threadRef).map((target) => ({
+            instanceId: target.modelSelection.instanceId,
+            label: target.label,
+          })),
         });
         const clicked = await settlePromise(() => api.contextMenu.show(items, position));
         if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -169,6 +175,10 @@ export function useThreadActionMenu(input: {
           if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
             failureToast("Failed to snooze thread", squashAtomCommandFailure(result));
           }
+          return;
+        }
+        if (action.startsWith("continue-with:")) {
+          await continueWith(threadRef, action.slice("continue-with:".length));
           return;
         }
         const reportFailure = async (
@@ -330,11 +340,13 @@ export function useThreadActionMenu(input: {
       confirmThreadArchive,
       confirmThreadDelete,
       confirmAndUnpinThread,
+      continueWith,
       copyBranchToClipboard,
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
       handleNewThread,
+      handoffTargetsFor,
       logicalProjectKeyByPhysicalKey,
       markThreadUnread,
       onStartRename,

@@ -1,3 +1,4 @@
+import { useContinueThreadWith } from "../hooks/useContinueThreadWith";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
@@ -2840,6 +2841,9 @@ export default function Sidebar() {
   // a ref keeps it out of attemptSettle's dependency array.
   const handleNewThreadRef = useRef(newThreadContext.handleNewThread);
   handleNewThreadRef.current = newThreadContext.handleNewThread;
+  const threadHandoff = useContinueThreadWith();
+  const threadHandoffRef = useRef(threadHandoff);
+  threadHandoffRef.current = threadHandoff;
   const settledThreadKeys = useMemo(
     () =>
       new Set(
@@ -4107,11 +4111,22 @@ export default function Sidebar() {
                 titleRegeneration: supportsTitleRegeneration,
               },
               snoozePresets,
+              continueWith: threadHandoffRef.current.targetsFor(threadRef).map((target) => ({
+                instanceId: target.modelSelection.instanceId,
+                label: target.label,
+              })),
             }),
             position,
           ),
         );
         if (clicked._tag === "Failure") return;
+        if (clicked.value?.startsWith("continue-with:")) {
+          await threadHandoffRef.current.continueWith(
+            threadRef,
+            clicked.value.slice("continue-with:".length),
+          );
+          return;
+        }
         if (clicked.value?.startsWith("snooze:")) {
           const preset =
             clicked.value === "snooze:custom"

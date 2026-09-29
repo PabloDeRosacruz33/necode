@@ -8,6 +8,8 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
  */
 export type ThreadActionMenuId =
   | "new-thread-on-branch"
+  | "continue-with"
+  | `continue-with:${string}`
   | "filter-by-project"
   | "project-settings"
   | "pin"
@@ -59,6 +61,8 @@ export interface ThreadActionMenuState {
     readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
+  /** Providers this thread can hand off to; omitted or empty hides "Continue with…". */
+  readonly continueWith?: ReadonlyArray<{ readonly instanceId: string; readonly label: string }>;
 }
 
 /**
@@ -76,6 +80,19 @@ export function buildThreadActionMenuItems(
             id: "new-thread-on-branch" as const,
             label: `New thread on ${state.branch}`,
             icon: "message-square-plus",
+          },
+        ]
+      : []),
+    ...(state.continueWith && state.continueWith.length > 0
+      ? [
+          {
+            id: "continue-with" as const,
+            label: "Continue with…",
+            icon: "message-square-plus",
+            children: state.continueWith.map((target) => ({
+              id: `continue-with:${target.instanceId}` as const,
+              label: target.label,
+            })),
           },
         ]
       : []),
