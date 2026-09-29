@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
@@ -101,6 +102,31 @@ it.layer(NodeServices.layer)("TeamService", (it) => {
       const team = yield* TeamService.TeamService;
       const error = yield* Effect.flip(team.revokeMember(TEAM_OWNER_MEMBER_ID));
       expect(error.message).toContain("owner");
+    }).pipe(Effect.provide(TeamTestLayer)),
+  );
+
+  it.effect("streams presence changes live to other subscribers", () =>
+    Effect.gen(function* () {
+      const team = yield* TeamService.TeamService;
+      const invited = yield* team.invite({ name: "Ana", role: "member" });
+      const threadId = ThreadId.make("thread-live");
+
+      // The owner is watching; Ana connects and then opens a thread.
+      const updates = yield* team
+        .subscribe("desktop-bootstrap")
+        .pipe(Stream.take(3), Stream.runCollect, Effect.forkChild);
+      yield* Effect.yieldNow;
+      yield* team.connect({
+        connectionId: "ana",
+        subject: teamMemberSubject(invited.member.memberId),
+      });
+      yield* team.setViewing("ana", threadId);
+
+      const snapshots = yield* Fiber.join(updates);
+      const last = [...snapshots].at(-1)!;
+      expect(last.presence).toEqual([
+        { memberId: invited.member.memberId, connections: 1, viewingThreadIds: [threadId] },
+      ]);
     }).pipe(Effect.provide(TeamTestLayer)),
   );
 

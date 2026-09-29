@@ -133,6 +133,7 @@ export function TeamSettings(props: {
                     size="sm"
                     aria-label="Your name"
                     value={editingOwnerName}
+                    onFocus={(event) => event.currentTarget.select()}
                     onChange={(event) => setEditingOwnerName(event.currentTarget.value)}
                     onBlur={() => void saveOwnerName(member)}
                     onKeyDown={(event) => {

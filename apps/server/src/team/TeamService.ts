@@ -262,13 +262,18 @@ export const make = Effect.gen(function* () {
 
   const subscribe: TeamServiceShape["subscribe"] = (subject) => {
     const selfMemberId = teamMemberIdFromSubject(subject);
-    return Stream.concat(
-      Stream.fromEffect(snapshot(selfMemberId)),
-      Stream.fromPubSub(changes).pipe(
-        // Presence can flap on reconnect; one snapshot per burst is enough.
-        Stream.debounce(Duration.millis(100)),
-        Stream.mapEffect(() => snapshot(selfMemberId)),
-      ),
+    // Subscribe before reading the first snapshot so no change falls in between.
+    return Stream.unwrap(
+      Effect.gen(function* () {
+        const subscription = yield* PubSub.subscribe(changes);
+        const initial = yield* snapshot(selfMemberId);
+        return Stream.concat(
+          Stream.make(initial),
+          Stream.fromSubscription(subscription).pipe(
+            Stream.mapEffect(() => snapshot(selfMemberId)),
+          ),
+        );
+      }),
     );
   };
 

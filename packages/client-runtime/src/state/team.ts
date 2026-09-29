@@ -19,9 +19,12 @@ export function createTeamEnvironmentAtoms<R, E>(
       label: "environment-data:team",
       tag: WS_METHODS.teamSubscribe,
     }),
+    // Mount/unmount pairs fire in quick succession; sending them serially and
+    // coalescing to the newest keeps the server from ending on a stale value.
     setViewing: createEnvironmentRpcCommand(runtime, {
       label: "team:set-viewing",
       tag: WS_METHODS.teamSetViewing,
+      concurrency: { mode: "latest", key: (target) => target.environmentId },
     }),
     invite: createEnvironmentRpcCommand(runtime, {
       label: "team:invite",
@@ -58,6 +61,17 @@ export function onlineTeamMembers(snapshot: TeamSnapshot): ReadonlyArray<TeamMem
           ? 1
           : 0,
     );
+}
+
+/**
+ * Whether the environment already knows the viewer has this thread open. Clients
+ * resend their viewing state whenever this is false, which recovers it after the
+ * first connect, reconnects and server restarts.
+ */
+export function isViewingThreadReported(snapshot: TeamSnapshot, threadId: ThreadId): boolean {
+  if (snapshot.selfMemberId === null) return true;
+  const self = snapshot.presence.find((entry) => entry.memberId === snapshot.selfMemberId);
+  return self?.viewingThreadIds.includes(threadId) ?? false;
 }
 
 /** Other members who have this thread open right now. */

@@ -1,4 +1,8 @@
-import { teamMemberInitials, teamMembersViewingThread } from "@t3tools/client-runtime/state/team";
+import {
+  isViewingThreadReported,
+  teamMemberInitials,
+  teamMembersViewingThread,
+} from "@t3tools/client-runtime/state/team";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useEffect } from "react";
 
@@ -18,14 +22,22 @@ export function ThreadTeamPresence(props: {
 }) {
   const { environmentId, threadId } = props;
   const setViewing = useAtomCommand(teamEnvironment.setViewing, { reportFailure: false });
-  useEffect(() => {
-    void setViewing({ environmentId, input: { threadId } });
-    return () => {
-      void setViewing({ environmentId, input: { threadId: null } });
-    };
-  }, [environmentId, setViewing, threadId]);
-
   const team = useTeamSnapshot(environmentId);
+  // Until a snapshot exists there is nobody to report to; afterwards resend
+  // whenever the environment lost track (first connect, reconnect, restart).
+  const hasSnapshot = team.selfMemberId !== null;
+  const reported = isViewingThreadReported(team, threadId);
+  useEffect(() => {
+    if (!hasSnapshot || reported) return;
+    void setViewing({ environmentId, input: { threadId } });
+  }, [environmentId, hasSnapshot, reported, setViewing, threadId]);
+  useEffect(
+    () => () => {
+      void setViewing({ environmentId, input: { threadId: null } });
+    },
+    [environmentId, setViewing, threadId],
+  );
+
   const viewers = teamMembersViewingThread(team, threadId);
   if (viewers.length === 0) return null;
 
