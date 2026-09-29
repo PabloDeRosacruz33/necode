@@ -11,7 +11,7 @@ set -euo pipefail
 REPO="PabloDeRosacruz33/necode"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
-export PATH="/opt/homebrew/opt/node@24/bin:$PATH"
+export PATH="$ROOT/node_modules/.bin:/opt/homebrew/opt/node@24/bin:$PATH"
 
 set -a
 # shellcheck disable=SC1090

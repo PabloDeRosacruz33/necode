@@ -10,7 +10,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 MOBILE="$ROOT/apps/mobile"
 WORK="$(mktemp -d)"
-export PATH="/opt/homebrew/opt/node@24/bin:$PATH" LANG=en_US.UTF-8
+export PATH="$ROOT/node_modules/.bin:/opt/homebrew/opt/node@24/bin:$PATH" LANG=en_US.UTF-8
 
 set -a
 # shellcheck disable=SC1090
