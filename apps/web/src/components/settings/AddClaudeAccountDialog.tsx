@@ -12,6 +12,8 @@ import { Dialog } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { WizardFooter, WizardHeader, WizardPanel, WizardPopup } from "../ui/wizard";
 import { ClaudeSetupSection } from "./ClaudeSetupSection";
+import { normalizeProviderAccentColor } from "../../providerInstances";
+import { ProviderAccentSwatches } from "./ProviderAccentSwatches";
 import { SettingsRow } from "./settingsLayout";
 
 export function ClaudeConnectionButton(props: { readonly onClick: () => void }) {
@@ -41,6 +43,7 @@ export function AddClaudeAccountDialog({
   const providers = useAtomValue(serverEnvironment.providersValueAtom(environmentId));
   const update = useAtomCommand(serverEnvironment.updateSettings, "Add Claude account");
   const [name, setName] = useState("Personal");
+  const [accentColor, setAccentColor] = useState("");
   const displayName = `Claude - ${name.trim()}`;
   const [instanceId, setInstanceId] = useState<ProviderInstanceId | null>(null);
   const [pending, setPending] = useState(false);
@@ -66,6 +69,9 @@ export function AddClaudeAccountDialog({
             [id]: {
               driver: ProviderDriverKind.make("claudeAgent"),
               displayName,
+              ...(normalizeProviderAccentColor(accentColor)
+                ? { accentColor: normalizeProviderAccentColor(accentColor) }
+                : {}),
               enabled: true,
               config: {
                 enabled: true,
@@ -120,6 +126,17 @@ export function AddClaudeAccountDialog({
                     disabled={pending}
                     onChange={(event) => setName(event.target.value)}
                     placeholder="e.g. Personal or Work"
+                  />
+                }
+              />
+              <SettingsRow
+                title="Color"
+                description="Tells this account apart in the model picker."
+                control={
+                  <ProviderAccentSwatches
+                    displayName={displayName}
+                    value={accentColor}
+                    onChange={setAccentColor}
                   />
                 }
               />

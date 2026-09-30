@@ -22,7 +22,7 @@ import { Input } from "../ui/input";
 import { RadioGroup } from "../ui/radio-group";
 import { toastManager } from "../ui/toast";
 import { DRIVER_OPTION_BY_VALUE, DRIVER_OPTIONS } from "./providerDriverMeta";
-import { ProviderAccentColorPicker } from "./ProviderAccentColorPicker";
+import { ProviderAccentSwatches } from "./ProviderAccentSwatches";
 import { ProviderSettingsForm, deriveProviderSettingsFields } from "./ProviderSettingsForm";
 import { WizardPanel, WizardPopup, WizardHeader, WizardFooter } from "../ui/wizard";
 import {
@@ -33,15 +33,6 @@ import {
 import { AddProviderInstanceWizardSteps } from "./AddProviderInstanceWizardSteps";
 import { AddManagedCodexAccountDialog } from "./CodexSetupSection";
 import { AddClaudeAccountDialog, ClaudeConnectionButton } from "./AddClaudeAccountDialog";
-
-const PROVIDER_ACCENT_SWATCHES = [
-  "#2563eb",
-  "#16a34a",
-  "#ea580c",
-  "#dc2626",
-  "#7c3aed",
-  "#0891b2",
-] as const;
 
 /**
  * Normalize a user-provided label into a slug suffix for the instance id.
@@ -358,44 +349,11 @@ export function AddProviderInstanceDialog({
 
           <div className={cn("grid gap-2", wizardStep !== 1 && "hidden")}>
             <span className="text-xs font-medium text-foreground">Accent color</span>
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <ProviderAccentColorPicker
-                displayName={label || driverOption.label}
-                value={accentColor || undefined}
-                onCommit={setAccentColor}
-                layout="inline"
-              />
-              <div className="flex flex-wrap gap-1.5">
-                {PROVIDER_ACCENT_SWATCHES.map((swatch) => {
-                  const selected = accentColor.toLowerCase() === swatch;
-                  return (
-                    <button
-                      key={swatch}
-                      type="button"
-                      className={cn(
-                        "size-6 cursor-pointer rounded-full border transition",
-                        selected
-                          ? "scale-110 border-foreground ring-2 ring-ring ring-offset-1 ring-offset-background"
-                          : "border-black/10 hover:scale-105 dark:border-white/20",
-                      )}
-                      style={{ backgroundColor: swatch }}
-                      onClick={() => setAccentColor(swatch)}
-                      aria-label={`Use ${swatch} accent`}
-                    />
-                  );
-                })}
-              </div>
-              {accentColor ? (
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="ghost-muted"
-                  onClick={() => setAccentColor("")}
-                >
-                  Clear
-                </Button>
-              ) : null}
-            </div>
+            <ProviderAccentSwatches
+              displayName={label || driverOption.label}
+              value={accentColor}
+              onChange={setAccentColor}
+            />
             <span className="text-2xs text-muted-foreground">
               Optional marker shown in the picker.
             </span>

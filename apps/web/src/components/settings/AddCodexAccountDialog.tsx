@@ -16,6 +16,8 @@ import { Button } from "../ui/button";
 import { Dialog } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { WizardFooter, WizardHeader, WizardPanel, WizardPopup } from "../ui/wizard";
+import { normalizeProviderAccentColor } from "../../providerInstances";
+import { ProviderAccentSwatches } from "./ProviderAccentSwatches";
 import { SettingsRow } from "./settingsLayout";
 
 export function AddCodexAccountDialog({
@@ -35,6 +37,7 @@ export function AddCodexAccountDialog({
   const providers = useAtomValue(serverEnvironment.providersValueAtom(environmentId));
   const update = useAtomCommand(serverEnvironment.updateSettings, "Add ChatGPT account");
   const [name, setName] = useState("Personal");
+  const [accentColor, setAccentColor] = useState("");
   const displayName = `ChatGPT - ${name.trim()}`;
   const [instanceId, setInstanceId] = useState<ProviderInstanceId | null>(null);
   const [pending, setPending] = useState(false);
@@ -60,6 +63,9 @@ export function AddCodexAccountDialog({
             [id]: {
               driver: ProviderDriverKind.make("codex"),
               displayName,
+              ...(normalizeProviderAccentColor(accentColor)
+                ? { accentColor: normalizeProviderAccentColor(accentColor) }
+                : {}),
               enabled: true,
               config: { enabled: true, setupMode: "managed" },
             },
@@ -115,6 +121,17 @@ export function AddCodexAccountDialog({
                     disabled={pending}
                     onChange={(event) => setName(event.target.value)}
                     placeholder="e.g. Personal or Work"
+                  />
+                }
+              />
+              <SettingsRow
+                title="Color"
+                description="Tells this account apart in the model picker."
+                control={
+                  <ProviderAccentSwatches
+                    displayName={displayName}
+                    value={accentColor}
+                    onChange={setAccentColor}
                   />
                 }
               />
