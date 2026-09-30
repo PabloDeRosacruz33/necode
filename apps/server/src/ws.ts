@@ -18,6 +18,7 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TeamService from "./team/TeamService.ts";
+import * as VoiceTranscription from "./voice/VoiceTranscription.ts";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
   AuthAccessStreamError,
@@ -541,6 +542,7 @@ const makeWsRpcLayer = (
           hasClientOrigin ? { origin: attributedOrigin } : undefined,
         );
       const team = yield* TeamService.TeamService;
+      const voiceTranscription = yield* VoiceTranscription.VoiceTranscription;
       const recordClientCommandAnalytics = (command: OrchestrationCommand) => {
         switch (command.type) {
           case "thread.create":
@@ -3795,6 +3797,10 @@ const makeWsRpcLayer = (
         [WS_METHODS.teamUpdateMember]: (input) =>
           observeRpcEffect(WS_METHODS.teamUpdateMember, team.updateMember(input), {
             "rpc.aggregate": "team",
+          }),
+        [WS_METHODS.voiceTranscribe]: (input) =>
+          observeRpcEffect(WS_METHODS.voiceTranscribe, voiceTranscription.transcribe(input), {
+            "rpc.aggregate": "voice",
           }),
         [WS_METHODS.subscribeBackgroundPolicy]: (_input) =>
           observeRpcStream(

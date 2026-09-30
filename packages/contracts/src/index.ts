@@ -11,6 +11,7 @@ export * from "./desktopBootstrap.ts";
 export * from "./desktopAppActivation.ts";
 export * from "./remoteAccess.ts";
 export * from "./team.ts";
+export * from "./voice.ts";
 export * from "./ipc.ts";
 export * from "./terminal.ts";
 export * from "./provider.ts";

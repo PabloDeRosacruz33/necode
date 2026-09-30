@@ -180,6 +180,7 @@ import { REPLAY_MARKER_MAX_AGE } from "./auth/replayMarkers.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as TeamService from "./team/TeamService.ts";
+import * as VoiceTranscription from "./voice/VoiceTranscription.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
@@ -407,7 +408,7 @@ const browserOtlpTracingLayer = Layer.mergeAll(
 );
 
 const makeAuthTestLayer = () =>
-  TeamService.layer.pipe(
+  Layer.mergeAll(TeamService.layer, VoiceTranscription.layer).pipe(
     Layer.provideMerge(
       EnvironmentAuth.layer.pipe(
         Layer.provideMerge(SqlitePersistenceMemory),

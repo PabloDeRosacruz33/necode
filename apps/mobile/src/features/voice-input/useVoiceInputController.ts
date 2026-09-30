@@ -14,7 +14,10 @@ import { AppState } from "react-native";
 import { useSharedValue } from "react-native-reanimated";
 
 import type { ComposerEditorSelection } from "../../components/ComposerEditor";
+import type { EnvironmentId } from "@t3tools/contracts";
+
 import { getLocalVoiceTranscriber } from "../../native/voiceTranscription";
+import { createEnvironmentVoiceTranscriber } from "./environmentVoiceTranscriber";
 import { getNativeShowcaseScene } from "../showcase/nativeShowcaseScene";
 import {
   VoiceInputController,
@@ -64,6 +67,8 @@ async function configureVoiceRecordingAudio(): Promise<void> {
 
 export function useVoiceInputController(input: {
   readonly ownerKey: string | null;
+  /** Environment that transcribes the recording; null uses on-device transcription only. */
+  readonly environmentId: EnvironmentId | null;
   readonly draftMessage: string;
   readonly selection: ComposerEditorSelection;
   readonly disabled?: boolean;
@@ -103,7 +108,12 @@ export function useVoiceInputController(input: {
   if (!controllerRef.current) {
     controllerRef.current = new VoiceInputController({
       recorder,
-      getTranscriber: getLocalVoiceTranscriber,
+      getTranscriber: () => {
+        const environmentId = latestInputRef.current.environmentId;
+        return environmentId === null
+          ? getLocalVoiceTranscriber()
+          : createEnvironmentVoiceTranscriber(environmentId, getLocalVoiceTranscriber());
+      },
       requestPermission: async () => {
         const permission = await requestRecordingPermissionsAsync();
         return { granted: permission.granted, canAskAgain: permission.canAskAgain };
@@ -221,7 +231,10 @@ export function useVoiceInputController(input: {
   return {
     // Store screenshots show the dictation button even on simulators, whose
     // on-device transcription is unavailable.
-    isAvailable: getLocalVoiceTranscriber() !== null || getNativeShowcaseScene() !== null,
+    isAvailable:
+      input.environmentId !== null ||
+      getLocalVoiceTranscriber() !== null ||
+      getNativeShowcaseScene() !== null,
     state,
     audioLevels,
     elapsedSeconds,

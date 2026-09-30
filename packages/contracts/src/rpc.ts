@@ -12,6 +12,7 @@ import {
   TeamSnapshot,
   TeamUpdateMemberInput,
 } from "./team.ts";
+import { VoiceTranscribeError, VoiceTranscribeInput, VoiceTranscribeResult } from "./voice.ts";
 import {
   ProviderAuthCancelInput,
   ProviderAuthCompleteInput,
@@ -458,6 +459,9 @@ export const WS_METHODS = {
   teamInvite: "team.invite",
   teamRevokeMember: "team.revokeMember",
   teamUpdateMember: "team.updateMember",
+
+  // Dictation
+  voiceTranscribe: "voice.transcribe",
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
 } as const;
@@ -1425,6 +1429,12 @@ const WsTeamUpdateMemberRpc = Rpc.make(WS_METHODS.teamUpdateMember, {
   error: Schema.Union([TeamError, EnvironmentAuthorizationError]),
 });
 
+const WsVoiceTranscribeRpc = Rpc.make(WS_METHODS.voiceTranscribe, {
+  payload: VoiceTranscribeInput,
+  success: VoiceTranscribeResult,
+  error: Schema.Union([VoiceTranscribeError, EnvironmentAuthorizationError]),
+});
+
 const WsSubscribeBackgroundPolicyRpc = Rpc.make(WS_METHODS.subscribeBackgroundPolicy, {
   payload: Schema.Struct({}),
   success: BackgroundPolicySnapshot,
@@ -1579,6 +1589,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsTeamInviteRpc,
   WsTeamRevokeMemberRpc,
   WsTeamUpdateMemberRpc,
+  WsVoiceTranscribeRpc,
   WsSubscribeBackgroundPolicyRpc,
   WsSubscribeResourceTelemetryRpc,
   WsOrchestrationDispatchCommandRpc,

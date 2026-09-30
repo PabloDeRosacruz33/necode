@@ -392,6 +392,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   });
   const voiceInput = useVoiceInputController({
     ownerKey: composerOwnerKey,
+    environmentId: props.environmentId,
     draftMessage: props.draftMessage,
     selection: composerMenu.selection,
     onChangeDraftMessage: props.onChangeDraftMessage,

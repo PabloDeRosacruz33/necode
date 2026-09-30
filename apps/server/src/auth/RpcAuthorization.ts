@@ -177,6 +177,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.teamInvite]: AuthAccessWriteScope,
   [WS_METHODS.teamRevokeMember]: AuthAccessWriteScope,
   [WS_METHODS.teamUpdateMember]: AuthAccessWriteScope,
+  // Dictation spends the host's speech-to-text quota, so it needs operate access.
+  [WS_METHODS.voiceTranscribe]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribeBackgroundPolicy]: AuthOrchestrationReadScope,
 } as const satisfies Readonly<Record<WsRpcMethod, AuthEnvironmentScope>>;
 

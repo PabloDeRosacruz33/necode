@@ -92,6 +92,20 @@ describe("resolveTranscriptCommit", () => {
     });
   });
 
+  it("separates dictated words for detected and Spanish locales, not for Japanese", () => {
+    const captured = draft({ text: "Hola", selection: { start: 4, end: 4 } });
+    for (const locale of ["auto", "es-ES"]) {
+      expect(resolveTranscriptCommit(captured, captured, "qué tal", locale)).toMatchObject({
+        kind: "commit",
+        text: "Hola qué tal",
+      });
+    }
+    expect(resolveTranscriptCommit(captured, captured, "こんにちは", "ja-JP")).toMatchObject({
+      kind: "commit",
+      text: "Holaこんにちは",
+    });
+  });
+
   it("does not replace text after the owner, text, or revision changes", () => {
     const captured = draft();
     expect(
