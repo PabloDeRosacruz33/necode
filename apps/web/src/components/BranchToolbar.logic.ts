@@ -6,7 +6,7 @@ import type {
   WorktreeSubmodules,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { sanitizeNewRefName } from "@t3tools/shared/git";
+import { deriveLocalBranchNameFromRemoteRef, sanitizeNewRefName } from "@t3tools/shared/git";
 import { toSortableTimestamp } from "../lib/threadSort";
 export {
   dedupeRemoteBranchesWithLocalMatches,
@@ -322,4 +322,37 @@ export function shouldIncludeBranchPickerItem(input: {
     sanitizedQuery !== normalizedQuery &&
     lowerItemValue.includes(sanitizedQuery)
   );
+}
+
+/** The branch finished work merges into: `staging` when the repo has one, else its default branch. */
+export const INTEGRATION_BRANCH_NAME = "staging";
+
+export function resolveIntegrationBranch(
+  refs: ReadonlyArray<Pick<VcsRef, "name" | "isRemote" | "isDefault">>,
+): string | null {
+  const hasStaging = refs.some((ref) =>
+    ref.isRemote
+      ? deriveLocalBranchNameFromRemoteRef(ref.name) === INTEGRATION_BRANCH_NAME
+      : ref.name === INTEGRATION_BRANCH_NAME,
+  );
+  if (hasStaging) return INTEGRATION_BRANCH_NAME;
+  const defaultRef = refs.find((ref) => ref.isDefault);
+  if (!defaultRef) return null;
+  return defaultRef.isRemote
+    ? deriveLocalBranchNameFromRemoteRef(defaultRef.name)
+    : defaultRef.name;
+}
+
+/** Composer text that asks the agent to finish a merge Necode backed out of. */
+export function buildResolveConflictsPrompt(input: {
+  readonly mergedRef: string;
+  readonly refName: string;
+  readonly conflictedFiles: ReadonlyArray<string>;
+}): string {
+  return [
+    `Merge ${input.mergedRef} into this branch (${input.refName}) and resolve the conflicts in:`,
+    ...input.conflictedFiles.map((file) => `- ${file}`),
+    "",
+    "Keep the intent of both sides, run the relevant checks, then commit the merge.",
+  ].join("\n");
 }

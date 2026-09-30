@@ -15,6 +15,10 @@ import {
   VcsProcessExitError,
   type VcsSwitchRefInput,
   type VcsSwitchRefResult,
+  type VcsMergeIntoInput,
+  type VcsMergeIntoResult,
+  type VcsSyncWithInput,
+  type VcsSyncWithResult,
   type VcsCreateRefInput,
   type VcsCreateRefResult,
   type VcsCreateWorktreeInput,
@@ -384,6 +388,12 @@ export class GitVcsDriver extends Context.Service<
     readonly switchRef: (
       input: VcsSwitchRefInput,
     ) => Effect.Effect<VcsSwitchRefResult, GitCommandError>;
+    readonly mergeInto: (
+      input: VcsMergeIntoInput,
+    ) => Effect.Effect<VcsMergeIntoResult, GitCommandError>;
+    readonly syncWith: (
+      input: VcsSyncWithInput,
+    ) => Effect.Effect<VcsSyncWithResult, GitCommandError>;
     readonly initRepo: (input: VcsInitInput) => Effect.Effect<void, GitCommandError>;
     readonly listLocalBranchNames: (cwd: string) => Effect.Effect<string[], GitCommandError>;
   }

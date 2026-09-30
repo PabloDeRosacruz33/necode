@@ -185,6 +185,41 @@ export const VcsSwitchRefInput = Schema.Struct({
 });
 export type VcsSwitchRefInput = typeof VcsSwitchRefInput.Type;
 
+/** Merges the checked-out branch into `targetRef` and publishes it when it tracks a remote. */
+export const VcsMergeIntoInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  targetRef: TrimmedNonEmptyStringSchema,
+});
+export type VcsMergeIntoInput = typeof VcsMergeIntoInput.Type;
+
+export const VcsMergeIntoResult = Schema.Struct({
+  status: Schema.Literals(["merged", "conflicted"]),
+  sourceRef: TrimmedNonEmptyStringSchema,
+  targetRef: TrimmedNonEmptyStringSchema,
+  /** Whether the merged target reached its remote. False when it has none or the push failed. */
+  pushed: Schema.Boolean,
+  conflictedFiles: Schema.Array(Schema.String),
+});
+export type VcsMergeIntoResult = typeof VcsMergeIntoResult.Type;
+
+/** Brings the latest `baseRef` (from its remote when it has one) into the checked-out branch. */
+export const VcsSyncWithInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  baseRef: TrimmedNonEmptyStringSchema,
+});
+export type VcsSyncWithInput = typeof VcsSyncWithInput.Type;
+
+export const VcsSyncWithResult = Schema.Struct({
+  status: Schema.Literals(["updated", "up_to_date", "conflicted"]),
+  refName: TrimmedNonEmptyStringSchema,
+  /** The ref that was merged in, e.g. `origin/staging`. */
+  mergedRef: TrimmedNonEmptyStringSchema,
+  conflictedFiles: Schema.Array(Schema.String),
+  /** Uncommitted work clashed with the update; git kept it in the stash. */
+  stashConflict: Schema.Boolean,
+});
+export type VcsSyncWithResult = typeof VcsSyncWithResult.Type;
+
 export const VcsInitInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   kind: Schema.optional(VcsDriverKind),

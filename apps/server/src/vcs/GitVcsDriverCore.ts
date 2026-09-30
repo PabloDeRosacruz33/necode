@@ -3612,6 +3612,180 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     },
   );
 
+  const refExists = (operation: string, cwd: string, fullRef: string) =>
+    executeGit(operation, cwd, ["show-ref", "--verify", "--quiet", fullRef], {
+      timeoutMs: 5_000,
+      allowNonZeroExit: true,
+    }).pipe(Effect.map((result) => result.exitCode === 0));
+
+  /** `origin/staging` for a local `staging` that tracks it; null when it tracks nothing. */
+  const readUpstreamRef = (operation: string, cwd: string, branch: string) =>
+    executeGit(
+      operation,
+      cwd,
+      ["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${branch}@{upstream}`],
+      { timeoutMs: 5_000, allowNonZeroExit: true },
+    ).pipe(Effect.map((result) => (result.exitCode === 0 ? result.stdout.trim() || null : null)));
+
+  const listConflictedFiles = (operation: string, cwd: string) =>
+    runGitStdout(operation, cwd, ["diff", "--name-only", "--diff-filter=U"], true).pipe(
+      Effect.map((stdout) => stdout.split("\n").filter((line) => line.trim().length > 0)),
+    );
+
+  const fetchRemoteRef = (operation: string, cwd: string, remoteRef: string) => {
+    const slash = remoteRef.indexOf("/");
+    if (slash <= 0) return Effect.void;
+    // Offline is fine: the merge then uses what was fetched last.
+    return executeGit(
+      operation,
+      cwd,
+      ["fetch", "--quiet", remoteRef.slice(0, slash), remoteRef.slice(slash + 1)],
+      { timeoutMs: 60_000, allowNonZeroExit: true },
+    ).pipe(Effect.asVoid);
+  };
+
+  const mergeInto: GitVcsDriver.GitVcsDriver["Service"]["mergeInto"] = Effect.fn("mergeInto")(
+    function* (input) {
+      const { cwd, targetRef } = input;
+      const args = ["merge", "--no-ff", "--no-edit"];
+      const fail = (detail: string) =>
+        new GitCommandError({
+          ...gitCommandContext({ operation: "GitVcsDriver.mergeInto", cwd, args }),
+          detail,
+        });
+      const details = yield* readStatusDetailsLocal(cwd);
+      const sourceRef = details.branch;
+      if (!sourceRef) return yield* fail("Switch to a branch before merging.");
+      if (sourceRef === targetRef) return yield* fail(`You are already on ${targetRef}.`);
+      if (details.hasWorkingTreeChanges) {
+        return yield* fail("Commit your changes before merging.");
+      }
+
+      yield* switchRef({ cwd, refName: targetRef });
+      const backToSource = executeGit(
+        "GitVcsDriver.mergeInto.restoreSource",
+        cwd,
+        ["checkout", sourceRef, "--"],
+        { timeoutMs: 10_000, allowNonZeroExit: true },
+      );
+      const upstreamRef = yield* readUpstreamRef("GitVcsDriver.mergeInto.upstream", cwd, targetRef);
+      if (upstreamRef) {
+        yield* fetchRemoteRef("GitVcsDriver.mergeInto.fetch", cwd, upstreamRef);
+        const fastForward = yield* executeGit(
+          "GitVcsDriver.mergeInto.fastForward",
+          cwd,
+          ["merge", "--ff-only", upstreamRef],
+          { timeoutMs: 30_000, allowNonZeroExit: true },
+        );
+        if (fastForward.exitCode !== 0) {
+          yield* backToSource;
+          return yield* fail(
+            `${targetRef} has commits that are not on ${upstreamRef}. Sync ${targetRef} first.`,
+          );
+        }
+      }
+
+      const merge = yield* executeGitWithStableDiagnostics(
+        "GitVcsDriver.mergeInto.merge",
+        cwd,
+        [...args, sourceRef],
+        { timeoutMs: 60_000, allowNonZeroExit: true },
+      );
+      if (merge.exitCode !== 0) {
+        const conflictedFiles = yield* listConflictedFiles("GitVcsDriver.mergeInto.conflicts", cwd);
+        yield* executeGit("GitVcsDriver.mergeInto.abort", cwd, ["merge", "--abort"], {
+          timeoutMs: 10_000,
+          allowNonZeroExit: true,
+        });
+        yield* backToSource;
+        if (conflictedFiles.length === 0) {
+          return yield* fail(merge.stderr.trim() || merge.stdout.trim() || "git merge failed");
+        }
+        return { status: "conflicted", sourceRef, targetRef, pushed: false, conflictedFiles };
+      }
+
+      const pushed = upstreamRef
+        ? yield* executeGit("GitVcsDriver.mergeInto.push", cwd, ["push"], {
+            timeoutMs: null,
+            allowNonZeroExit: true,
+          }).pipe(Effect.map((result) => result.exitCode === 0))
+        : false;
+      return { status: "merged", sourceRef, targetRef, pushed, conflictedFiles: [] };
+    },
+  );
+
+  const syncWith: GitVcsDriver.GitVcsDriver["Service"]["syncWith"] = Effect.fn("syncWith")(
+    function* (input) {
+      const { cwd, baseRef } = input;
+      const args = ["merge", "--autostash", "--no-edit"];
+      const fail = (detail: string) =>
+        new GitCommandError({
+          ...gitCommandContext({ operation: "GitVcsDriver.syncWith", cwd, args }),
+          detail,
+        });
+      const details = yield* readStatusDetailsLocal(cwd);
+      const refName = details.branch;
+      if (!refName) return yield* fail("Switch to a branch before updating.");
+
+      const localBaseExists = yield* refExists(
+        "GitVcsDriver.syncWith.localBase",
+        cwd,
+        `refs/heads/${baseRef}`,
+      );
+      const upstreamRef = localBaseExists
+        ? yield* readUpstreamRef("GitVcsDriver.syncWith.upstream", cwd, baseRef)
+        : (yield* refExists(
+              "GitVcsDriver.syncWith.originBase",
+              cwd,
+              `refs/remotes/origin/${baseRef}`,
+            ))
+          ? `origin/${baseRef}`
+          : null;
+      if (!localBaseExists && !upstreamRef) return yield* fail(`There is no ${baseRef} branch.`);
+      if (upstreamRef) {
+        yield* fetchRemoteRef("GitVcsDriver.syncWith.fetch", cwd, upstreamRef);
+        if (localBaseExists && refName !== baseRef) {
+          // Keep the local base current too. Refused (and ignored) when it has
+          // diverged or is checked out elsewhere.
+          yield* executeGit(
+            "GitVcsDriver.syncWith.fastForwardBase",
+            cwd,
+            ["fetch", "--quiet", ".", `refs/remotes/${upstreamRef}:refs/heads/${baseRef}`],
+            { timeoutMs: 10_000, allowNonZeroExit: true },
+          );
+        }
+      }
+      const mergedRef = upstreamRef ?? baseRef;
+
+      const merge = yield* executeGitWithStableDiagnostics(
+        "GitVcsDriver.syncWith.merge",
+        cwd,
+        [...args, mergedRef],
+        { timeoutMs: 60_000, allowNonZeroExit: true },
+      );
+      const output = `${merge.stdout}\n${merge.stderr}`;
+      if (merge.exitCode !== 0) {
+        const conflictedFiles = yield* listConflictedFiles("GitVcsDriver.syncWith.conflicts", cwd);
+        // Aborting also puts the autostashed work back.
+        yield* executeGit("GitVcsDriver.syncWith.abort", cwd, ["merge", "--abort"], {
+          timeoutMs: 10_000,
+          allowNonZeroExit: true,
+        });
+        if (conflictedFiles.length === 0) {
+          return yield* fail(merge.stderr.trim() || merge.stdout.trim() || "git merge failed");
+        }
+        return { status: "conflicted", refName, mergedRef, conflictedFiles, stashConflict: false };
+      }
+      return {
+        status: /Already up[ -]to[ -]date/i.test(output) ? "up_to_date" : "updated",
+        refName,
+        mergedRef,
+        conflictedFiles: [],
+        stashConflict: /autostash resulted in conflicts/i.test(output),
+      };
+    },
+  );
+
   const initRepo: GitVcsDriver.GitVcsDriver["Service"]["initRepo"] = (input) =>
     executeGit("GitVcsDriver.initRepo", input.cwd, ["init"], {
       timeoutMs: 10_000,
@@ -3706,6 +3880,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     renameBranch: (input) => withListRefsInvalidation(input.cwd, renameBranch(input)),
     createRef: (input) => withListRefsInvalidation(input.cwd, createRef(input)),
     switchRef: (input) => withListRefsInvalidation(input.cwd, switchRef(input)),
+    mergeInto: (input) => withListRefsInvalidation(input.cwd, mergeInto(input)),
+    syncWith: (input) => withListRefsInvalidation(input.cwd, syncWith(input)),
     initRepo: initRepoWithListRefsInvalidation,
     listLocalBranchNames,
   });

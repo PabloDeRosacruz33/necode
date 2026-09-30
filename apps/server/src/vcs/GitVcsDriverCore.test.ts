@@ -2278,6 +2278,139 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
     );
   });
 
+  describe("branch merge and sync", () => {
+    const withRemote = Effect.gen(function* () {
+      const cwd = yield* makeTmpDir();
+      const remote = yield* makeTmpDir("git-remote-");
+      const { initialBranch } = yield* initRepoWithCommit(cwd);
+      yield* git(remote, ["init", "--bare"]);
+      yield* git(cwd, ["remote", "add", "origin", remote]);
+      yield* git(cwd, ["push", "-u", "origin", initialBranch]);
+      return { cwd, remote, base: initialBranch };
+    });
+
+    const commitFile = (cwd: string, file: string, contents: string) =>
+      Effect.gen(function* () {
+        yield* writeTextFile(cwd, file, contents);
+        yield* git(cwd, ["add", file]);
+        yield* git(cwd, ["commit", "-m", `edit ${file}`]);
+      });
+
+    it.effect("merges the current branch into the base and publishes it", () =>
+      Effect.gen(function* () {
+        const { cwd, remote, base } = yield* withRemote;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["checkout", "-b", "feature/login"]);
+        yield* commitFile(cwd, "login.ts", "export {};\n");
+
+        const result = yield* driver.mergeInto({ cwd, targetRef: base });
+
+        assert.deepStrictEqual(result, {
+          status: "merged",
+          sourceRef: "feature/login",
+          targetRef: base,
+          pushed: true,
+          conflictedFiles: [],
+        });
+        assert.equal(yield* git(cwd, ["branch", "--show-current"]), base);
+        assert.include(yield* git(remote, ["ls-tree", "--name-only", base]), "login.ts");
+      }),
+    );
+
+    it.effect("reports merge conflicts and leaves the branch as it was", () =>
+      Effect.gen(function* () {
+        const { cwd, base } = yield* withRemote;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["checkout", "-b", "feature/readme"]);
+        yield* commitFile(cwd, "README.md", "mine\n");
+        yield* git(cwd, ["checkout", base]);
+        yield* commitFile(cwd, "README.md", "theirs\n");
+        yield* git(cwd, ["checkout", "feature/readme"]);
+
+        const result = yield* driver.mergeInto({ cwd, targetRef: base });
+
+        assert.equal(result.status, "conflicted");
+        assert.deepStrictEqual(result.conflictedFiles, ["README.md"]);
+        assert.equal(yield* git(cwd, ["branch", "--show-current"]), "feature/readme");
+        assert.equal(yield* git(cwd, ["status", "--porcelain"]), "");
+      }),
+    );
+
+    it.effect("refuses to merge uncommitted work", () =>
+      Effect.gen(function* () {
+        const { cwd, base } = yield* withRemote;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["checkout", "-b", "feature/dirty"]);
+        yield* writeTextFile(cwd, "README.md", "unsaved\n");
+
+        const error = yield* driver.mergeInto({ cwd, targetRef: base }).pipe(Effect.flip);
+
+        assert.include(error.detail, "Commit your changes");
+        assert.equal(yield* git(cwd, ["branch", "--show-current"]), "feature/dirty");
+      }),
+    );
+
+    it.effect("brings a teammate's merged work into the current branch", () =>
+      Effect.gen(function* () {
+        const { cwd, remote, base } = yield* withRemote;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const teammate = yield* makeTmpDir("git-teammate-");
+        yield* git(teammate, ["clone", remote, "."]);
+        yield* git(teammate, ["config", "user.email", "roy@test.com"]);
+        yield* git(teammate, ["config", "user.name", "Roy"]);
+        yield* commitFile(teammate, "roy.ts", "export {};\n");
+        yield* git(teammate, ["push", "origin", base]);
+
+        yield* git(cwd, ["checkout", "-b", "feature/mine"]);
+        yield* commitFile(cwd, "mine.ts", "export {};\n");
+        yield* writeTextFile(cwd, "README.md", "work in progress\n");
+
+        const result = yield* driver.syncWith({ cwd, baseRef: base });
+
+        assert.deepStrictEqual(result, {
+          status: "updated",
+          refName: "feature/mine",
+          mergedRef: `origin/${base}`,
+          conflictedFiles: [],
+          stashConflict: false,
+        });
+        assert.include(yield* git(cwd, ["ls-files"]), "roy.ts");
+        assert.equal(yield* git(cwd, ["status", "--porcelain"]), "M README.md");
+        assert.equal(
+          yield* git(cwd, ["rev-parse", base]),
+          yield* git(cwd, ["rev-parse", `origin/${base}`]),
+        );
+        const again = yield* driver.syncWith({ cwd, baseRef: base });
+        assert.equal(again.status, "up_to_date");
+      }),
+    );
+
+    it.effect("backs out of an update that conflicts with committed work", () =>
+      Effect.gen(function* () {
+        const { cwd, remote, base } = yield* withRemote;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const teammate = yield* makeTmpDir("git-teammate-");
+        yield* git(teammate, ["clone", remote, "."]);
+        yield* git(teammate, ["config", "user.email", "roy@test.com"]);
+        yield* git(teammate, ["config", "user.name", "Roy"]);
+        yield* commitFile(teammate, "README.md", "roy\n");
+        yield* git(teammate, ["push", "origin", base]);
+
+        yield* git(cwd, ["checkout", "-b", "feature/mine"]);
+        yield* commitFile(cwd, "README.md", "pablo\n");
+        yield* writeTextFile(cwd, "notes.md", "draft\n");
+        const before = yield* git(cwd, ["rev-parse", "HEAD"]);
+
+        const result = yield* driver.syncWith({ cwd, baseRef: base });
+
+        assert.equal(result.status, "conflicted");
+        assert.deepStrictEqual(result.conflictedFiles, ["README.md"]);
+        assert.equal(yield* git(cwd, ["rev-parse", "HEAD"]), before);
+        assert.equal(yield* git(cwd, ["status", "--porcelain"]), "?? notes.md");
+      }),
+    );
+  });
+
   describe("worktree operations", () => {
     it.effect("uses parallel checkout without skipping filters or hooks", () =>
       Effect.gen(function* () {

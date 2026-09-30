@@ -16,6 +16,7 @@ import {
   resolveLocalCheckoutBranchMismatch,
   resolvePreviousWorktreeLabel,
   resolvePreviousWorktreeSeed,
+  resolveIntegrationBranch,
   sanitizeNewRefName,
   shouldIncludeBranchPickerItem,
   shouldShowComposerContextStrip,
@@ -856,5 +857,35 @@ describe("sanitizeNewRefName", () => {
   it("does not collapse dashes the user typed", () => {
     expect(sanitizeNewRefName("new - branch")).toBe("new---branch");
     expect(sanitizeNewRefName("foo--bar")).toBe("foo--bar");
+  });
+});
+
+describe("resolveIntegrationBranch", () => {
+  const ref = (name: string, extra: { isRemote?: boolean; isDefault?: boolean } = {}) => ({
+    name,
+    isRemote: extra.isRemote ?? false,
+    isDefault: extra.isDefault ?? false,
+  });
+
+  it("prefers staging, even when only the remote has it", () => {
+    expect(resolveIntegrationBranch([ref("main", { isDefault: true }), ref("staging")])).toBe(
+      "staging",
+    );
+    expect(
+      resolveIntegrationBranch([
+        ref("main", { isDefault: true }),
+        ref("origin/staging", { isRemote: true }),
+      ]),
+    ).toBe("staging");
+  });
+
+  it("falls back to the default branch", () => {
+    expect(
+      resolveIntegrationBranch([
+        ref("feature"),
+        ref("origin/main", { isRemote: true, isDefault: true }),
+      ]),
+    ).toBe("main");
+    expect(resolveIntegrationBranch([ref("feature")])).toBeNull();
   });
 });

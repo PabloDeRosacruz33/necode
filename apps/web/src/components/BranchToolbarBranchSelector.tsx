@@ -9,7 +9,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type { ContextMenuItem, EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { ChevronDownIcon, GitBranchIcon } from "lucide-react";
+import { ChevronDownIcon, GitBranchIcon, GitBranchPlusIcon, MergeIcon } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -42,7 +42,10 @@ import { parsePullRequestReference } from "../pullRequestReference";
 import { getSourceControlPresentation } from "../sourceControlPresentation";
 import { useComposerMenuProps } from "./chat/composerEventScope";
 import {
+  buildResolveConflictsPrompt,
   deriveLocalBranchNameFromRemoteRef,
+  INTEGRATION_BRANCH_NAME,
+  resolveIntegrationBranch,
   resolveBranchTriggerLabel,
   resolveBranchToolbarPrBranch,
   resolveBranchSelectionTarget,
@@ -130,6 +133,12 @@ export function BranchToolbarBranchSelector({
   const createRefMutation = useAtomCommand(vcsEnvironment.createRef, {
     reportFailure: false,
   });
+  const mergeIntoMutation = useAtomCommand(vcsEnvironment.mergeInto, {
+    reportFailure: false,
+  });
+  const syncWithMutation = useAtomCommand(vcsEnvironment.syncWith, {
+    reportFailure: false,
+  });
   // ---------------------------------------------------------------------------
   // Thread / project state (pushed down from parent to colocate with mutation)
   // ---------------------------------------------------------------------------
@@ -143,6 +152,7 @@ export function BranchToolbarBranchSelector({
   const serverThread = useThreadShell(threadRef);
   const serverSession = serverThread?.session ?? null;
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
+  const setComposerPrompt = useComposerDraftStore((store) => store.setPrompt);
 
   const activeProjectRef = serverThread
     ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
@@ -232,6 +242,8 @@ export function BranchToolbarBranchSelector({
   // ---------------------------------------------------------------------------
   const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false);
   const [branchQuery, setBranchQuery] = useState("");
+  // "New branch" turns the search field into a name field for a branch off the current one.
+  const [isNamingNewBranch, setIsNamingNewBranch] = useState(false);
   const deferredBranchQuery = useDeferredValue(branchQuery);
 
   const branchStatusQuery = useEnvironmentQuery(
@@ -308,20 +320,26 @@ export function BranchToolbarBranchSelector({
   }, [branchNames, checkoutPullRequestItemValue, createBranchItemValue, hasExactBranchMatch]);
   const filteredBranchPickerItems = useMemo(
     () =>
-      normalizedDeferredBranchQuery.length === 0
-        ? branchPickerItems
-        : branchPickerItems.filter((itemValue) =>
-            shouldIncludeBranchPickerItem({
-              itemValue,
-              normalizedQuery: normalizedDeferredBranchQuery,
-              createBranchItemValue,
-              checkoutPullRequestItemValue,
-            }),
-          ),
+      isNamingNewBranch
+        ? createBranchItemValue && !hasExactBranchMatch
+          ? [createBranchItemValue]
+          : []
+        : normalizedDeferredBranchQuery.length === 0
+          ? branchPickerItems
+          : branchPickerItems.filter((itemValue) =>
+              shouldIncludeBranchPickerItem({
+                itemValue,
+                normalizedQuery: normalizedDeferredBranchQuery,
+                createBranchItemValue,
+                checkoutPullRequestItemValue,
+              }),
+            ),
     [
       branchPickerItems,
       checkoutPullRequestItemValue,
       createBranchItemValue,
+      hasExactBranchMatch,
+      isNamingNewBranch,
       normalizedDeferredBranchQuery,
     ],
   );
@@ -352,6 +370,18 @@ export function BranchToolbarBranchSelector({
       : queriedActiveBranch
         ? queriedActiveBranch.isRemote === true
         : null;
+  const integrationRefQuery = useEnvironmentQuery(
+    isBranchMenuOpen && branchCwd !== null
+      ? vcsEnvironment.listRefs({
+          environmentId,
+          input: { cwd: branchCwd, query: INTEGRATION_BRANCH_NAME, limit: 10 },
+        })
+      : null,
+  );
+  const integrationBranch = resolveIntegrationBranch([
+    ...(integrationRefQuery.data?.refs ?? []),
+    ...refs,
+  ]);
   const [isBranchActionPending, startBranchActionTransition] = useTransition();
   const totalBranchCount = branchRefState.data?.totalCount ?? 0;
   const branchStatusText = isInitialBranchesLoadPending
@@ -417,7 +447,7 @@ export function BranchToolbarBranchSelector({
 
     if (isSelectingWorktreeBase) {
       setThreadBranch(refName.name, null);
-      setIsBranchMenuOpen(false);
+      handleOpenChange(false);
       onComposerFocusRequest?.();
       return;
     }
@@ -430,7 +460,7 @@ export function BranchToolbarBranchSelector({
 
     if (selectionTarget.reuseExistingWorktree) {
       setThreadBranch(refName.name, selectionTarget.nextWorktreePath);
-      setIsBranchMenuOpen(false);
+      handleOpenChange(false);
       onComposerFocusRequest?.();
       return;
     }
@@ -439,7 +469,7 @@ export function BranchToolbarBranchSelector({
       ? deriveLocalBranchNameFromRemoteRef(refName.name)
       : refName.name;
 
-    setIsBranchMenuOpen(false);
+    handleOpenChange(false);
     onComposerFocusRequest?.();
 
     runBranchAction(async () => {
@@ -477,7 +507,7 @@ export function BranchToolbarBranchSelector({
     const name = sanitizeNewRefName(rawName);
     if (!branchCwd || !name || isBranchActionPending) return;
 
-    setIsBranchMenuOpen(false);
+    handleOpenChange(false);
     onComposerFocusRequest?.();
 
     runBranchAction(async () => {
@@ -506,6 +536,126 @@ export function BranchToolbarBranchSelector({
           }),
         );
       }
+    });
+  };
+
+  const offerConflictResolution = (input: {
+    title: string;
+    mergedRef: string;
+    refName: string;
+    conflictedFiles: ReadonlyArray<string>;
+  }) => {
+    const toastId = toastManager.add(
+      stackedThreadToast({
+        type: "warning",
+        title: input.title,
+        description: `Nothing changed. Conflicts in ${input.conflictedFiles.join(", ")}.`,
+        actionProps: {
+          children: "Ask the agent to resolve",
+          onClick: () => {
+            toastManager.close(toastId);
+            setComposerPrompt(draftId ?? threadRef, buildResolveConflictsPrompt(input));
+            onComposerFocusRequest?.();
+          },
+        },
+      }),
+    );
+  };
+
+  const syncWithIntegrationBranch = () => {
+    if (!branchCwd || !integrationBranch || isBranchActionPending) return;
+    handleOpenChange(false);
+    runBranchAction(async () => {
+      const result = await syncWithMutation({
+        environmentId,
+        input: { cwd: branchCwd, baseRef: integrationBranch },
+      });
+      if (result._tag !== "Success") {
+        if (!isAtomCommandInterrupted(result)) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: `Could not update from ${integrationBranch}`,
+              description: toBranchActionErrorMessage(squashAtomCommandFailure(result)),
+            }),
+          );
+        }
+        return;
+      }
+      const { status, refName, mergedRef, conflictedFiles, stashConflict } = result.value;
+      if (status === "conflicted") {
+        offerConflictResolution({
+          title: `${mergedRef} conflicts with ${refName}`,
+          mergedRef,
+          refName,
+          conflictedFiles,
+        });
+        return;
+      }
+      toastManager.add(
+        stackedThreadToast({
+          type: stashConflict ? "warning" : "success",
+          title:
+            status === "up_to_date"
+              ? `Already up to date with ${mergedRef}`
+              : `${refName} now includes ${mergedRef}`,
+          ...(stashConflict
+            ? {
+                description:
+                  "Your uncommitted changes clashed with the update. Git kept a copy in the stash.",
+              }
+            : {}),
+        }),
+      );
+    });
+  };
+
+  const mergeIntoIntegrationBranch = () => {
+    const sourceRef = resolvedActiveBranch;
+    if (!branchCwd || !integrationBranch || !sourceRef || isBranchActionPending) return;
+    handleOpenChange(false);
+    runBranchAction(async () => {
+      const message = `Merge ${sourceRef} into ${integrationBranch}? This thread moves to ${integrationBranch}, and it is pushed if it has a remote.`;
+      const api = readLocalApi();
+      const confirmed = api ? await api.dialogs.confirm(message) : window.confirm(message);
+      if (!confirmed) return;
+      const result = await mergeIntoMutation({
+        environmentId,
+        input: { cwd: branchCwd, targetRef: integrationBranch },
+      });
+      if (result._tag !== "Success") {
+        if (!isAtomCommandInterrupted(result)) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: `Could not merge into ${integrationBranch}`,
+              description: toBranchActionErrorMessage(squashAtomCommandFailure(result)),
+            }),
+          );
+        }
+        return;
+      }
+      const { status, targetRef, pushed, conflictedFiles } = result.value;
+      if (status === "conflicted") {
+        offerConflictResolution({
+          title: `${sourceRef} conflicts with ${targetRef}`,
+          mergedRef: targetRef,
+          refName: sourceRef,
+          conflictedFiles,
+        });
+        return;
+      }
+      setOptimisticBranch(targetRef);
+      setThreadBranch(targetRef, activeWorktreePath);
+      toastManager.add(
+        stackedThreadToast({
+          type: "success",
+          title: `Merged ${sourceRef} into ${targetRef}`,
+          description: pushed
+            ? "Pushed, so your team can update from it."
+            : "Not pushed: it has no remote or the push failed.",
+        }),
+      );
     });
   };
 
@@ -547,6 +697,7 @@ export function BranchToolbarBranchSelector({
     setIsBranchMenuOpen(open);
     if (!open) {
       setBranchQuery("");
+      setIsNamingNewBranch(false);
       highlightedBranchValueRef.current = null;
     }
   }, []);
@@ -835,7 +986,11 @@ export function BranchToolbarBranchSelector({
         {...composerFloatingLayerProps}
       >
         <ComboboxSearchInput
-          placeholder="Search refs..."
+          placeholder={
+            isNamingNewBranch
+              ? `New branch from ${resolvedActiveBranch ?? "HEAD"}`
+              : "Search refs..."
+          }
           value={branchQuery}
           onChange={(event) => setBranchQuery(event.target.value)}
           onKeyDown={(event) => {
@@ -922,6 +1077,47 @@ export function BranchToolbarBranchSelector({
                 branch.
               </TooltipPopup>
             </Tooltip>
+          ) : null}
+          {!isSelectingWorktreeBase && !isNamingNewBranch ? (
+            <div className="flex flex-col border-t border-border/60 p-1">
+              <Button
+                variant="ghost"
+                size="xs"
+                className="justify-start"
+                onClick={() => {
+                  setBranchQuery("");
+                  setIsNamingNewBranch(true);
+                }}
+              >
+                <GitBranchPlusIcon />
+                New branch from {resolvedActiveBranch ?? "HEAD"}
+              </Button>
+              {integrationBranch ? (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="justify-start"
+                  onClick={syncWithIntegrationBranch}
+                >
+                  <RefreshIcon aria-hidden="true" size="xs" />
+                  Update from {integrationBranch}
+                </Button>
+              ) : null}
+              {integrationBranch &&
+              activeWorktreePath === null &&
+              resolvedActiveBranch !== null &&
+              resolvedActiveBranch !== integrationBranch ? (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="justify-start"
+                  onClick={mergeIntoIntegrationBranch}
+                >
+                  <MergeIcon />
+                  Merge into {integrationBranch}
+                </Button>
+              ) : null}
+            </div>
           ) : null}
           {branchStatusText ? <ComboboxStatus>{branchStatusText}</ComboboxStatus> : null}
         </div>

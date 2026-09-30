@@ -3423,6 +3423,18 @@ const makeWsRpcLayer = (
             gitWorkflow.switchRef(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
             { "rpc.aggregate": "vcs" },
           ),
+        [WS_METHODS.vcsMergeInto]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsMergeInto,
+            gitWorkflow.mergeInto(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsSyncWith]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsSyncWith,
+            gitWorkflow.syncWith(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
         [WS_METHODS.vcsInit]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsInit,
