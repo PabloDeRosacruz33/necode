@@ -17,6 +17,7 @@ import {
   isTailscaleIpv4Address,
   parseTailscaleMagicDnsName,
   parseTailscaleStatus,
+  MACOS_APP_TAILSCALE_EXECUTABLE,
   readTailscaleStatus,
   TAILSCALE_STATUS_TIMEOUT,
   TailscaleCommandExitError,
@@ -192,6 +193,35 @@ describe("tailscale", () => {
         magicDnsName: "desktop.tail.ts.net",
         tailnetIpv4Addresses: ["100.90.1.2"],
       });
+    });
+  });
+
+  it.effect("falls back to the Mac app's bundled CLI when tailscale is not on PATH", () => {
+    const spawned: Array<string> = [];
+    const layer = Layer.merge(
+      Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make((command) => {
+          const executable = (command as unknown as { readonly command: string }).command;
+          spawned.push(executable);
+          return executable === "tailscale"
+            ? Effect.fail(
+                PlatformError.systemError({
+                  _tag: "NotFound",
+                  module: "ChildProcess",
+                  method: "spawn",
+                }),
+              )
+            : Effect.succeed(mockHandle({ stdout: tailscaleStatusWithSingleIpJson }));
+        }),
+      ),
+      Layer.succeed(HostProcessPlatform, "darwin"),
+    );
+
+    return Effect.gen(function* () {
+      const status = yield* readTailscaleStatus.pipe(Effect.provide(layer));
+      assert.deepEqual(status.tailnetIpv4Addresses, ["100.90.1.2"]);
+      assert.deepEqual(spawned, ["tailscale", MACOS_APP_TAILSCALE_EXECUTABLE]);
     });
   });
 

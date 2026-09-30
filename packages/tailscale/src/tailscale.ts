@@ -17,6 +17,42 @@ const TAILSCALE_PROBE_TIMEOUT = Duration.millis(2_500);
 const tailscaleCommandForPlatform = (platform: NodeJS.Platform): "tailscale" | "tailscale.exe" =>
   platform === "win32" ? "tailscale.exe" : "tailscale";
 
+// The Mac app keeps its CLI inside the bundle and only puts `tailscale` on
+// PATH when the user installs the CLI separately, so a missing command on
+// macOS retries the bundled one.
+export const MACOS_APP_TAILSCALE_EXECUTABLE =
+  "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
+
+const spawnTailscale = (
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  hostPlatform: NodeJS.Platform,
+  args: ReadonlyArray<string>,
+  commandContext: {
+    readonly executable: "tailscale" | "tailscale.exe";
+    readonly subcommand: "status" | "serve" | "funnel";
+    readonly argumentCount: number;
+  },
+) => {
+  const spawnAt = (executable: string) =>
+    spawner.spawn(ChildProcess.make(executable, args)).pipe(
+      Effect.mapError((cause) => new TailscaleCommandSpawnError({ ...commandContext, cause })),
+      // Spawning can also fail as a defect rather than a typed error - a
+      // non-directory entry on PATH makes node throw ENOTDIR synchronously.
+      // `mapError` never sees that, so it would escape as an uncaught error.
+      Effect.catchDefect((cause) =>
+        Effect.fail(new TailscaleCommandSpawnError({ ...commandContext, cause })),
+      ),
+    );
+  const onPath = spawnAt(commandContext.executable);
+  return hostPlatform === "darwin"
+    ? onPath.pipe(
+        Effect.catchTag("TailscaleCommandSpawnError", (error) =>
+          spawnAt(MACOS_APP_TAILSCALE_EXECUTABLE).pipe(Effect.mapError(() => error)),
+        ),
+      )
+    : onPath;
+};
+
 const TailscaleCommandContext = {
   executable: Schema.Literals(["tailscale", "tailscale.exe"]),
   subcommand: Schema.Literals(["status", "serve", "funnel"]),
@@ -225,15 +261,7 @@ export const readTailscaleStatus = Effect.gen(function* () {
     argumentCount: args.length,
   };
   return yield* Effect.gen(function* () {
-    const child = yield* spawner.spawn(ChildProcess.make(executable, args)).pipe(
-      Effect.mapError((cause) => new TailscaleCommandSpawnError({ ...commandContext, cause })),
-      // Spawning can also fail as a defect rather than a typed error - a
-      // non-directory entry on PATH makes node throw ENOTDIR synchronously.
-      // `mapError` never sees that, so it would escape as an uncaught error.
-      Effect.catchDefect((cause) =>
-        Effect.fail(new TailscaleCommandSpawnError({ ...commandContext, cause })),
-      ),
-    );
+    const child = yield* spawnTailscale(spawner, hostPlatform, args, commandContext);
     const [stdout, stderr, exitCode] = yield* Effect.all(
       [
         collectStdout(child.stdout),
@@ -300,12 +328,7 @@ const runTailscaleCommand = (
     };
     const timeout = Duration.fromInputUnsafe(timeoutInput);
     return yield* Effect.gen(function* () {
-      const child = yield* spawner.spawn(ChildProcess.make(executable, args)).pipe(
-        Effect.mapError((cause) => new TailscaleCommandSpawnError({ ...commandContext, cause })),
-        Effect.catchDefect((cause) =>
-          Effect.fail(new TailscaleCommandSpawnError({ ...commandContext, cause })),
-        ),
-      );
+      const child = yield* spawnTailscale(spawner, hostPlatform, args, commandContext);
       const [stderr, exitCode] = yield* Effect.all(
         [collectStderr(child.stderr), child.exitCode.pipe(Effect.map(Number))],
         { concurrency: "unbounded" },
