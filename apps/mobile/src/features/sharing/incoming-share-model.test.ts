@@ -145,6 +145,46 @@ describe("incoming native shares", () => {
     expect(removeOwnedFile).toHaveBeenCalledWith(file.value);
   });
 
+  it("keeps a shared SVG as a file the agent can read", async () => {
+    const image: SharePayload = {
+      shareType: "image",
+      value: "file:///shared/logo.svg",
+      mimeType: "image/svg+xml",
+    };
+    const readBase64 = vi.fn(async () => "unused");
+    const persistFile = vi.fn(async () => "file:///documents/logo.svg");
+
+    const result = await buildIncomingShareDraft({
+      id: "share-logo",
+      createdAt: "2026-07-15T10:00:00.000Z",
+      payloads: [image],
+      resolvedPayloads: [
+        {
+          ...image,
+          contentUri: image.value,
+          contentType: "image",
+          contentMimeType: "image/svg+xml",
+          contentSize: 12,
+          originalName: "logo.svg",
+        },
+      ],
+      fileReader: { readBase64, persistFile, removeOwnedFile: async () => undefined },
+    });
+
+    expect(result.warnings).toEqual([]);
+    expect(result.attachments).toEqual([
+      {
+        id: "share-logo:file:0",
+        type: "file",
+        name: "logo.svg",
+        mimeType: "image/svg+xml",
+        sizeBytes: 12,
+        fileUri: "file:///documents/logo.svg",
+      },
+    ]);
+    expect(readBase64).not.toHaveBeenCalled();
+  });
+
   it("rejects shared files that exceed the generic attachment limit", async () => {
     const file: SharePayload = {
       shareType: "file",

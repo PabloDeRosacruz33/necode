@@ -12,7 +12,7 @@ import type { ComposerFileAttachment, ComposerImageAttachment } from "../../comp
 import { isHeicImageFile } from "../../lib/imageCompression";
 import { isVideoAttachment } from "../../types";
 
-type ComposerAttachmentFileKind = "image" | "file" | "unsupported-image";
+type ComposerAttachmentFileKind = "image" | "file";
 
 interface FileAttachmentCapabilityState {
   readonly attachmentUploadsCapabilityKnown: boolean;
@@ -71,10 +71,9 @@ export function classifyComposerAttachmentFile(
   if (inferImageMimeTypeForUnknownFile(file)) {
     return "image";
   }
-  if (!file.type.toLowerCase().startsWith("image/")) {
-    return "file";
-  }
-  return isProviderSendTurnSupportedImageMimeType(file.type) ? "image" : "unsupported-image";
+  // Images a provider cannot see natively (SVG, TIFF, BMP...) still travel as
+  // files: the agent reads them from disk like any other reference.
+  return isProviderSendTurnSupportedImageMimeType(file.type) ? "image" : "file";
 }
 
 export function isPreviewableComposerVideo(
@@ -160,11 +159,14 @@ export function shouldHandleComposerAttachmentPaste(input: {
   readonly files: ReadonlyArray<File>;
   readonly plainText: string;
 }): boolean {
+  // Any image is claimed, even one that travels as a file, so a caption the
+  // source app adds to the clipboard does not swallow it.
   if (
-    input.files.some((file) => {
-      const classification = classifyComposerAttachmentFile(file);
-      return classification === "image" || classification === "unsupported-image";
-    })
+    input.files.some(
+      (file) =>
+        classifyComposerAttachmentFile(file) === "image" ||
+        file.type.toLowerCase().startsWith("image/"),
+    )
   ) {
     return true;
   }

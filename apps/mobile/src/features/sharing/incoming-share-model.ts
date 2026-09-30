@@ -292,7 +292,8 @@ export async function buildIncomingShareDraft(input: {
       payload.mimeType ??
       (payload.shareType === "image" ? "image/png" : "application/octet-stream")
     ).toLowerCase();
-    if (payload.shareType !== "image") {
+    // Images a provider cannot see natively (SVG, TIFF...) travel as files.
+    if (payload.shareType !== "image" || !isProviderSendTurnSupportedImageMimeType(mimeType)) {
       // The patched native module never emits a blank display name, but keep
       // the guard: an empty name would fail the attachment name contract.
       const sharedFileName =
@@ -381,15 +382,8 @@ export async function buildIncomingShareDraft(input: {
       }
       continue;
     }
-    if (!uri || !mimeType.startsWith("image/")) {
-      warnings.push("One shared item was not a supported image.");
-      await releaseOwnedFiles(input.fileReader, [uri, payload.value]);
-      continue;
-    }
-    if (!isProviderSendTurnSupportedImageMimeType(mimeType)) {
-      warnings.push(
-        `'${resolved?.originalName ?? fallbackName(uri, index, mimeType)}' is not a supported image type.`,
-      );
+    if (!uri) {
+      warnings.push("One shared image could not be read.");
       await releaseOwnedFiles(input.fileReader, [uri, payload.value]);
       continue;
     }
