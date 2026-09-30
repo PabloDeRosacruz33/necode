@@ -1950,12 +1950,12 @@ function UserVideoAttachment({ file }: { readonly file: ChatFileAttachment }) {
 // from selection so sighted users and copied text are unaffected.
 const MESSAGE_HEADING_LEVEL = 3;
 
-/** Names the teammate behind a user message; the viewer's own messages stay unlabelled. */
-function TeamMessageAuthor({ member }: { member: TeamMember }) {
+/** Names who sent a user message once the environment has more than one member. */
+function TeamMessageAuthor({ member, isSelf }: { member: TeamMember; isSelf: boolean }) {
   return (
     <div className="flex items-center gap-1.5 pr-1 text-xs text-muted-foreground" aria-hidden>
       <span className="size-2 rounded-full" style={{ backgroundColor: member.color }} />
-      {member.name}
+      {isSelf ? `${member.name} (you)` : member.name}
     </div>
   );
 }
@@ -1971,7 +1971,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   const author = shouldLabelMessageAuthor(team, row.message.authorMemberId)
     ? findTeamMember(team, row.message.authorMemberId)
     : undefined;
-  const authoredBySomeoneElse = author !== undefined && author.memberId !== team.selfMemberId;
+  const isOwnMessage = author !== undefined && author.memberId === team.selfMemberId;
   const resources = useMemo(
     () => selectMessageImageResources(row.message.attachments),
     [row.message.attachments],
@@ -2127,9 +2127,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      {authoredBySomeoneElse ? <TeamMessageAuthor member={author} /> : null}
+      {author ? <TeamMessageAuthor member={author} isSelf={isOwnMessage} /> : null}
       <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
-        <MessageAuthorHeading>{authoredBySomeoneElse ? author.name : "You"}</MessageAuthorHeading>
+        <MessageAuthorHeading>{author && !isOwnMessage ? author.name : "You"}</MessageAuthorHeading>
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[210px] grid-cols-2 gap-2">
             {regularImages.map((image) => (

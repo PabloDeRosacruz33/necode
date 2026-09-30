@@ -1557,17 +1557,18 @@ function renderFeedEntry(
       const author = shouldLabelMessageAuthor(props.team, message.authorMemberId)
         ? findTeamMember(props.team, message.authorMemberId)
         : undefined;
-      const teammateAuthor =
-        author !== undefined && author.memberId !== props.team.selfMemberId ? author : undefined;
+      const authorLabel =
+        author === undefined
+          ? null
+          : author.memberId === props.team.selfMemberId
+            ? `${author.name} (you)`
+            : author.name;
       return (
         <View className="mb-5 items-end">
-          {teammateAuthor ? (
+          {author && authorLabel ? (
             <View className="mb-1 flex-row items-center gap-1.5 pr-1">
-              <View
-                className="size-2 rounded-full"
-                style={{ backgroundColor: teammateAuthor.color }}
-              />
-              <Text className="text-xs text-foreground-muted">{teammateAuthor.name}</Text>
+              <View className="size-2 rounded-full" style={{ backgroundColor: author.color }} />
+              <Text className="text-xs text-foreground-muted">{authorLabel}</Text>
             </View>
           ) : null}
           <View
