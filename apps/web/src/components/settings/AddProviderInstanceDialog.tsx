@@ -32,6 +32,7 @@ import {
 } from "./AddProviderInstanceDialog.logic";
 import { AddProviderInstanceWizardSteps } from "./AddProviderInstanceWizardSteps";
 import { AddManagedCodexAccountDialog } from "./CodexSetupSection";
+import { AddClaudeAccountDialog, ClaudeConnectionButton } from "./AddClaudeAccountDialog";
 
 const PROVIDER_ACCENT_SWATCHES = [
   "#2563eb",
@@ -129,6 +130,7 @@ export function AddProviderInstanceDialog({
 
   const [wizardStep, setWizardStep] = useState(0);
   const [addingChatGptAccount, setAddingChatGptAccount] = useState(false);
+  const [addingClaudeAccount, setAddingClaudeAccount] = useState(false);
   const [driver, setDriver] = useState<ProviderDriverKind>(DEFAULT_DRIVER_KIND);
   const [label, setLabel] = useState("");
   const [accentColor, setAccentColor] = useState<string>("");
@@ -227,6 +229,16 @@ export function AddProviderInstanceDialog({
       });
     }
   };
+
+  if (addingClaudeAccount) {
+    return (
+      <AddClaudeAccountDialog
+        environmentId={environmentId}
+        environmentLabel={environmentLabel}
+        onClose={() => onOpenChange(false)}
+      />
+    );
+  }
 
   if (addingChatGptAccount) {
     return (
@@ -427,6 +439,13 @@ export function AddProviderInstanceDialog({
                 Configure manually
               </Button>
               <ChatGptConnectionButton onClick={() => setAddingChatGptAccount(true)} />
+            </>
+          ) : wizardStep === 0 && driver === "claudeAgent" ? (
+            <>
+              <Button variant="outline" onClick={() => navigateToStep(1)}>
+                Configure manually
+              </Button>
+              <ClaudeConnectionButton onClick={() => setAddingClaudeAccount(true)} />
             </>
           ) : wizardStep < ADD_PROVIDER_WIZARD_STEPS.length - 1 ? (
             <Button onClick={() => navigateToStep(wizardStep + 1)}>Next</Button>

@@ -3,10 +3,12 @@ import * as NodeOS from "node:os";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
 import {
   claudeSignedOutMessage,
+  linkClaudeSharedSessions,
   makeClaudeCapabilitiesCacheKey,
   makeClaudeContinuationGroupKey,
   makeClaudeEnvironment,
@@ -63,6 +65,37 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
           explicit,
         );
       }),
+    );
+
+    it.effect("lets an account share the default home's sessions without moving its login", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fileSystem.makeTempDirectoryScoped();
+        const sharedHome = path.join(root, "claude");
+        const environment = { CLAUDE_CONFIG_DIR: sharedHome };
+        const account = { homePath: path.join(root, "claude-personal") };
+
+        expect(
+          yield* makeClaudeContinuationGroupKey({ ...account, shareSessions: true }, environment),
+        ).toBe(yield* makeClaudeContinuationGroupKey({ homePath: "" }, environment));
+
+        yield* linkClaudeSharedSessions(account, environment);
+        yield* fileSystem.writeFileString(path.join(sharedHome, "projects", "thread.jsonl"), "{}");
+        expect(
+          yield* fileSystem.readFileString(path.join(account.homePath, "projects", "thread.jsonl")),
+        ).toBe("{}");
+
+        // Existing account history is never replaced by the link.
+        const separate = { homePath: path.join(root, "claude-work") };
+        yield* fileSystem.makeDirectory(path.join(separate.homePath, "projects"), {
+          recursive: true,
+        });
+        yield* linkClaudeSharedSessions(separate, environment);
+        expect(
+          yield* fileSystem.exists(path.join(separate.homePath, "projects", "thread.jsonl")),
+        ).toBe(false);
+      }).pipe(Effect.scoped),
     );
 
     it("points the signed-out hint at the configured Claude home", () => {

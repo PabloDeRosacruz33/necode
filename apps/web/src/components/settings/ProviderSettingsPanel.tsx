@@ -85,6 +85,7 @@ import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { UsageProviderSettings } from "./UsageProviderSettings";
 import { ProviderSetupSection, readAntigravityAuthMethod } from "./ProviderSetupSection";
 import { CodexSetupSection, CodexManagedRuntimeFields } from "./CodexSetupSection";
+import { ClaudeSetupSection } from "./ClaudeSetupSection";
 import { readCodexSetupMode } from "./CodexSetupSection.logic";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
 import { searchableSetting } from "./settingsSearch";
@@ -986,6 +987,13 @@ export function EnvironmentProviderSettings({
                   },
                 })
               }
+            />
+          ) : mode === "editor" && row.driver === "claudeAgent" && !readOnly ? (
+            <ClaudeSetupSection
+              environmentId={environmentId}
+              environmentLabel={environmentLabel}
+              instanceId={row.instanceId}
+              provider={liveProvider}
             />
           ) : null
         }

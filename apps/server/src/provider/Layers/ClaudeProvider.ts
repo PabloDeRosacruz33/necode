@@ -11,6 +11,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -401,6 +402,15 @@ const probeClaudeCapabilities = (
   );
 };
 
+const decodeClaudeAuthStatus = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ loggedIn: Schema.Boolean })),
+);
+
+/** `claude auth status` prints JSON with `loggedIn`; CLIs without it give no answer. */
+export function parseClaudeLoggedIn(stdout: string): boolean | undefined {
+  return Option.getOrUndefined(decodeClaudeAuthStatus(stdout.trim()))?.loggedIn;
+}
+
 const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
   claudeSettings: ClaudeSettings,
   args: ReadonlyArray<string>,
@@ -532,6 +542,33 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
   );
   const versionUpgradeMessage = formatClaudeVersionUpgradeMessage(modelCatalog, parsedVersion);
+
+  // The capabilities probe starts even without a login, so it cannot tell a
+  // signed-out config directory from a signed-in one. The CLI can.
+  const loginProbe = yield* runClaudeCommand(
+    claudeSettings,
+    ["auth", "status"],
+    resolvedEnvironment,
+  ).pipe(Effect.timeoutOption(DEFAULT_TIMEOUT_MS), Effect.result);
+  const loggedIn =
+    Result.isSuccess(loginProbe) && Option.isSome(loginProbe.success)
+      ? parseClaudeLoggedIn(loginProbe.success.value.stdout)
+      : undefined;
+  if (loggedIn === false) {
+    return buildServerProvider({
+      presentation: CLAUDE_PRESENTATION,
+      enabled: claudeSettings.enabled,
+      checkedAt,
+      models,
+      probe: {
+        installed: true,
+        version: parsedVersion,
+        status: "error",
+        auth: { status: "unauthenticated" },
+        message: "Claude is not signed in. Sign in from this instance's provider settings.",
+      },
+    });
+  }
 
   const capabilities = resolveCapabilities
     ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
