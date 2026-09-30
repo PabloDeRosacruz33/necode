@@ -202,8 +202,12 @@ describe("tailscale", () => {
       Layer.succeed(
         ChildProcessSpawner.ChildProcessSpawner,
         ChildProcessSpawner.make((command) => {
-          const executable = (command as unknown as { readonly command: string }).command;
+          const { command: executable, options } = command as unknown as {
+            readonly command: string;
+            readonly options: { readonly env?: Record<string, string> };
+          };
           spawned.push(executable);
+          if (executable !== "tailscale") assert.equal(options.env?.TAILSCALE_BE_CLI, "1");
           return executable === "tailscale"
             ? Effect.fail(
                 PlatformError.systemError({

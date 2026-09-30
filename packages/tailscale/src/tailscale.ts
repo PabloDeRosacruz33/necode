@@ -19,7 +19,8 @@ const tailscaleCommandForPlatform = (platform: NodeJS.Platform): "tailscale" | "
 
 // The Mac app keeps its CLI inside the bundle and only puts `tailscale` on
 // PATH when the user installs the CLI separately, so a missing command on
-// macOS retries the bundled one.
+// macOS retries the bundled one. Launched outside a shell, that binary starts
+// its GUI instead of answering, unless TAILSCALE_BE_CLI is set.
 export const MACOS_APP_TAILSCALE_EXECUTABLE =
   "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
 
@@ -34,15 +35,24 @@ const spawnTailscale = (
   },
 ) => {
   const spawnAt = (executable: string) =>
-    spawner.spawn(ChildProcess.make(executable, args)).pipe(
-      Effect.mapError((cause) => new TailscaleCommandSpawnError({ ...commandContext, cause })),
-      // Spawning can also fail as a defect rather than a typed error - a
-      // non-directory entry on PATH makes node throw ENOTDIR synchronously.
-      // `mapError` never sees that, so it would escape as an uncaught error.
-      Effect.catchDefect((cause) =>
-        Effect.fail(new TailscaleCommandSpawnError({ ...commandContext, cause })),
-      ),
-    );
+    spawner
+      .spawn(
+        executable === MACOS_APP_TAILSCALE_EXECUTABLE
+          ? ChildProcess.make(executable, args, {
+              env: { TAILSCALE_BE_CLI: "1" },
+              extendEnv: true,
+            })
+          : ChildProcess.make(executable, args),
+      )
+      .pipe(
+        Effect.mapError((cause) => new TailscaleCommandSpawnError({ ...commandContext, cause })),
+        // Spawning can also fail as a defect rather than a typed error - a
+        // non-directory entry on PATH makes node throw ENOTDIR synchronously.
+        // `mapError` never sees that, so it would escape as an uncaught error.
+        Effect.catchDefect((cause) =>
+          Effect.fail(new TailscaleCommandSpawnError({ ...commandContext, cause })),
+        ),
+      );
   const onPath = spawnAt(commandContext.executable);
   return hostPlatform === "darwin"
     ? onPath.pipe(
