@@ -20,6 +20,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
@@ -41,6 +42,7 @@ import {
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { resolveClaudeModelCatalog } from "../ClaudeModelCatalog.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
+import { makeClaudeAuth } from "../ClaudeAuth.ts";
 import * as ModelManifest from "../ModelManifest.ts";
 import {
   defaultProviderContinuationIdentity,
@@ -62,8 +64,10 @@ import {
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
 import {
+  linkClaudeSharedSessions,
   makeClaudeCapabilitiesCacheKey,
   makeClaudeContinuationGroupKey,
+  makeClaudeEnvironment,
   resolveClaudeHomePath,
 } from "./ClaudeHome.ts";
 import { discoverClaudeSkills } from "./ClaudeSkills.ts";
@@ -148,17 +152,42 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         processEnv,
       );
       const configDir = yield* resolveClaudeHomePath(effectiveConfig, processEnv);
+      const prepareAccountHome =
+        effectiveConfig.shareSessions && effectiveConfig.homePath.trim()
+          ? linkClaudeSharedSessions(effectiveConfig, processEnv).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, path),
+              Effect.catch((cause) =>
+                Effect.logWarning("Claude account sessions are not shared.", {
+                  instanceId,
+                  cause,
+                }),
+              ),
+            )
+          : Effect.void;
+      yield* prepareAccountHome;
+      const auth = yield* makeClaudeAuth({
+        instanceId,
+        binaryPath: effectiveConfig.binaryPath,
+        environment: yield* makeClaudeEnvironment(effectiveConfig, processEnv),
+        configDir,
+        prepare: prepareAccountHome,
+      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
       const accountConfigPath = yield* ClaudeResetCredits.claudeAccountConfigPath(
         effectiveConfig.homePath.trim() || processEnv.CLAUDE_CONFIG_DIR?.trim()
           ? configDir
           : undefined,
       );
-      const stampIdentity = withInstanceIdentity({
+      const stampInstance = withInstanceIdentity({
         instanceId,
         driverKind: DRIVER_KIND,
         displayName,
         accentColor,
         continuationGroupKey,
+      });
+      const stampIdentity = (draft: Parameters<typeof stampInstance>[0]) => ({
+        ...stampInstance(draft),
+        setup: { canAuthenticate: true, canInstall: false },
       });
 
       // One per instance: the status probe writes the model-scoped bucket
@@ -258,6 +287,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
             }),
         ),
       );
+      // A finished sign-in or sign-out changes the account the probe reports.
+      yield* auth.subscribe("claude-snapshot").pipe(
+        Stream.drop(1),
+        Stream.filter((state) => state.phase === "succeeded" || state.phase === "idle"),
+        Stream.runForEach(() =>
+          Cache.invalidateAll(capabilitiesProbeCache).pipe(Effect.andThen(snapshot.refresh)),
+        ),
+        Effect.forkScoped,
+      );
       const snapshotForCwd = (cwd: string) =>
         !effectiveConfig.enabled
           ? snapshot.getSnapshot
@@ -347,6 +385,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         snapshotForCwd,
         adapter,
         textGeneration,
+        auth,
         consumeResetCredit,
       } satisfies ProviderInstance;
     }),

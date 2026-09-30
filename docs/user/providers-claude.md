@@ -4,35 +4,27 @@ Necode uses Claude Code's login and configuration. Start with the default provid
 for one account; [provider setup](./install.md#providers) covers installation and
 shared provider settings.
 
-## Separate accounts or configurations
+## Use multiple accounts
 
-Use a separate Claude config directory for each account. This also works for named
-presets that need different Claude settings or a router connection.
+Add another Claude account in **Settings → Providers**: select **+**, choose
+Claude, then **Continue with Claude**. Name the account, open the sign-in page,
+sign in with the other account, and paste the code Claude shows. Signing in
+happens on the environment's machine, so it also works from another device.
 
-Keep your existing account in the default directory. On the environment's machine,
-create the second login:
+Accounts added this way share conversations with your main Claude login. When one
+account runs out of usage, choose the other from the thread's model picker and
+continue the same thread. Sign in or out of any Claude instance from its
+provider settings.
 
-```bash
-mkdir -p ~/.claude_personal
-CLAUDE_CONFIG_DIR=~/.claude_personal claude auth login
-```
+### Separate configurations
 
-Add another Claude instance in **Settings > Providers**:
-
-| Instance        | Binary path | CLAUDE_CONFIG_DIR path |
-| --------------- | ----------- | ---------------------- |
-| Claude Work     | `claude`    | Leave empty            |
-| Claude Personal | `claude`    | `~/.claude_personal`   |
-
-An empty config-directory setting uses Claude Code's normal configuration. The
-custom setting changes `CLAUDE_CONFIG_DIR`, leaving `HOME` and the system keychain
-location intact. Use the same variable for the login command. Setting `HOME`
-instead can put credentials where this provider will not find them.
-
-Check the account reported in provider settings after signing in. Existing
-threads can switch only between Claude instances with the same config directory.
-Separate account directories stay isolated, including their local conversation
-state. Claude does not have Codex's shared-home and shadow-home arrangement.
+For a separate Claude setup with its own conversations, such as a router preset,
+choose **Configure manually** and set a **CLAUDE_CONFIG_DIR path**, for example
+`~/.claude_openrouter`. Sign in from the instance's provider settings, or run
+`CLAUDE_CONFIG_DIR=~/.claude_openrouter claude auth login` on the environment's
+machine. Setting `HOME` instead can put credentials where this provider will not
+find them. Threads cannot switch to or from an instance with a separate config
+directory.
 
 For presets that differ only in API keys or endpoints, use the instance's
 **Environment variables**. Variable assignments do not belong in **Launch arguments**.

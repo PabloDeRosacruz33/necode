@@ -2,6 +2,7 @@ import * as NodeOS from "node:os";
 
 import type { ClaudeSettings } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
@@ -53,15 +54,42 @@ export const makeClaudeEnvironment = Effect.fn("makeClaudeEnvironment")(function
   };
 });
 
+/** Accounts that share sessions continue threads from the default Claude home. */
 export const makeClaudeContinuationGroupKey = Effect.fn("makeClaudeContinuationGroupKey")(
   function* (
-    config: Pick<ClaudeSettings, "homePath">,
+    config: Pick<ClaudeSettings, "homePath"> & { readonly shareSessions?: boolean },
     environment?: NodeJS.ProcessEnv,
   ): Effect.fn.Return<string, never, Path.Path> {
-    const resolvedHomePath = yield* resolveClaudeHomePath(config, environment);
+    const resolvedHomePath = yield* resolveClaudeHomePath(
+      config.shareSessions ? { homePath: "" } : config,
+      environment,
+    );
     return `claude:home:${resolvedHomePath}`;
   },
 );
+
+/**
+ * Point an account's `projects` directory, where Claude keeps resumable
+ * transcripts, at the default Claude home. The account keeps its own login and
+ * settings. An existing `projects` entry is left alone so real history is never
+ * replaced.
+ */
+export const linkClaudeSharedSessions = Effect.fn("linkClaudeSharedSessions")(function* (
+  config: Pick<ClaudeSettings, "homePath">,
+  environment?: NodeJS.ProcessEnv,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const accountHome = yield* resolveClaudeHomePath(config, environment);
+  const sharedHome = yield* resolveClaudeHomePath({ homePath: "" }, environment);
+  if (accountHome === sharedHome) return;
+  const target = path.join(sharedHome, "projects");
+  const link = path.join(accountHome, "projects");
+  yield* fileSystem.makeDirectory(accountHome, { recursive: true });
+  yield* fileSystem.makeDirectory(target, { recursive: true });
+  if (yield* fileSystem.exists(link)) return;
+  yield* fileSystem.symlink(target, link);
+});
 
 export const makeClaudeCapabilitiesCacheKey = Effect.fn("makeClaudeCapabilitiesCacheKey")(
   function* (
@@ -86,5 +114,5 @@ export const claudeSignedOutMessage = (input: {
     input.configDir !== undefined
       ? ` from ${quotePath(input.cwd)}, with CLAUDE_CONFIG_DIR set to ${quotePath(input.configDir)}`
       : "";
-  return `Claude could not authenticate. For subscription login, run \`claude auth login\` on this environment's machine${configuration}, then start a new thread. For API-key authentication, check this instance's configured credentials.`;
+  return `Claude could not authenticate. Sign in to this Claude instance in Settings > Providers, or run \`claude auth login\` on this environment's machine${configuration}, then start a new thread. For API-key authentication, check this instance's configured credentials.`;
 };
