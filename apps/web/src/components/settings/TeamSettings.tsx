@@ -66,10 +66,13 @@ function isOnline(snapshot: TeamSnapshot, memberId: string): boolean {
  */
 export function TeamSettings(props: {
   readonly environmentId: EnvironmentId;
-  /** Where teammates reach this machine; null while it is only reachable locally. */
-  readonly endpoint: AdvertisedEndpoint | null;
+  /** Public address (Tailscale Funnel) that works from anywhere; null while it is off. */
+  readonly publicEndpoint: AdvertisedEndpoint | null;
+  /** Fallback address that only works on this network or tailnet. */
+  readonly localEndpoint: AdvertisedEndpoint | null;
 }) {
-  const { environmentId, endpoint } = props;
+  const { environmentId, publicEndpoint, localEndpoint } = props;
+  const endpoint = publicEndpoint ?? localEndpoint;
   const team = useTeamSnapshot(environmentId);
   const invite = useAtomCommand(teamEnvironment.invite, { reportFailure: false });
   const revokeMember = useAtomCommand(teamEnvironment.revokeMember, { reportFailure: false });
@@ -78,7 +81,11 @@ export function TeamSettings(props: {
   const [name, setName] = useState("");
   const [role, setRole] = useState<TeamInvitableRole>("member");
   const [inviting, setInviting] = useState(false);
-  const [lastInvite, setLastInvite] = useState<{ name: string; url: string } | null>(null);
+  const [lastInvite, setLastInvite] = useState<{
+    name: string;
+    url: string;
+    isPublic: boolean;
+  } | null>(null);
   const [editingOwnerName, setEditingOwnerName] = useState<string | null>(null);
 
   const submitInvite = async () => {
@@ -95,7 +102,7 @@ export function TeamSettings(props: {
     const url = endpoint
       ? resolveDesktopPairingUrl(endpoint.httpBaseUrl, credential)
       : resolveDesktopPairingUrl(window.location.origin, credential);
-    setLastInvite({ name: trimmed, url });
+    setLastInvite({ name: trimmed, url, isPublic: publicEndpoint !== null });
     setName("");
   };
 
@@ -241,12 +248,12 @@ export function TeamSettings(props: {
             <code className="max-w-full break-all text-2xs text-muted-foreground">
               {lastInvite.url}
             </code>
-            {endpoint === null ? (
+            {lastInvite.isPublic ? null : (
               <p className="text-2xs text-warning">
-                This machine is not reachable from outside yet. Turn on public access below so the
-                link works away from this network.
+                This link only works on your own network or tailnet. Turn on Tailscale HTTPS below
+                to publish this machine, then create a new invite.
               </p>
-            ) : null}
+            )}
           </div>
         </SettingsRow>
       ) : null}

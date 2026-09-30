@@ -3274,7 +3274,12 @@ export function ConnectionsSettings() {
       {canManageLocalBackend && primaryEnvironmentId !== null ? (
         <TeamSettings
           environmentId={primaryEnvironmentId}
-          endpoint={
+          // Teammates join from anywhere, so invites use the public Tailscale Funnel
+          // address whenever it is up; LAN and tailnet addresses only work nearby.
+          publicEndpoint={
+            tailscaleHttpsEndpoint?.status === "available" ? tailscaleHttpsEndpoint : null
+          }
+          localEndpoint={
             defaultDesktopAdvertisedEndpoint?.reachability === "loopback"
               ? null
               : defaultDesktopAdvertisedEndpoint
