@@ -2554,6 +2554,12 @@ export function ConnectionsSettings() {
     () => desktopAdvertisedEndpoints.find(isTailscaleHttpsEndpoint) ?? null,
     [desktopAdvertisedEndpoints],
   );
+  // Funnel being on is the setting; the probe only says whether it answered in
+  // time, and the first HTTPS request waits for Tailscale to issue a certificate.
+  const isTailscaleHttpsEnabled =
+    tailscaleHttpsEndpoint !== null &&
+    (tailscaleHttpsEndpoint.status === "available" ||
+      desktopServerExposureState?.tailscaleServeEnabled === true);
   const visibleDesktopNetworkAdvertisedEndpoints = useMemo(
     () =>
       isLocalBackendNetworkAccessible
@@ -3163,13 +3169,15 @@ export function ConnectionsSettings() {
         tailscaleHttpsEndpoint
           ? tailscaleHttpsEndpoint.status === "available"
             ? tailscaleHttpsEndpoint.httpBaseUrl
-            : "Publish this machine at a public HTTPS address with Tailscale Funnel so invited teammates can join from anywhere."
+            : isTailscaleHttpsEnabled
+              ? `${tailscaleHttpsEndpoint.httpBaseUrl} is not answering yet. The first time, Tailscale can take a minute to issue its certificate.`
+              : "Publish this machine at a public HTTPS address with Tailscale Funnel so invited teammates can join from anywhere."
           : "Start Tailscale to set up HTTPS access through MagicDNS."
       }
       control={
         tailscaleHttpsEndpoint ? (
           <Switch
-            checked={tailscaleHttpsEndpoint.status === "available"}
+            checked={isTailscaleHttpsEnabled}
             disabled={isUpdatingTailscaleServe}
             onCheckedChange={(checked) => {
               if (checked) {
@@ -3276,9 +3284,7 @@ export function ConnectionsSettings() {
           environmentId={primaryEnvironmentId}
           // Teammates join from anywhere, so invites use the public Tailscale Funnel
           // address whenever it is up; LAN and tailnet addresses only work nearby.
-          publicEndpoint={
-            tailscaleHttpsEndpoint?.status === "available" ? tailscaleHttpsEndpoint : null
-          }
+          publicEndpoint={isTailscaleHttpsEnabled ? tailscaleHttpsEndpoint : null}
           localEndpoint={
             defaultDesktopAdvertisedEndpoint?.reachability === "loopback"
               ? null
