@@ -91,6 +91,18 @@ For a local Git repository without a remote, **Publish Repository** creates a ho
 adds it as `origin`, and pushes your commits. If there are no commits yet, it creates the remote;
 make your first commit before pushing.
 
+## Work in branches
+
+The branch menu under the composer handles a branch-per-task flow without pull requests. The shared
+branch is `staging` when the repository has one, otherwise its default branch.
+
+- **New branch from …** names a branch off the current one and moves the thread onto it.
+- **Update from staging** fetches the latest `staging` and merges it into your branch, keeping
+  uncommitted work. If the changes conflict, nothing changes and **Ask the agent to resolve** puts
+  the merge in the composer for you to send.
+- **Merge into staging** merges your committed branch into `staging`, pushes it, and moves the
+  thread to `staging`. Commit your changes first.
+
 ## Create a pull request
 
 Use a thread's Git actions to commit, push, and create a pull request. Necode can generate commit

@@ -348,6 +348,20 @@ export function createVcsEnvironmentAtoms<R, E>(
       concurrency: vcsCommandConcurrency,
       onSettled: invalidateRefs,
     }),
+    mergeInto: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:merge-into",
+      tag: WS_METHODS.vcsMergeInto,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+      onSettled: invalidateRefs,
+    }),
+    syncWith: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:sync-with",
+      tag: WS_METHODS.vcsSyncWith,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+      onSettled: invalidateRefs,
+    }),
     init: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:vcs:init",
       tag: WS_METHODS.vcsInit,
