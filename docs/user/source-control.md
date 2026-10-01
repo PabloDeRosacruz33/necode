@@ -103,6 +103,11 @@ branch is `staging` when the repository has one, otherwise its default branch.
 - **Merge into staging** merges your committed branch into `staging`, pushes it, and moves the
   thread to `staging`. Commit your changes first.
 
+Threads in the same project folder share one checkout, so switching branches changes it for all of
+them. If uncommitted edits would be overwritten, choose **Stash and switch**: the edits are saved
+for that branch and come back when you switch to it again. To keep several branches open at once,
+start the thread in a new worktree instead.
+
 ## Create a pull request
 
 Use a thread's Git actions to commit, push, and create a pull request. Necode can generate commit

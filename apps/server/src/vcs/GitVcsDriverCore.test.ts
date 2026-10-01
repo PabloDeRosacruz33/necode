@@ -25,6 +25,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import {
   GitCommandError,
   ReviewDiffPreviewInput,
+  VCS_SWITCH_REF_UNCOMMITTED_CHANGES_OPERATION,
   type ReviewDiffFileContentsInput,
   type WorktreeSubmodules,
 } from "@t3tools/contracts";
@@ -2333,6 +2334,48 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.deepStrictEqual(result.conflictedFiles, ["README.md"]);
         assert.equal(yield* git(cwd, ["branch", "--show-current"]), "feature/readme");
         assert.equal(yield* git(cwd, ["status", "--porcelain"]), "");
+      }),
+    );
+
+    it.effect("says when uncommitted work blocks a branch switch", () =>
+      Effect.gen(function* () {
+        const { cwd, base } = yield* withRemote;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["checkout", "-b", "feature/copy"]);
+        yield* commitFile(cwd, "README.md", "feature copy\n");
+        yield* writeTextFile(cwd, "README.md", "unsaved\n");
+
+        const error = yield* driver.switchRef({ cwd, refName: base }).pipe(Effect.flip);
+
+        assert.equal(error.operation, VCS_SWITCH_REF_UNCOMMITTED_CHANGES_OPERATION);
+        assert.equal(yield* git(cwd, ["branch", "--show-current"]), "feature/copy");
+        assert.equal(yield* git(cwd, ["status", "--porcelain"]), "M README.md");
+      }),
+    );
+
+    it.effect("stashes work when switching away and restores it on return", () =>
+      Effect.gen(function* () {
+        const { cwd, base } = yield* withRemote;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["checkout", "-b", "feature/copy"]);
+        yield* commitFile(cwd, "README.md", "feature copy\n");
+        yield* writeTextFile(cwd, "README.md", "unsaved\n");
+        yield* writeTextFile(cwd, "notes.md", "draft\n");
+
+        const away = yield* driver.switchRef({ cwd, refName: base, stashChanges: true });
+
+        assert.deepStrictEqual(away, { refName: base, stashedChanges: true });
+        assert.equal(yield* git(cwd, ["status", "--porcelain"]), "");
+
+        const back = yield* driver.switchRef({ cwd, refName: "feature/copy" });
+
+        assert.deepStrictEqual(back, { refName: "feature/copy", restoredChanges: true });
+        assert.equal(yield* git(cwd, ["show", ":README.md"]), "feature copy");
+        assert.equal(
+          yield* git(cwd, ["status", "--porcelain", "--untracked-files=all"]),
+          "M README.md\n?? notes.md",
+        );
+        assert.equal(yield* git(cwd, ["stash", "list"]), "");
       }),
     );
 

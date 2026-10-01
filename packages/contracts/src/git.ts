@@ -182,6 +182,8 @@ export type VcsCreateRefResult = typeof VcsCreateRefResult.Type;
 export const VcsSwitchRefInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   refName: TrimmedNonEmptyStringSchema,
+  /** Stash uncommitted work for the current branch first; switching back to it restores the stash. */
+  stashChanges: Schema.optional(Schema.Boolean),
 });
 export type VcsSwitchRefInput = typeof VcsSwitchRefInput.Type;
 
@@ -333,6 +335,10 @@ export type GitPreparePullRequestThreadResult = typeof GitPreparePullRequestThre
 
 export const VcsSwitchRefResult = Schema.Struct({
   refName: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  /** Uncommitted work was stashed for the branch that was left. */
+  stashedChanges: Schema.optional(Schema.Boolean),
+  /** Work stashed earlier for the new branch was put back. */
+  restoredChanges: Schema.optional(Schema.Boolean),
 });
 export type VcsSwitchRefResult = typeof VcsSwitchRefResult.Type;
 
@@ -373,6 +379,10 @@ export const VcsPullResult = Schema.Struct({
 export type VcsPullResult = typeof VcsPullResult.Type;
 
 // RPC / domain errors
+/** `GitCommandError.operation` when uncommitted work blocks a branch switch; retry with `stashChanges`. */
+export const VCS_SWITCH_REF_UNCOMMITTED_CHANGES_OPERATION =
+  "GitVcsDriver.switchRef.uncommittedChanges";
+
 export class GitCommandError extends Schema.TaggedError<GitCommandError>()("GitCommandError", {
   operation: Schema.String,
   command: Schema.String,

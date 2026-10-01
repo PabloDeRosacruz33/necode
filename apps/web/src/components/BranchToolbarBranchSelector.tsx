@@ -7,8 +7,16 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type { ContextMenuItem, EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
+import {
+  GitCommandError,
+  VCS_SWITCH_REF_UNCOMMITTED_CHANGES_OPERATION,
+  type ContextMenuItem,
+  type EnvironmentId,
+  type VcsRef,
+  type ThreadId,
+} from "@t3tools/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
+import * as Schema from "effect/Schema";
 import { ChevronDownIcon, GitBranchIcon, GitBranchPlusIcon, MergeIcon } from "lucide-react";
 import {
   useCallback,
@@ -99,6 +107,8 @@ interface BranchToolbarBranchSelectorProps {
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
 }
+
+const isGitCommandError = Schema.is(GitCommandError);
 
 function toBranchActionErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "An error occurred.";
@@ -472,35 +482,77 @@ export function BranchToolbarBranchSelector({
     handleOpenChange(false);
     onComposerFocusRequest?.();
 
-    runBranchAction(async () => {
-      const previousBranch = resolvedActiveBranch;
-      setOptimisticBranch(selectedBranchName);
-      const checkoutResult = await switchRef({
-        environmentId,
-        input: {
-          cwd: selectionTarget.checkoutCwd,
-          refName: refName.name,
-        },
-      });
-      if (checkoutResult._tag === "Success") {
-        const nextBranchName = refName.isRemote
-          ? (checkoutResult.value.refName ?? selectedBranchName)
-          : selectedBranchName;
-        setOptimisticBranch(nextBranchName);
-        setThreadBranch(nextBranchName, selectionTarget.nextWorktreePath);
-        return;
-      }
-      setOptimisticBranch(previousBranch);
-      if (!isAtomCommandInterrupted(checkoutResult)) {
+    const checkoutSelectedBranch = (stashChanges: boolean) =>
+      runBranchAction(async () => {
+        const previousBranch = resolvedActiveBranch;
+        setOptimisticBranch(selectedBranchName);
+        const checkoutResult = await switchRef({
+          environmentId,
+          input: {
+            cwd: selectionTarget.checkoutCwd,
+            refName: refName.name,
+            ...(stashChanges ? { stashChanges } : {}),
+          },
+        });
+        if (checkoutResult._tag === "Success") {
+          const nextBranchName = refName.isRemote
+            ? (checkoutResult.value.refName ?? selectedBranchName)
+            : selectedBranchName;
+          setOptimisticBranch(nextBranchName);
+          setThreadBranch(nextBranchName, selectionTarget.nextWorktreePath);
+          const { stashedChanges, restoredChanges } = checkoutResult.value;
+          if (stashedChanges || restoredChanges) {
+            toastManager.add(
+              stackedThreadToast({
+                type: "success",
+                title: `Switched to ${nextBranchName}`,
+                description: [
+                  stashedChanges && previousBranch
+                    ? `Your uncommitted changes on ${previousBranch} are saved and come back when you switch to it again.`
+                    : null,
+                  restoredChanges ? `Restored the changes you left on ${nextBranchName}.` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" "),
+              }),
+            );
+          }
+          return;
+        }
+        setOptimisticBranch(previousBranch);
+        if (isAtomCommandInterrupted(checkoutResult)) return;
+        const error = squashAtomCommandFailure(checkoutResult);
+        if (
+          !stashChanges &&
+          isGitCommandError(error) &&
+          error.operation === VCS_SWITCH_REF_UNCOMMITTED_CHANGES_OPERATION
+        ) {
+          const toastId = toastManager.add(
+            stackedThreadToast({
+              type: "warning",
+              title: `Uncommitted changes block ${selectedBranchName}`,
+              description: `Some edits on ${previousBranch ?? "this branch"} would be overwritten. Commit them, or stash them: they come back when you switch to ${previousBranch ?? "it"} again. Other threads in this folder see the same files.`,
+              actionProps: {
+                children: "Stash and switch",
+                onClick: () => {
+                  toastManager.close(toastId);
+                  checkoutSelectedBranch(true);
+                },
+              },
+            }),
+          );
+          return;
+        }
         toastManager.add(
           stackedThreadToast({
             type: "error",
             title: "Failed to switch ref.",
-            description: toBranchActionErrorMessage(squashAtomCommandFailure(checkoutResult)),
+            description: toBranchActionErrorMessage(error),
           }),
         );
-      }
-    });
+      });
+
+    checkoutSelectedBranch(false);
   };
 
   const createRef = (rawName: string) => {

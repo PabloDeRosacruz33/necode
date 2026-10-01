@@ -21,6 +21,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import {
   GitCommandError,
   T3_PROJECT_FILE_NAME,
+  VCS_SWITCH_REF_UNCOMMITTED_CHANGES_OPERATION,
   type ReviewDiffFileContentsInput,
   type ReviewDiffPreviewInput,
   type ReviewDiffFileStat,
@@ -3515,6 +3516,43 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     return { branch: targetBranch };
   });
 
+  const autostashMessage = (branch: string) => `necode-autostash:${branch}`;
+
+  const hasUncommittedChanges = (cwd: string) =>
+    runGitStdout("GitVcsDriver.switchRef.status", cwd, ["status", "--porcelain"]).pipe(
+      Effect.map((stdout) => stdout.trim().length > 0),
+    );
+
+  /**
+   * Puts back the work stashed when the user last left `branch` with "Stash and switch". Only runs
+   * on a clean tree, so a failed pop can be rolled back without touching anyone else's edits.
+   */
+  const restoreAutostash = Effect.fn("restoreAutostash")(function* (cwd: string, branch: string) {
+    const stashes = yield* runGitStdout("GitVcsDriver.switchRef.listStashes", cwd, [
+      "stash",
+      "list",
+      "--format=%gd%x00%gs",
+    ]);
+    const stashRef = stashes
+      .split("\n")
+      .map((line) => line.split("\0"))
+      .find(([, subject]) => subject === `On ${branch}: ${autostashMessage(branch)}`)?.[0];
+    if (!stashRef || (yield* hasUncommittedChanges(cwd))) return false;
+    const pop = yield* executeGit(
+      "GitVcsDriver.switchRef.restoreStash",
+      cwd,
+      ["stash", "pop", stashRef],
+      {
+        allowNonZeroExit: true,
+      },
+    );
+    if (pop.exitCode === 0) return true;
+    // The stash stays in the list; return the tree to the clean state it was in.
+    yield* runGit("GitVcsDriver.switchRef.resetFailedRestore", cwd, ["reset", "--hard", "HEAD"]);
+    yield* runGit("GitVcsDriver.switchRef.cleanFailedRestore", cwd, ["clean", "-fd"]);
+    return false;
+  });
+
   const switchRef: GitVcsDriver.GitVcsDriver["Service"]["switchRef"] = Effect.fn("switchRef")(
     function* (input) {
       const [localInputExists, remoteExists] = yield* Effect.all(
@@ -3583,18 +3621,59 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               ? ["checkout", localTrackingBranch]
               : ["checkout", input.refName];
 
-      // A stale ref must not turn into a path checkout that discards local edits.
-      yield* executeGit("GitVcsDriver.switchRef.checkout", input.cwd, [...checkoutArgs, "--"], {
-        timeoutMs: 10_000,
-        fallbackErrorDetail: "git checkout failed",
-      });
-
-      const refName = yield* runGitStdout("GitVcsDriver.switchRef.currentBranch", input.cwd, [
+      const readCurrentBranch = runGitStdout("GitVcsDriver.switchRef.currentBranch", input.cwd, [
         "branch",
         "--show-current",
       ]).pipe(Effect.map((stdout) => stdout.trim() || null));
 
-      return { refName };
+      const sourceBranch = input.stashChanges ? yield* readCurrentBranch : null;
+      const stashedChanges =
+        sourceBranch !== null && (yield* hasUncommittedChanges(input.cwd))
+          ? yield* runGit("GitVcsDriver.switchRef.stash", input.cwd, [
+              "stash",
+              "push",
+              "--include-untracked",
+              "--message",
+              autostashMessage(sourceBranch),
+            ]).pipe(Effect.as(true))
+          : false;
+
+      // A stale ref must not turn into a path checkout that discards local edits.
+      const checkoutArgsWithSeparator = [...checkoutArgs, "--"];
+      const checkout = yield* executeGitWithStableDiagnostics(
+        "GitVcsDriver.switchRef.checkout",
+        input.cwd,
+        checkoutArgsWithSeparator,
+        { timeoutMs: 10_000, allowNonZeroExit: true },
+      );
+      if (checkout.exitCode !== 0) {
+        if (stashedChanges) {
+          yield* runGit("GitVcsDriver.switchRef.unstash", input.cwd, ["stash", "pop"]);
+        }
+        const blockedByChanges = checkout.stderr.includes("would be overwritten by checkout");
+        return yield* new GitCommandError({
+          ...gitCommandContext({
+            operation: blockedByChanges
+              ? VCS_SWITCH_REF_UNCOMMITTED_CHANGES_OPERATION
+              : "GitVcsDriver.switchRef.checkout",
+            cwd: input.cwd,
+            args: checkoutArgsWithSeparator,
+          }),
+          detail: blockedByChanges
+            ? `Uncommitted changes here would be overwritten by ${input.refName}.`
+            : "git checkout failed",
+          ...(checkout.exitCode === null ? {} : { exitCode: checkout.exitCode }),
+        });
+      }
+
+      const refName = yield* readCurrentBranch;
+      const restoredChanges = refName ? yield* restoreAutostash(input.cwd, refName) : false;
+
+      return {
+        refName,
+        ...(stashedChanges ? { stashedChanges } : {}),
+        ...(restoredChanges ? { restoredChanges } : {}),
+      };
     },
   );
 
