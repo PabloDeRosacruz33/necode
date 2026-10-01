@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import {
   NonNegativeInt,
   PositiveInt,
+  ProjectId,
   TrimmedNonEmptyString,
   TrimmedString,
 } from "./baseSchemas.ts";
@@ -305,3 +306,27 @@ export class ProjectWriteFileError extends Schema.TaggedError<ProjectWriteFileEr
     } as any);
   }
 }
+
+/** Points a project at the same repository in another folder, keeping its threads. */
+export const ProjectRelocateInput = Schema.Struct({
+  projectId: ProjectId,
+  workspaceRoot: TrimmedNonEmptyString,
+  /** Move even though the new folder's remote is not the one the project had. */
+  allowRemoteMismatch: Schema.optional(Schema.Boolean),
+});
+export type ProjectRelocateInput = typeof ProjectRelocateInput.Type;
+
+export const ProjectRelocateResult = Schema.Union([
+  Schema.TaggedStruct("relocated", { workspaceRoot: TrimmedNonEmptyString }),
+  /** Nothing changed: confirm with `allowRemoteMismatch` to move anyway. */
+  Schema.TaggedStruct("remote-mismatch", {
+    previousRemote: Schema.NullOr(Schema.String),
+    newRemote: Schema.NullOr(Schema.String),
+  }),
+]);
+export type ProjectRelocateResult = typeof ProjectRelocateResult.Type;
+
+export class ProjectRelocateError extends Schema.TaggedError<ProjectRelocateError>()(
+  "ProjectRelocateError",
+  { message: TrimmedNonEmptyString },
+) {}

@@ -188,6 +188,9 @@ import {
   ProjectSearchContentsInput,
   ProjectSearchContentsResult,
   ProjectSearchEntriesError,
+  ProjectRelocateInput,
+  ProjectRelocateResult,
+  ProjectRelocateError,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
   ProjectWriteFileError,
@@ -463,6 +466,7 @@ export const WS_METHODS = {
   projectCloneStart: "projectClone.start",
   projectCloneCancel: "projectClone.cancel",
   projectCloneRetry: "projectClone.retry",
+  projectRelocate: "project.relocate",
   subscribeProjectClones: "subscribeProjectClones",
 
   // Streaming subscriptions
@@ -979,6 +983,16 @@ const WsProjectCloneRetryRpc = Rpc.make(WS_METHODS.projectCloneRetry, {
   payload: ProjectCloneActionInput,
   success: ProjectCloneActionResult,
   error: Schema.Union([SourceControlRepositoryError, EnvironmentAuthorizationError]),
+});
+
+const WsProjectRelocateRpc = Rpc.make(WS_METHODS.projectRelocate, {
+  payload: ProjectRelocateInput,
+  success: ProjectRelocateResult,
+  error: Schema.Union([
+    ProjectRelocateError,
+    OrchestrationDispatchCommandError,
+    EnvironmentAuthorizationError,
+  ]),
 });
 
 const WsSubscribeProjectClonesRpc = Rpc.make(WS_METHODS.subscribeProjectClones, {
@@ -1597,6 +1611,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectCloneStartRpc,
   WsProjectCloneCancelRpc,
   WsProjectCloneRetryRpc,
+  WsProjectRelocateRpc,
   WsSubscribeProjectClonesRpc,
   WsProjectsListEntriesRpc,
   WsProjectsReadFileRpc,

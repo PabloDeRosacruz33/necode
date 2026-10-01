@@ -39,6 +39,7 @@ import {
   canPickExternalProjectFavicon,
   ProjectFaviconPickerDialog,
 } from "./ProjectFaviconPickerDialog";
+import { ChangeProjectFolderDialog } from "./ChangeProjectFolderDialog";
 import { ProjectActionsSettings } from "./ProjectActionsSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { projectGroupTitleNeedsUpdate } from "./ProjectSettingsPanel.logic";
@@ -179,6 +180,9 @@ function ProjectDetail({
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const deleteProject = useAtomCommand(projectEnvironment.delete, { reportFailure: false });
   const projectNameEditedRef = useRef(false);
+  const [relocatingMember, setRelocatingMember] = useState<
+    (typeof group.memberProjects)[number] | null
+  >(null);
 
   const faviconPath = representative.faviconPath ?? null;
   const projectIcon = representative.projectIcon ?? null;
@@ -385,24 +389,55 @@ function ProjectDetail({
   );
 
   const checkoutChoices = (
-    <SettingsSection title="Checkouts">
+    <SettingsSection title={hasMultipleCheckouts ? "Checkouts" : "Folder"}>
       {group.memberProjects.map((member) => (
         <SettingsRow
           key={member.physicalProjectKey}
-          title={member.environmentLabel ?? "Environment"}
+          title={
+            hasMultipleCheckouts ? (member.environmentLabel ?? "Environment") : "Project folder"
+          }
           description={member.workspaceRoot}
           control={
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void removeMembers([member])}
-              aria-label={`Remove checkout ${member.workspaceRoot}`}
-            >
-              Remove
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setRelocatingMember(member)}
+                aria-label={`Cambiar carpeta de ${member.workspaceRoot}`}
+              >
+                Cambiar carpeta…
+              </Button>
+              {hasMultipleCheckouts ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void removeMembers([member])}
+                  aria-label={`Remove checkout ${member.workspaceRoot}`}
+                >
+                  Remove
+                </Button>
+              ) : null}
+            </div>
           }
         />
       ))}
+      {relocatingMember ? (
+        <ChangeProjectFolderDialog
+          key={relocatingMember.physicalProjectKey}
+          open
+          onOpenChange={(open) => {
+            if (!open) setRelocatingMember(null);
+          }}
+          environmentId={relocatingMember.environmentId}
+          projectId={relocatingMember.id}
+          workspaceRoot={relocatingMember.workspaceRoot}
+          canBrowse={
+            relocatingMember.environmentId === primaryEnvironmentId &&
+            typeof window !== "undefined" &&
+            window.desktopBridge !== undefined
+          }
+        />
+      ) : null}
     </SettingsSection>
   );
 
@@ -491,7 +526,7 @@ function ProjectDetail({
         </SettingsSection>
         <ProjectDefaultsSettings category="project" />
         <ProjectActionsSettings />
-        {hasMultipleCheckouts ? checkoutChoices : null}
+        {checkoutChoices}
         <SettingsSection title="Danger">
           <SettingsRow
             title={

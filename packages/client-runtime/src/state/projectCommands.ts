@@ -102,5 +102,11 @@ export function createProjectEnvironmentAtoms<R, E>(
           JSON.stringify([environmentId, input.cwd, input.relativePath]),
       },
     }),
+    relocate: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projects:relocate",
+      tag: WS_METHODS.projectRelocate,
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
   };
 }

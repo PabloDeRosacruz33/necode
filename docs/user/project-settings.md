@@ -88,6 +88,14 @@ Existing prompts for deleting a worktree manually remain available when this pol
 Browser captures and rotated logs have separate retention periods. Expired capture links stop
 working. Current logs, message attachments, and browser profiles are kept.
 
+## Move a project to another folder
+
+If you move a repository on disk, open **Settings → Project**, choose **Cambiar carpeta…** next to
+the project folder and pick or type the new location (`~` works). Threads keep their history and
+the next message runs in the new folder; worktrees are repaired to point at the moved repository.
+Necode checks that the folder is the top of a Git repository and asks before switching to one whose
+remote differs from the project's.
+
 ## Project icons
 
 Select the project and open Project to choose an icon, emoji, monogram, or image. The choice applies to

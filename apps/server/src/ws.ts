@@ -58,6 +58,7 @@ import {
   ProjectReadFileError,
   ProjectSearchContentsError,
   ProjectSearchEntriesError,
+  ProjectRelocateError,
   ProjectWriteFileError,
   ProviderUploadFeedbackError,
   ProviderSetupError,
@@ -147,6 +148,9 @@ import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
+import { relocateProject } from "./project/ProjectRelocation.ts";
+import { expandHomePath } from "./os-jank.ts";
+import * as ProcessRunner from "./processRunner.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import { importRecentAgentThreads } from "./project/AgentSessionImporter.ts";
@@ -3056,6 +3060,50 @@ const makeWsRpcLayer = (
             WS_METHODS.projectCloneRetry,
             projectCloneTracker.retry(input.projectId).pipe(Effect.map((applied) => ({ applied }))),
             { "rpc.aggregate": "source-control" },
+          ),
+        [WS_METHODS.projectRelocate]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectRelocate,
+            Effect.gen(function* () {
+              const project = yield* projectionSnapshotQuery
+                .getProjectShellById(input.projectId)
+                .pipe(
+                  Effect.map(Option.getOrNull),
+                  Effect.orElseSucceed(() => null),
+                );
+              if (project === null) {
+                return yield* new ProjectRelocateError({ message: "Project not found." });
+              }
+              const path = yield* Path.Path;
+              const result = yield* relocateProject({
+                previousRoot: project.workspaceRoot,
+                previousIdentity: project.repositoryIdentity,
+                workspaceRoot: path.resolve(yield* expandHomePath(input.workspaceRoot)),
+                allowRemoteMismatch: input.allowRemoteMismatch === true,
+                applyWorkspaceRoot: (workspaceRoot) =>
+                  Effect.gen(function* () {
+                    const command = yield* normalizeDispatchCommand({
+                      type: "project.meta.update",
+                      commandId: yield* serverCommandId("project-relocate"),
+                      projectId: input.projectId,
+                      workspaceRoot,
+                    });
+                    yield* dispatchNormalizedCommand(command);
+                  }).pipe(
+                    Effect.mapError((cause) =>
+                      toDispatchCommandError(cause, "Failed to move the project."),
+                    ),
+                    Effect.provideContext(normalizerContext),
+                  ),
+              }).pipe(Effect.provide(ProcessRunner.layer));
+              if (result._tag === "relocated") {
+                yield* refreshGitStatus(result.workspaceRoot).pipe(
+                  Effect.ignoreCause({ log: true }),
+                );
+              }
+              return result;
+            }),
+            { "rpc.aggregate": "project" },
           ),
         [WS_METHODS.subscribeProjectClones]: () =>
           observeRpcStream(WS_METHODS.subscribeProjectClones, projectCloneTracker.stream, {
