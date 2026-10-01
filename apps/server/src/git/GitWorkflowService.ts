@@ -11,6 +11,10 @@ import {
   type VcsMergeIntoResult,
   type VcsSyncWithInput,
   type VcsSyncWithResult,
+  type VcsLogInput,
+  type VcsLogResult,
+  type VcsCommitDetailsInput,
+  type VcsCommitDetailsResult,
   type VcsCreateRefInput,
   type VcsCreateRefResult,
   type VcsCreateWorktreeInput,
@@ -115,6 +119,10 @@ export class GitWorkflowService extends Context.Service<
     readonly syncWith: (
       input: VcsSyncWithInput,
     ) => Effect.Effect<VcsSyncWithResult, GitCommandError>;
+    readonly log: (input: VcsLogInput) => Effect.Effect<VcsLogResult, GitCommandError>;
+    readonly commitDetails: (
+      input: VcsCommitDetailsInput,
+    ) => Effect.Effect<VcsCommitDetailsResult, GitCommandError>;
     readonly renameBranch: (input: {
       readonly cwd: string;
       readonly oldBranch: string;
@@ -393,6 +401,12 @@ export const make = Effect.gen(function* () {
     syncWith: (input) =>
       ensureGitCommand("GitWorkflowService.syncWith", input.cwd).pipe(
         Effect.andThen(git.syncWith(input)),
+      ),
+    log: (input) =>
+      ensureGitCommand("GitWorkflowService.log", input.cwd).pipe(Effect.andThen(git.log(input))),
+    commitDetails: (input) =>
+      ensureGitCommand("GitWorkflowService.commitDetails", input.cwd).pipe(
+        Effect.andThen(git.commitDetails(input)),
       ),
     renameBranch: (input) =>
       ensureGit("GitWorkflowService.renameBranch", input.cwd).pipe(

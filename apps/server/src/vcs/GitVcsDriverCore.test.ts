@@ -2379,6 +2379,67 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("lists the branch graph with refs and tracking state", () =>
+      Effect.gen(function* () {
+        const { cwd, base } = yield* withRemote;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["checkout", "-b", "feature/login"]);
+        yield* commitFile(cwd, "login.ts", "export {};\n");
+        yield* git(cwd, ["checkout", base]);
+        yield* commitFile(cwd, "README.md", "base moved\n");
+        yield* git(cwd, ["merge", "--no-ff", "--no-edit", "feature/login"]);
+        yield* git(cwd, ["tag", "-a", "v1", "-m", "first"]);
+        yield* writeTextFile(cwd, "draft.md", "wip\n");
+
+        const result = yield* driver.log({ cwd });
+
+        const [merge, ...rest] = result.commits;
+        assert.equal(result.commits.length, 4);
+        assert.equal(merge?.parents.length, 2);
+        assert.equal(merge?.sha, result.headSha);
+        assert.equal(merge?.authorName, "Test");
+        assert.include(
+          rest.map((commit) => commit.subject),
+          "edit login.ts",
+        );
+        assert.equal(result.currentBranch, base);
+        assert.equal(result.hasMore, false);
+        assert.equal(result.uncommittedFiles, 1);
+        const byName = new Map(result.refs.map((ref) => [ref.name, ref]));
+        assert.deepInclude(byName.get(base), {
+          kind: "local",
+          current: true,
+          upstream: `origin/${base}`,
+          ahead: 3,
+          behind: 0,
+        });
+        assert.equal(byName.get(`origin/${base}`)?.kind, "remote");
+        assert.equal(byName.get("v1")?.sha, result.headSha);
+        assert.equal(byName.get("feature/login")?.upstream, null);
+      }),
+    );
+
+    it.effect("pages the history and reads one commit's changes", () =>
+      Effect.gen(function* () {
+        const { cwd } = yield* withRemote;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* commitFile(cwd, "a.ts", "one\n");
+        yield* commitFile(cwd, "a.ts", "two\nthree\n");
+
+        const page = yield* driver.log({ cwd, limit: 2 });
+        assert.equal(page.commits.length, 2);
+        assert.equal(page.hasMore, true);
+
+        const details = yield* driver.commitDetails({ cwd, sha: page.commits[0]!.sha });
+        assert.equal(details.subject, "edit a.ts");
+        assert.deepStrictEqual(details.files, [
+          { path: "a.ts", previousPath: null, additions: 2, deletions: 1 },
+        ]);
+        assert.include(details.diff, "+three");
+        assert.equal(details.truncated, false);
+      }),
+    );
+
     it.effect("refuses to merge uncommitted work", () =>
       Effect.gen(function* () {
         const { cwd, base } = yield* withRemote;

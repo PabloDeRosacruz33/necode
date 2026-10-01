@@ -19,6 +19,10 @@ import {
   type VcsMergeIntoResult,
   type VcsSyncWithInput,
   type VcsSyncWithResult,
+  type VcsLogInput,
+  type VcsLogResult,
+  type VcsCommitDetailsInput,
+  type VcsCommitDetailsResult,
   type VcsCreateRefInput,
   type VcsCreateRefResult,
   type VcsCreateWorktreeInput,
@@ -394,6 +398,10 @@ export class GitVcsDriver extends Context.Service<
     readonly syncWith: (
       input: VcsSyncWithInput,
     ) => Effect.Effect<VcsSyncWithResult, GitCommandError>;
+    readonly log: (input: VcsLogInput) => Effect.Effect<VcsLogResult, GitCommandError>;
+    readonly commitDetails: (
+      input: VcsCommitDetailsInput,
+    ) => Effect.Effect<VcsCommitDetailsResult, GitCommandError>;
     readonly initRepo: (input: VcsInitInput) => Effect.Effect<void, GitCommandError>;
     readonly listLocalBranchNames: (cwd: string) => Effect.Effect<string[], GitCommandError>;
   }

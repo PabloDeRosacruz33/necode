@@ -26,6 +26,8 @@ import {
   type ReviewDiffPreviewInput,
   type ReviewDiffFileStat,
   type ReviewDiffPreviewSource,
+  type VcsLogCommit,
+  type VcsLogRef,
   type VcsRef,
 } from "@t3tools/contracts";
 import { dedupeRemoteBranchesWithLocalMatches, normalizeGitRemoteUrl } from "@t3tools/shared/git";
@@ -214,6 +216,78 @@ function parseReviewNumstat(stdout: string): ReviewDiffFileStat[] {
     });
   }
   return files;
+}
+
+const VCS_LOG_DEFAULT_LIMIT = 300;
+const COMMIT_DETAILS_PATCH_MAX_BYTES = 2_000_000;
+const EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+// %x1e ends a record so subjects can hold anything but that control byte.
+const LOG_COMMIT_FORMAT = "%H%x00%P%x00%an%x00%ae%x00%aI%x00%s%x1e";
+const COMMIT_DETAILS_FORMAT = "%H%x00%P%x00%an%x00%ae%x00%aI%x00%cn%x00%cI%x00%s%x00%b";
+// Annotated tags point at a tag object; %(*objectname) is the commit it tags.
+const LOG_REF_FORMAT =
+  "%(refname)%00%(if)%(*objectname)%(then)%(*objectname)%(else)%(objectname)%(end)%00%(HEAD)%00%(upstream:short)%00%(upstream:track,nobracket)";
+
+function countLines(stdout: string): number {
+  return stdout.split("\n").filter((line) => line.trim().length > 0).length;
+}
+
+function parseLogCommits(stdout: string): VcsLogCommit[] {
+  const commits: VcsLogCommit[] = [];
+  for (const record of stdout.split("\x1e")) {
+    const [sha, parents = "", authorName = "", authorEmail = "", authoredAt = "", subject = ""] =
+      record.replace(/^\n/, "").split("\0");
+    if (!sha) continue;
+    commits.push({
+      sha,
+      parents: parents.split(" ").filter((parent) => parent.length > 0),
+      authorName,
+      authorEmail,
+      authoredAt,
+      subject,
+    });
+  }
+  return commits;
+}
+
+function parseTrackCount(track: string, label: "ahead" | "behind"): number {
+  const match = new RegExp(`${label} (\\d+)`).exec(track);
+  return match ? Number(match[1]) : 0;
+}
+
+function parseLogRefs(stdout: string): VcsLogRef[] {
+  const refs: VcsLogRef[] = [];
+  for (const line of stdout.split("\n")) {
+    const [fullName, sha, head = "", upstream = "", track = ""] = line.split("\0");
+    if (!fullName || !sha) continue;
+    const kind = fullName.startsWith("refs/heads/")
+      ? "local"
+      : fullName.startsWith("refs/remotes/")
+        ? "remote"
+        : fullName.startsWith("refs/tags/")
+          ? "tag"
+          : null;
+    if (kind === null) continue;
+    const name = fullName.replace(/^refs\/(heads|remotes|tags)\//, "");
+    // `origin/HEAD` only points at the remote's default branch, which is listed anyway.
+    if (kind === "remote" && name.endsWith("/HEAD")) continue;
+    refs.push({
+      name,
+      kind,
+      sha,
+      current: head.trim() === "*",
+      upstream: upstream.trim() || null,
+      ahead: parseTrackCount(track, "ahead"),
+      behind: parseTrackCount(track, "behind"),
+    });
+  }
+  return refs;
+}
+
+/** A cut patch would end mid-file; keep only the files that arrived whole. */
+function dropPartialFilePatch(patch: string): string {
+  const lastFileStart = patch.lastIndexOf("\ndiff --git ");
+  return lastFileStart > 0 ? patch.slice(0, lastFileStart + 1) : "";
 }
 
 function parsePorcelainPath(line: string): string | null {
@@ -3865,6 +3939,113 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     },
   );
 
+  const log: GitVcsDriver.GitVcsDriver["Service"]["log"] = Effect.fn("log")(function* (input) {
+    const { cwd } = input;
+    const limit = input.limit ?? VCS_LOG_DEFAULT_LIMIT;
+    const headSha = yield* executeGit("GitVcsDriver.log.head", cwd, ["rev-parse", "HEAD"], {
+      allowNonZeroExit: true,
+    }).pipe(Effect.map((result) => (result.exitCode === 0 ? result.stdout.trim() || null : null)));
+    const [commitsStdout, refsStdout, currentBranch, statusStdout, stashStdout] = yield* Effect.all(
+      [
+        headSha === null
+          ? Effect.succeed("")
+          : runGitStdoutWithOptions("GitVcsDriver.log.commits", cwd, [
+              "log",
+              "--branches",
+              "--remotes",
+              "--tags",
+              "HEAD",
+              "--topo-order",
+              `--max-count=${limit + 1}`,
+              `--format=${LOG_COMMIT_FORMAT}`,
+            ]),
+        runGitStdout("GitVcsDriver.log.refs", cwd, [
+          "for-each-ref",
+          `--format=${LOG_REF_FORMAT}`,
+          "refs/heads",
+          "refs/remotes",
+          "refs/tags",
+        ]),
+        runGitStdout("GitVcsDriver.log.currentBranch", cwd, ["branch", "--show-current"]).pipe(
+          Effect.map((stdout) => stdout.trim() || null),
+        ),
+        runGitStdout("GitVcsDriver.log.status", cwd, ["status", "--porcelain"]),
+        runGitStdout("GitVcsDriver.log.stashes", cwd, ["stash", "list", "--format=%gd"]),
+      ],
+      { concurrency: "unbounded" },
+    );
+    const commits = parseLogCommits(commitsStdout);
+    return {
+      commits: commits.slice(0, limit),
+      refs: parseLogRefs(refsStdout),
+      headSha,
+      currentBranch,
+      hasMore: commits.length > limit,
+      uncommittedFiles: countLines(statusStdout),
+      stashes: countLines(stashStdout),
+    };
+  });
+
+  const commitDetails: GitVcsDriver.GitVcsDriver["Service"]["commitDetails"] = Effect.fn(
+    "commitDetails",
+  )(function* ({ cwd, sha }) {
+    const header = yield* runGitStdout("GitVcsDriver.commitDetails.header", cwd, [
+      "show",
+      "--no-patch",
+      `--format=${COMMIT_DETAILS_FORMAT}`,
+      sha,
+      "--",
+    ]);
+    const [
+      fullSha = sha,
+      parentsField = "",
+      authorName = "",
+      authorEmail = "",
+      authoredAt = "",
+      committerName = "",
+      committedAt = "",
+      subject = "",
+      body = "",
+    ] = header.split("\0");
+    const parents = parentsField.split(" ").filter((parent) => parent.length > 0);
+    // Against the first parent so a merge shows what it brought into the branch.
+    const base = parents[0] ?? EMPTY_TREE_SHA;
+    const [numstat, patch] = yield* Effect.all(
+      [
+        runGitStdout("GitVcsDriver.commitDetails.numstat", cwd, [
+          "diff",
+          "--numstat",
+          "-z",
+          "-M",
+          base,
+          fullSha,
+          "--",
+        ]),
+        executeGit(
+          "GitVcsDriver.commitDetails.patch",
+          cwd,
+          ["diff", "--no-color", "--no-ext-diff", "-M", base, fullSha, "--"],
+          { maxOutputBytes: COMMIT_DETAILS_PATCH_MAX_BYTES, appendTruncationMarker: true },
+        ),
+      ],
+      { concurrency: "unbounded" },
+    );
+    return {
+      sha: fullSha,
+      parents,
+      authorName,
+      authorEmail,
+      authoredAt,
+      committerName,
+      committedAt,
+      subject,
+      body: body.trim(),
+      files: parseReviewNumstat(numstat),
+      diff: patch.stdoutTruncated ? dropPartialFilePatch(patch.stdout) : patch.stdout,
+      truncated: patch.stdoutTruncated,
+    };
+  });
+
   const initRepo: GitVcsDriver.GitVcsDriver["Service"]["initRepo"] = (input) =>
     executeGit("GitVcsDriver.initRepo", input.cwd, ["init"], {
       timeoutMs: 10_000,
@@ -3961,6 +4142,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     switchRef: (input) => withListRefsInvalidation(input.cwd, switchRef(input)),
     mergeInto: (input) => withListRefsInvalidation(input.cwd, mergeInto(input)),
     syncWith: (input) => withListRefsInvalidation(input.cwd, syncWith(input)),
+    log,
+    commitDetails,
     initRepo: initRepoWithListRefsInvalidation,
     listLocalBranchNames,
   });

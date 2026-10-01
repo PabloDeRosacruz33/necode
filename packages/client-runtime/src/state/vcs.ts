@@ -17,6 +17,7 @@ import { Atom, AtomRegistry } from "effect/unstable/reactivity";
 
 import {
   createEnvironmentRpcCommand,
+  createEnvironmentRpcQueryAtomFamily,
   createEnvironmentRpcSubscriptionAtomFamily,
   createEnvironmentSubscriptionAtomFamily,
 } from "./runtime.ts";
@@ -280,6 +281,22 @@ export function createVcsEnvironmentAtoms<R, E>(
 
   return {
     listRefs,
+    // Refetched whenever this client changes refs (switch, merge, pull...); the Git panel also
+    // refreshes it when the live status shows someone else moved the branch.
+    log: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:vcs:log",
+      tag: WS_METHODS.vcsLog,
+      staleTimeMs: 5_000,
+      idleTtlMs: VCS_REFS_IDLE_TTL_MS,
+      refreshTrigger: ({ environmentId }) => vcsRefsCacheStateAtom({ environmentId }),
+    }),
+    commitDetails: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:vcs:commit-details",
+      tag: WS_METHODS.vcsCommitDetails,
+      // A commit never changes, so its details stay valid as long as anyone looks at them.
+      staleTimeMs: 60 * 60_000,
+      idleTtlMs: VCS_REFS_IDLE_TTL_MS,
+    }),
     status: createEnvironmentSubscriptionAtomFamily(runtime, {
       label: "environment-data:vcs:status",
       idleTtlMs: VCS_STATUS_IDLE_TTL_MS,

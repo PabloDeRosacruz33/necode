@@ -222,6 +222,85 @@ export const VcsSyncWithResult = Schema.Struct({
 });
 export type VcsSyncWithResult = typeof VcsSyncWithResult.Type;
 
+export const VCS_LOG_MAX_LIMIT = 2000;
+
+/** Newest-first history of every branch, remote branch and tag, for the Git panel's graph. */
+export const VcsLogInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  limit: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(VCS_LOG_MAX_LIMIT))),
+});
+export type VcsLogInput = typeof VcsLogInput.Type;
+
+export const VcsLogCommit = Schema.Struct({
+  sha: TrimmedNonEmptyStringSchema,
+  parents: Schema.Array(TrimmedNonEmptyStringSchema),
+  authorName: Schema.String,
+  authorEmail: Schema.String,
+  /** ISO 8601. */
+  authoredAt: Schema.String,
+  subject: Schema.String,
+});
+export type VcsLogCommit = typeof VcsLogCommit.Type;
+
+export const VcsLogRef = Schema.Struct({
+  /** Short name: `staging`, `origin/staging`, `v1.2.0`. */
+  name: TrimmedNonEmptyStringSchema,
+  kind: Schema.Literals(["local", "remote", "tag"]),
+  sha: TrimmedNonEmptyStringSchema,
+  current: Schema.Boolean,
+  /** Local branches only: the remote branch it tracks, if any. */
+  upstream: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  ahead: NonNegativeInt,
+  behind: NonNegativeInt,
+});
+export type VcsLogRef = typeof VcsLogRef.Type;
+
+export const VcsLogResult = Schema.Struct({
+  /** Topological order, newest first: a commit always comes before its parents. */
+  commits: Schema.Array(VcsLogCommit),
+  refs: Schema.Array(VcsLogRef),
+  headSha: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  currentBranch: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  /** Older commits exist beyond `limit`. */
+  hasMore: Schema.Boolean,
+  /** Files with uncommitted changes in the working tree. */
+  uncommittedFiles: NonNegativeInt,
+  stashes: NonNegativeInt,
+});
+export type VcsLogResult = typeof VcsLogResult.Type;
+
+export const VcsCommitDetailsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  sha: TrimmedNonEmptyStringSchema,
+});
+export type VcsCommitDetailsInput = typeof VcsCommitDetailsInput.Type;
+
+export const VcsCommitFile = Schema.Struct({
+  path: Schema.String,
+  previousPath: Schema.NullOr(Schema.String),
+  additions: NonNegativeInt,
+  deletions: NonNegativeInt,
+});
+export type VcsCommitFile = typeof VcsCommitFile.Type;
+
+export const VcsCommitDetailsResult = Schema.Struct({
+  sha: TrimmedNonEmptyStringSchema,
+  parents: Schema.Array(TrimmedNonEmptyStringSchema),
+  authorName: Schema.String,
+  authorEmail: Schema.String,
+  authoredAt: Schema.String,
+  committerName: Schema.String,
+  committedAt: Schema.String,
+  subject: Schema.String,
+  body: Schema.String,
+  /** Changes against the first parent; a merge shows what it brought in. */
+  files: Schema.Array(VcsCommitFile),
+  diff: Schema.String,
+  /** The patch was cut short; `files` is still complete. */
+  truncated: Schema.Boolean,
+});
+export type VcsCommitDetailsResult = typeof VcsCommitDetailsResult.Type;
+
 export const VcsInitInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   kind: Schema.optional(VcsDriverKind),

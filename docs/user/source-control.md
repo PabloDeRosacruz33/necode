@@ -108,6 +108,14 @@ them. If uncommitted edits would be overwritten, choose **Stash and switch**: th
 for that branch and come back when you switch to it again. To keep several branches open at once,
 start the thread in a new worktree instead.
 
+## Git history
+
+Open **Git** from the right panel (shortcut `G`) to see the project's history as a branch graph:
+every local branch, remote branch and tag, who made each commit, and how the checked-out branch
+stands against its remote (commits to push or pull, uncommitted files, stashes). Select a commit to
+read its message and changes. **Fetch**, **Pull** and **Push** sit in the panel's header. The graph
+refreshes when an agent commits or the background fetch brings in a teammate's work.
+
 ## Create a pull request
 
 Use a thread's Git actions to commit, push, and create a pull request. Necode can generate commit
