@@ -17,6 +17,15 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 export const GROQ_API_KEY_SECRET = "groq-api-key";
 const GROQ_TRANSCRIPTIONS_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
 const GROQ_TRANSCRIPTION_MODEL = "whisper-large-v3-turbo";
+/**
+ * The team dictates in Spanish. Left to detect the language itself, Whisper misreads short
+ * voice notes as English and returns nonsense, so Spanish is the default unless a client
+ * names another language.
+ */
+const DEFAULT_TRANSCRIPTION_LANGUAGE = "es";
+/** Whisper spells names it has seen in the prompt; this keeps product and team names intact. */
+const TRANSCRIPTION_PROMPT =
+  "Nota de voz en español para Necode. Necora, Roi, Pablo, staging, merge, commit, rama, push, pull request, Vercel, Supabase.";
 
 const EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
   "audio/m4a": "m4a",
@@ -80,7 +89,9 @@ export const make = Effect.gen(function* () {
       form.append("model", GROQ_TRANSCRIPTION_MODEL);
       form.append("response_format", "json");
       form.append("temperature", "0");
-      if (input.language) form.append("language", input.language);
+      const language = input.language ?? DEFAULT_TRANSCRIPTION_LANGUAGE;
+      form.append("language", language);
+      if (language === DEFAULT_TRANSCRIPTION_LANGUAGE) form.append("prompt", TRANSCRIPTION_PROMPT);
 
       const response = yield* HttpClientRequest.post(GROQ_TRANSCRIPTIONS_URL).pipe(
         HttpClientRequest.bearerToken(apiKey),

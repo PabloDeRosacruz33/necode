@@ -91,6 +91,22 @@ it.effect("sends the recording to Groq Whisper with the stored key", () => {
   }).pipe(Effect.provide(makeLayer(captured)));
 });
 
+it.effect("dictates in Spanish unless the client names another language", () => {
+  const captured: Array<CapturedRequest> = [];
+  return Effect.gen(function* () {
+    const secrets = yield* ServerSecretStore.ServerSecretStore;
+    yield* secrets.set(VoiceTranscription.GROQ_API_KEY_SECRET, new TextEncoder().encode("gsk"));
+    const voice = yield* VoiceTranscription.VoiceTranscription;
+    yield* voice.transcribe(input);
+    yield* voice.transcribe({ ...input, language: "en" });
+
+    expect(captured[0]?.fields).toMatchObject({ language: "es" });
+    expect(captured[0]?.fields.prompt).toContain("Necode");
+    expect(captured[1]?.fields).toMatchObject({ language: "en" });
+    expect(captured[1]?.fields.prompt).toBeUndefined();
+  }).pipe(Effect.provide(makeLayer(captured)));
+});
+
 it.effect("surfaces provider failures", () => {
   const captured: Array<CapturedRequest> = [];
   return Effect.gen(function* () {

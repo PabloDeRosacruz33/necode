@@ -25,8 +25,8 @@ const isVoiceTranscribeError = Schema.is(VoiceTranscribeError);
 
 /**
  * Transcribes on the environment (Groq Whisper on the host) and falls back to
- * the on-device transcriber when the host has no speech-to-text key. The
- * language is detected from the audio, so Spanish works on an English phone.
+ * the on-device transcriber when the host has no speech-to-text key. The host
+ * transcribes Spanish by default, whatever language the phone is set to.
  */
 export function createEnvironmentVoiceTranscriber(
   environmentId: EnvironmentId,
