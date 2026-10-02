@@ -324,12 +324,18 @@ export function shouldIncludeBranchPickerItem(input: {
   );
 }
 
-/** The branch finished work merges into: `staging` when the repo has one, else its default branch. */
+/** The branch work merges into when nothing is configured and the repository has it. */
 export const INTEGRATION_BRANCH_NAME = "staging";
 
+/**
+ * The branch tasks start from and merge into: the one configured (t3.json, then the project
+ * setting), else `staging` when the repository has it, else its default branch.
+ */
 export function resolveIntegrationBranch(
   refs: ReadonlyArray<Pick<VcsRef, "name" | "isRemote" | "isDefault">>,
+  configured?: string | null,
 ): string | null {
+  if (configured?.trim()) return configured.trim();
   const hasStaging = refs.some((ref) =>
     ref.isRemote
       ? deriveLocalBranchNameFromRemoteRef(ref.name) === INTEGRATION_BRANCH_NAME

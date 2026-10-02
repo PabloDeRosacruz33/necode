@@ -13,6 +13,13 @@ import {
   type VcsSyncWithResult,
   type VcsLogInput,
   type VcsLogResult,
+  type VcsMergeTaskPrepareInput,
+  type VcsMergeTaskPrepareResult,
+  type VcsMergeTaskPublishInput,
+  type VcsMergeTaskPublishResult,
+  type VcsMergeAbortInput,
+  type VcsCloseTaskInput,
+  type VcsCloseTaskResult,
   type VcsCommitDetailsInput,
   type VcsCommitDetailsResult,
   type VcsCreateRefInput,
@@ -120,6 +127,16 @@ export class GitWorkflowService extends Context.Service<
       input: VcsSyncWithInput,
     ) => Effect.Effect<VcsSyncWithResult, GitCommandError>;
     readonly log: (input: VcsLogInput) => Effect.Effect<VcsLogResult, GitCommandError>;
+    readonly mergeTaskPrepare: (
+      input: VcsMergeTaskPrepareInput,
+    ) => Effect.Effect<VcsMergeTaskPrepareResult, GitCommandError>;
+    readonly mergeTaskPublish: (
+      input: VcsMergeTaskPublishInput,
+    ) => Effect.Effect<VcsMergeTaskPublishResult, GitCommandError>;
+    readonly mergeAbort: (input: VcsMergeAbortInput) => Effect.Effect<void, GitCommandError>;
+    readonly closeTask: (
+      input: VcsCloseTaskInput,
+    ) => Effect.Effect<VcsCloseTaskResult, GitCommandError>;
     readonly commitDetails: (
       input: VcsCommitDetailsInput,
     ) => Effect.Effect<VcsCommitDetailsResult, GitCommandError>;
@@ -404,6 +421,22 @@ export const make = Effect.gen(function* () {
       ),
     log: (input) =>
       ensureGitCommand("GitWorkflowService.log", input.cwd).pipe(Effect.andThen(git.log(input))),
+    mergeTaskPrepare: (input) =>
+      ensureGitCommand("GitWorkflowService.mergeTaskPrepare", input.cwd).pipe(
+        Effect.andThen(git.mergeTaskPrepare(input)),
+      ),
+    mergeTaskPublish: (input) =>
+      ensureGitCommand("GitWorkflowService.mergeTaskPublish", input.cwd).pipe(
+        Effect.andThen(git.mergeTaskPublish(input)),
+      ),
+    mergeAbort: (input) =>
+      ensureGitCommand("GitWorkflowService.mergeAbort", input.cwd).pipe(
+        Effect.andThen(git.mergeAbort(input)),
+      ),
+    closeTask: (input) =>
+      ensureGitCommand("GitWorkflowService.closeTask", input.projectCwd).pipe(
+        Effect.andThen(git.closeTask(input)),
+      ),
     commitDetails: (input) =>
       ensureGitCommand("GitWorkflowService.commitDetails", input.cwd).pipe(
         Effect.andThen(git.commitDetails(input)),

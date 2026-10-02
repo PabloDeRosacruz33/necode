@@ -359,7 +359,12 @@ const PullRequestServiceLive = PullRequestService.layer.pipe(
 );
 
 const GitManagerLayerLive = GitManager.layer.pipe(
-  Layer.provideMerge(ProjectSetupScriptRunner.layer.pipe(Layer.provide(ServerSettingsLayerLive))),
+  Layer.provideMerge(
+    ProjectSetupScriptRunner.layer.pipe(
+      Layer.provide(ServerSettingsLayerLive),
+      Layer.provide(T3ProjectFileLoader.layer),
+    ),
+  ),
   Layer.provideMerge(WorktreeSetupTracker.layer),
   Layer.provideMerge(GitVcsDriver.layer),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),

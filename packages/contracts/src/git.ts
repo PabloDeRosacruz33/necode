@@ -222,6 +222,88 @@ export const VcsSyncWithResult = Schema.Struct({
 });
 export type VcsSyncWithResult = typeof VcsSyncWithResult.Type;
 
+/**
+ * Merging a task worktree into the integration branch without checking that branch out
+ * anywhere: prepare (bring the integration branch into the worktree), check (the project's
+ * pre-merge script), publish (build the merge commit in memory and push it).
+ */
+export const VcsMergeTaskPrepareInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  targetRef: TrimmedNonEmptyStringSchema,
+});
+export type VcsMergeTaskPrepareInput = typeof VcsMergeTaskPrepareInput.Type;
+
+export const VcsMergeTaskPrepareResult = Schema.Union([
+  /** Uncommitted work blocks the merge. */
+  Schema.TaggedStruct("dirty", { files: Schema.Array(Schema.String) }),
+  /** The integration branch conflicts; the merge is left in progress in the worktree. */
+  Schema.TaggedStruct("conflicted", {
+    mergedRef: TrimmedNonEmptyStringSchema,
+    conflictedFiles: Schema.Array(Schema.String),
+  }),
+  Schema.TaggedStruct("ready", {
+    branch: TrimmedNonEmptyStringSchema,
+    mergedRef: TrimmedNonEmptyStringSchema,
+    /** The commit the pre-merge check runs against and publish must still find. */
+    headSha: TrimmedNonEmptyStringSchema,
+  }),
+]);
+export type VcsMergeTaskPrepareResult = typeof VcsMergeTaskPrepareResult.Type;
+
+export const VcsMergeTaskCheckInput = Schema.Struct({ cwd: TrimmedNonEmptyStringSchema });
+export type VcsMergeTaskCheckInput = typeof VcsMergeTaskCheckInput.Type;
+
+export const VcsMergeTaskCheckEvent = Schema.Union([
+  /** `command` is null when the project declares no pre-merge check. */
+  Schema.TaggedStruct("started", { command: Schema.NullOr(Schema.String) }),
+  Schema.TaggedStruct("output", { text: Schema.String }),
+  Schema.TaggedStruct("finished", { exitCode: Schema.NullOr(Schema.Int) }),
+]);
+export type VcsMergeTaskCheckEvent = typeof VcsMergeTaskCheckEvent.Type;
+
+export const VcsMergeTaskPublishInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  targetRef: TrimmedNonEmptyStringSchema,
+  headSha: TrimmedNonEmptyStringSchema,
+  message: TrimmedNonEmptyStringSchema,
+  /** The task's thread: a successful merge is noted in it with the commit. */
+  threadId: Schema.optional(ThreadId),
+});
+export type VcsMergeTaskPublishInput = typeof VcsMergeTaskPublishInput.Type;
+
+export const VcsMergeTaskPublishResult = Schema.Union([
+  Schema.TaggedStruct("merged", {
+    commit: TrimmedNonEmptyStringSchema,
+    targetRef: TrimmedNonEmptyStringSchema,
+    /** False when the local integration branch is checked out elsewhere or diverged. */
+    localTargetUpdated: Schema.Boolean,
+  }),
+  /** The worktree or the integration branch moved since prepare: prepare and check again. */
+  Schema.TaggedStruct("stale", { reason: Schema.Literals(["head-moved", "target-moved"]) }),
+]);
+export type VcsMergeTaskPublishResult = typeof VcsMergeTaskPublishResult.Type;
+
+export const VcsMergeAbortInput = Schema.Struct({ cwd: TrimmedNonEmptyStringSchema });
+export type VcsMergeAbortInput = typeof VcsMergeAbortInput.Type;
+
+/** Removes a merged task: its worktree, its local branch and, if asked, the remote branch. */
+export const VcsCloseTaskInput = Schema.Struct({
+  projectCwd: TrimmedNonEmptyStringSchema,
+  worktreePath: TrimmedNonEmptyStringSchema,
+  branch: TrimmedNonEmptyStringSchema,
+  /** The branch is deleted only once `origin/<targetRef>` contains it. */
+  targetRef: TrimmedNonEmptyStringSchema,
+  deleteRemote: Schema.Boolean,
+});
+export type VcsCloseTaskInput = typeof VcsCloseTaskInput.Type;
+
+export const VcsCloseTaskResult = Schema.Struct({
+  removedWorktree: Schema.Boolean,
+  deletedBranch: Schema.Boolean,
+  deletedRemote: Schema.Boolean,
+});
+export type VcsCloseTaskResult = typeof VcsCloseTaskResult.Type;
+
 export const VCS_LOG_MAX_LIMIT = 2000;
 
 /** Newest-first history of every branch, remote branch and tag, for the Git panel's graph. */

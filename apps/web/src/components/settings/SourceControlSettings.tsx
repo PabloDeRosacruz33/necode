@@ -22,6 +22,8 @@ import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings"
 import { useSettingsScope } from "./SettingsScopeContext";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { cn } from "../../lib/utils";
+import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
+import { Input } from "../ui/input";
 import { useEnvironmentQuery } from "../../state/query";
 import { sourceControlEnvironment } from "../../state/sourceControl";
 import { Badge } from "../ui/badge";
@@ -63,6 +65,7 @@ import {
   PolicyTooltip,
   SettingResetButton,
   SettingsPageContainer,
+  SettingsRow,
   SettingsSearchTarget,
   SettingsSection,
   useSettingsSearchTargetId,
@@ -618,6 +621,38 @@ export function SourceControlSettingsPanel() {
       )}
 
       <SourceControlWritingSettingsSection />
+      <TaskSettingsSection />
     </SettingsPageContainer>
+  );
+}
+
+/** Per-person settings for "Nueva tarea". */
+function TaskSettingsSection() {
+  const taskBranchPrefix = useClientSettings((settings) => settings.taskBranchPrefix);
+  const updateClientSettings = useUpdateClientSettings();
+  return (
+    <SettingsSection title="Tareas">
+      <SettingsRow
+        title="Prefijo de rama"
+        description="Las tareas crean ramas «<prefijo>/<nombre>». Vacío: tu nombre en Git (por ejemplo «pablo»)."
+        control={
+          <Input
+            key={taskBranchPrefix}
+            size="sm"
+            className="w-full sm:w-40"
+            aria-label="Prefijo de rama de tareas"
+            placeholder="automático"
+            defaultValue={taskBranchPrefix}
+            onBlur={(event) => {
+              const value = event.currentTarget.value.trim().replace(/\/+$/, "");
+              if (value !== taskBranchPrefix) updateClientSettings({ taskBranchPrefix: value });
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+          />
+        }
+      />
+    </SettingsSection>
   );
 }

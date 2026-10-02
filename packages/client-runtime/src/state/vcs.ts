@@ -2,6 +2,7 @@ import {
   type EnvironmentId,
   type VcsListRefsInput,
   type VcsListRefsResult,
+  type VcsMergeTaskCheckEvent,
   type VcsStatusResult,
   WS_METHODS,
 } from "@t3tools/contracts";
@@ -35,6 +36,15 @@ import {
 } from "./vcsRefInvalidation.ts";
 
 const OFFLINE_BRANCH_LIST_LIMIT = 100;
+/** Keep the tail of a long pre-merge check log; the end is where failures are. */
+const MERGE_CHECK_LOG_LIMIT = 200_000;
+
+export interface MergeTaskCheckState {
+  readonly command: string | null;
+  readonly output: string;
+  readonly exitCode: number | null;
+  readonly done: boolean;
+}
 const VCS_REFS_IDLE_TTL_MS = 30_000;
 // Rows keep the last status they rendered, so the live stream only needs a
 // short grace period when virtualization or scrolling releases its consumer.
@@ -296,6 +306,60 @@ export function createVcsEnvironmentAtoms<R, E>(
       // A commit never changes, so its details stay valid as long as anyone looks at them.
       staleTimeMs: 60 * 60_000,
       idleTtlMs: VCS_REFS_IDLE_TTL_MS,
+    }),
+    mergeTaskPrepare: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:merge-task-prepare",
+      tag: WS_METHODS.vcsMergeTaskPrepare,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+      onSettled: invalidateRefs,
+    }),
+    mergeTaskPublish: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:merge-task-publish",
+      tag: WS_METHODS.vcsMergeTaskPublish,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+      onSettled: invalidateRefs,
+    }),
+    mergeAbort: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:merge-abort",
+      tag: WS_METHODS.vcsMergeAbort,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+      onSettled: invalidateRefs,
+    }),
+    closeTask: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:close-task",
+      tag: WS_METHODS.vcsCloseTask,
+      onSettled: (target, registry) =>
+        invalidateCachedVcsRefs(registry, {
+          environmentId: target.environmentId,
+          cwd: target.input.projectCwd,
+        }),
+    }),
+    // One run of the project's pre-merge check, keyed by `runId` so retrying starts it again.
+    // Accumulates the log so the dialog can show it as it arrives.
+    mergeTaskCheck: createEnvironmentSubscriptionAtomFamily(runtime, {
+      label: "environment-data:vcs:merge-task-check",
+      idleTtlMs: VCS_STATUS_IDLE_TTL_MS,
+      subscribe: (input: { readonly cwd: string; readonly runId: string }) =>
+        subscribe(WS_METHODS.vcsMergeTaskCheck, { cwd: input.cwd }).pipe(
+          Stream.mapAccum(
+            (): MergeTaskCheckState => ({ command: null, output: "", exitCode: null, done: false }),
+            (state, event: VcsMergeTaskCheckEvent) => {
+              const next: MergeTaskCheckState =
+                event._tag === "started"
+                  ? { ...state, command: event.command }
+                  : event._tag === "output"
+                    ? {
+                        ...state,
+                        output: (state.output + event.text).slice(-MERGE_CHECK_LOG_LIMIT),
+                      }
+                    : { ...state, exitCode: event.exitCode, done: true };
+              return [next, [next]] as const;
+            },
+          ),
+        ),
     }),
     status: createEnvironmentSubscriptionAtomFamily(runtime, {
       label: "environment-data:vcs:status",

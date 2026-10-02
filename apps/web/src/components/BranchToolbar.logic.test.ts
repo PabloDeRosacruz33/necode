@@ -879,6 +879,13 @@ describe("resolveIntegrationBranch", () => {
     ).toBe("staging");
   });
 
+  it("uses the configured branch before looking at the refs", () => {
+    expect(
+      resolveIntegrationBranch([ref("staging"), ref("main", { isDefault: true })], "main"),
+    ).toBe("main");
+    expect(resolveIntegrationBranch([ref("staging")], "  ")).toBe("staging");
+  });
+
   it("falls back to the default branch", () => {
     expect(
       resolveIntegrationBranch([

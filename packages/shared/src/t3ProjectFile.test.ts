@@ -35,9 +35,13 @@ describe("buildT3ProjectFileJsonSchema", () => {
       "$schema",
       "defaultThreadEnvMode",
       "iconPath",
+      "integrationBranch",
+      "preMergeCheck",
       "scripts",
       "worktreeSubmodules",
     ]);
+    expect(schema.properties.integrationBranch?.description).toContain("merge into");
+    expect(schema.properties.preMergeCheck?.description).toContain("must succeed");
     expect(schema.required).toBeUndefined();
     expect(schema.properties.iconPath?.description).toContain("Workspace-relative path");
     expect(schema.properties.defaultThreadEnvMode?.description).toContain("new threads start");
@@ -51,6 +55,7 @@ describe("buildT3ProjectFileJsonSchema", () => {
       "icon",
       "name",
       "previewUrl",
+      "runBeforeMerge",
       "runOnWorktreeCreate",
     ]);
   });

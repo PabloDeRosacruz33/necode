@@ -84,6 +84,15 @@ import {
   VcsSyncWithResult,
   VcsLogInput,
   VcsLogResult,
+  VcsMergeTaskPrepareInput,
+  VcsMergeTaskPrepareResult,
+  VcsMergeTaskCheckInput,
+  VcsMergeTaskCheckEvent,
+  VcsMergeTaskPublishInput,
+  VcsMergeTaskPublishResult,
+  VcsMergeAbortInput,
+  VcsCloseTaskInput,
+  VcsCloseTaskResult,
   VcsCommitDetailsInput,
   VcsCommitDetailsResult,
   GitCommandError,
@@ -356,6 +365,11 @@ export const WS_METHODS = {
   vcsMergeInto: "vcs.mergeInto",
   vcsSyncWith: "vcs.syncWith",
   vcsLog: "vcs.log",
+  vcsMergeTaskPrepare: "vcs.mergeTask.prepare",
+  vcsMergeTaskCheck: "vcs.mergeTask.check",
+  vcsMergeTaskPublish: "vcs.mergeTask.publish",
+  vcsMergeAbort: "vcs.mergeAbort",
+  vcsCloseTask: "vcs.closeTask",
   vcsCommitDetails: "vcs.commitDetails",
   vcsInit: "vcs.init",
 
@@ -1181,6 +1195,36 @@ const WsVcsSyncWithRpc = Rpc.make(WS_METHODS.vcsSyncWith, {
   error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
 });
 
+const WsVcsMergeTaskPrepareRpc = Rpc.make(WS_METHODS.vcsMergeTaskPrepare, {
+  payload: VcsMergeTaskPrepareInput,
+  success: VcsMergeTaskPrepareResult,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
+const WsVcsMergeTaskCheckRpc = Rpc.make(WS_METHODS.vcsMergeTaskCheck, {
+  payload: VcsMergeTaskCheckInput,
+  success: VcsMergeTaskCheckEvent,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+const WsVcsMergeTaskPublishRpc = Rpc.make(WS_METHODS.vcsMergeTaskPublish, {
+  payload: VcsMergeTaskPublishInput,
+  success: VcsMergeTaskPublishResult,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
+const WsVcsMergeAbortRpc = Rpc.make(WS_METHODS.vcsMergeAbort, {
+  payload: VcsMergeAbortInput,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
+const WsVcsCloseTaskRpc = Rpc.make(WS_METHODS.vcsCloseTask, {
+  payload: VcsCloseTaskInput,
+  success: VcsCloseTaskResult,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
 const WsVcsLogRpc = Rpc.make(WS_METHODS.vcsLog, {
   payload: VcsLogInput,
   success: VcsLogResult,
@@ -1642,6 +1686,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsMergeIntoRpc,
   WsVcsSyncWithRpc,
   WsVcsLogRpc,
+  WsVcsMergeTaskPrepareRpc,
+  WsVcsMergeTaskCheckRpc,
+  WsVcsMergeTaskPublishRpc,
+  WsVcsMergeAbortRpc,
+  WsVcsCloseTaskRpc,
   WsVcsCommitDetailsRpc,
   WsVcsInitRpc,
   WsReviewGetDiffPreviewRpc,

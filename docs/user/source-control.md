@@ -91,22 +91,35 @@ For a local Git repository without a remote, **Publish Repository** creates a ho
 adds it as `origin`, and pushes your commits. If there are no commits yet, it creates the remote;
 make your first commit before pushing.
 
-## Work in branches
+## Work in tasks
 
-The branch menu under the composer handles a branch-per-task flow without pull requests. The shared
-branch is `staging` when the repository has one, otherwise its default branch.
+A task is one branch in its own folder (a git worktree) with its own thread, so several agents can
+work on the same repository at once without seeing each other's files. Tasks start from and merge
+into the project's integration branch: `integrationBranch` in the repository's `t3.json`, else the
+project setting **Rama de integración** in **Settings → Project**, else `staging` when it exists,
+else the remote's default branch.
 
-- **New branch from …** names a branch off the current one and moves the thread onto it.
-- **Update from staging** fetches the latest `staging` and merges it into your branch, keeping
-  uncommitted work. If the changes conflict, nothing changes and **Ask the agent to resolve** puts
-  the merge in the composer for you to send.
-- **Merge into staging** merges your committed branch into `staging`, pushes it, and moves the
-  thread to `staging`. Commit your changes first.
+- **Nueva tarea** (branch menu under the composer) names the task and opens a new thread. The
+  first message creates the branch `<prefix>/<name>` from the latest integration branch on origin,
+  creates its folder under `~/.necode/worktrees/<repo>/<name>` and runs the `runOnWorktreeCreate`
+  script from `t3.json` (waiting for it when `async` is `false`). The prefix is your first name in
+  Git, or the one set in **Settings → Source Control → Tareas**. An empty name is taken from the
+  first message.
+- **Actualizar desde …** fetches the integration branch and merges it into the thread's folder,
+  keeping uncommitted work.
+- **Fusionar en …**, in a task, merges without checking the integration branch out anywhere: it
+  brings the integration branch into the task's folder, runs the project's pre-merge check
+  (`preMergeCheck` in `t3.json`, or the script marked `runBeforeMerge`) with its log live, then
+  builds the merge commit and pushes it. If a teammate merged in between, it starts over by itself.
+  Uncommitted work, conflicts (left in the task's folder for its agent) and a failed check stop the
+  merge with a way forward. Afterwards, **Cerrar tarea** deletes the task's folder and its branch,
+  locally and on the remote; the thread stays as history.
 
-Threads in the same project folder share one checkout, so switching branches changes it for all of
-them. If uncommitted edits would be overwritten, choose **Stash and switch**: the edits are saved
-for that branch and come back when you switch to it again. To keep several branches open at once,
-start the thread in a new worktree instead.
+Threads without their own folder share the project's checkout, so switching branches there
+changes it for all of them; Necode warns before it does. If uncommitted edits would be overwritten,
+choose **Stash and switch**: the edits are saved for that branch and come back when you switch to
+it again. In that shared checkout, **Fusionar en …** checks the integration branch out, merges and
+pushes, so commit first.
 
 ## Git history
 

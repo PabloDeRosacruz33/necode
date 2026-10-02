@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "@effect/vitest";
-import { type OrchestrationProject, ProjectId, type TerminalEvent } from "@t3tools/contracts";
+import {
+  type OrchestrationProject,
+  ProjectId,
+  type T3ProjectFile,
+  type TerminalEvent,
+} from "@t3tools/contracts";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -10,6 +15,7 @@ import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSn
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as ProjectSetupScriptRunner from "./ProjectSetupScriptRunner.ts";
+import * as T3ProjectFileLoader from "./T3ProjectFileLoader.ts";
 
 const isProjectSetupScriptOperationError = Schema.is(
   ProjectSetupScriptRunner.ProjectSetupScriptOperationError,
@@ -74,15 +80,22 @@ const makeTerminalManagerLayer = (overrides: TerminalOverrides) =>
     ...overrides,
   });
 
+const projectFileLayer = (file: T3ProjectFile | null = null) =>
+  Layer.succeed(T3ProjectFileLoader.T3ProjectFileLoader, {
+    load: () => Effect.succeed(Option.fromNullishOr(file)),
+  });
+
 const testLayer = (
   project: OrchestrationProject,
   terminal: TerminalOverrides,
   settings = ServerSettings.layerTest(),
+  projectFile: T3ProjectFile | null = null,
 ) =>
   ProjectSetupScriptRunner.layer.pipe(
     Layer.provideMerge(makeProjectionSnapshotQueryLayer(project)),
     Layer.provideMerge(makeTerminalManagerLayer(terminal)),
     Layer.provide(settings),
+    Layer.provide(projectFileLayer(projectFile)),
   );
 
 describe("ProjectSetupScriptRunner", () => {
@@ -145,6 +158,57 @@ describe("ProjectSetupScriptRunner", () => {
             ],
           }),
         ),
+      ),
+    );
+  });
+
+  it.effect("runs the repository's t3.json setup script when none was imported", () => {
+    const open = vi.fn(() =>
+      Effect.succeed({
+        threadId: "thread-1",
+        terminalId: "setup-t3-json-setup",
+        cwd: "/repo/worktrees/a",
+        worktreePath: "/repo/worktrees/a",
+        status: "running" as const,
+        pid: 123,
+        history: "",
+        exitCode: null,
+        exitSignal: null,
+        label: "setup-t3-json-setup",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    const write = vi.fn(() => Effect.void);
+    return Effect.gen(function* () {
+      const runner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+      const result = yield* runner.runForThread({
+        threadId: "thread-1",
+        projectId: "project-1",
+        worktreePath: "/repo/worktrees/a",
+      });
+      expect(result).toMatchObject({
+        status: "started",
+        scriptName: "Preparar worktree",
+        async: false,
+      });
+      expect(write).toHaveBeenCalledWith({
+        threadId: "thread-1",
+        terminalId: "setup-t3-json-setup",
+        data: "npm run worktree:setup\r",
+      });
+    }).pipe(
+      Effect.provide(
+        testLayer(makeProject([]), { open, write }, ServerSettings.layerTest(), {
+          scripts: [
+            { name: "Abrir app", command: "npm run app" },
+            {
+              name: "Preparar worktree",
+              command: "npm run worktree:setup",
+              runOnWorktreeCreate: true,
+              async: false,
+            },
+          ],
+        }),
       ),
     );
   });

@@ -49,6 +49,12 @@ export const T3ProjectFileScript = Schema.Struct({
         "Only for runOnWorktreeCreate scripts. When true (the default), the agent starts while the script is still running. Set false to hold the agent until the script exits.",
     }),
   ),
+  runBeforeMerge: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description:
+        "When true, this script is the check that must pass before a task merges into the integration branch. Ignored when `preMergeCheck` is set.",
+    }),
+  ),
   previewUrl: Schema.optionalKey(
     trimmedNonEmpty({
       description:
@@ -93,6 +99,18 @@ export const T3ProjectFile = Schema.Struct({
         'How new worktrees populate git submodules: "recursive" (the default) initializes nested submodules too, "top-level" initializes only those declared by this repository, and "none" leaves every submodule empty for a setup script to handle. A project or environment setting in Necode overrides this.',
     }),
   ),
+  integrationBranch: Schema.optionalKey(
+    trimmedNonEmpty({
+      description:
+        'Branch that tasks start from and merge into, e.g. "staging". Defaults to "staging" when it exists, otherwise the remote\'s default branch. A per-project setting in Necode overrides this.',
+    }),
+  ),
+  preMergeCheck: Schema.optionalKey(
+    trimmedNonEmpty({
+      description:
+        'Shell command that must succeed before a task merges into the integration branch, run in the task\'s folder (e.g. "npm run verify").',
+    }),
+  ),
   scripts: Schema.optionalKey(
     Schema.Array(T3ProjectFileScript)
       .annotate({
@@ -106,6 +124,13 @@ export const T3ProjectFile = Schema.Struct({
     "Checked-in project configuration for Necode (t3.json at the repository root). See https://t3.codes for documentation.",
 });
 export type T3ProjectFile = typeof T3ProjectFile.Type;
+
+/** The command a task must pass before merging: `preMergeCheck`, else the `runBeforeMerge` script. */
+export function resolvePreMergeCheck(file: T3ProjectFile | null | undefined): string | null {
+  return (
+    file?.preMergeCheck ?? file?.scripts?.find((script) => script.runBeforeMerge)?.command ?? null
+  );
+}
 
 /**
  * Settings a repository can also declare in t3.json. A key here must be

@@ -2440,6 +2440,135 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    const withTasks = Effect.gen(function* () {
+      const { cwd, remote, base } = yield* withRemote;
+      yield* git(cwd, ["checkout", "-b", "staging"]);
+      yield* git(cwd, ["push", "-u", "origin", "staging"]);
+      const task = (name: string) =>
+        Effect.gen(function* () {
+          // A subfolder, so closing the task can delete it without the temp dir going missing.
+          const path = `${yield* makeTmpDir(`task-${name}-`)}/worktree`;
+          yield* git(cwd, ["worktree", "add", "-b", `pablo/${name}`, path, "origin/staging"]);
+          yield* git(path, ["config", "user.email", "test@test.com"]);
+          yield* git(path, ["config", "user.name", "Test"]);
+          return path;
+        });
+      return { project: cwd, remote, base, a: yield* task("a"), b: yield* task("b") };
+    });
+
+    const mergeTask = (cwd: string, message: string) =>
+      Effect.gen(function* () {
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const prepared = yield* driver.mergeTaskPrepare({ cwd, targetRef: "staging" });
+        if (prepared._tag !== "ready") return prepared;
+        return yield* driver.mergeTaskPublish({
+          cwd,
+          targetRef: "staging",
+          headSha: prepared.headSha,
+          message,
+        });
+      });
+
+    it.effect("merges two tasks one after another without touching the main folder", () =>
+      Effect.gen(function* () {
+        const { project, remote, a, b } = yield* withTasks;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* commitFile(a, "a.ts", "export const a = 1;\n");
+        yield* commitFile(b, "b.ts", "export const b = 1;\n");
+        const projectHead = yield* git(project, ["rev-parse", "HEAD"]);
+        const preparedB = yield* driver.mergeTaskPrepare({ cwd: b, targetRef: "staging" });
+        assert.equal(preparedB._tag, "ready");
+
+        const mergedA = yield* mergeTask(a, "merge: pablo/a into staging");
+        assert.equal(mergedA._tag, "merged");
+        // B checked an older staging; publishing now must not overwrite A.
+        const staleB = yield* driver.mergeTaskPublish({
+          cwd: b,
+          targetRef: "staging",
+          headSha: preparedB._tag === "ready" ? preparedB.headSha : "",
+          message: "merge: pablo/b into staging",
+        });
+        assert.deepStrictEqual(staleB, { _tag: "stale", reason: "target-moved" });
+        const mergedB = yield* mergeTask(b, "merge: pablo/b into staging");
+        assert.equal(mergedB._tag, "merged");
+
+        const files = yield* git(remote, ["ls-tree", "--name-only", "staging"]);
+        assert.include(files, "a.ts");
+        assert.include(files, "b.ts");
+        const parents = yield* git(remote, ["log", "-1", "--format=%P", "staging"]);
+        assert.equal(parents.split(" ").length, 2);
+        assert.equal(
+          yield* git(remote, ["log", "-1", "--format=%s", "staging"]),
+          "merge: pablo/b into staging",
+        );
+        assert.equal(yield* git(project, ["rev-parse", "HEAD"]), projectHead);
+        assert.equal(yield* git(project, ["status", "--porcelain"]), "");
+      }),
+    );
+
+    it.effect("stops a task that edits the same line in its own worktree", () =>
+      Effect.gen(function* () {
+        const { project, a, b } = yield* withTasks;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* commitFile(a, "README.md", "from a\n");
+        yield* commitFile(b, "README.md", "from b\n");
+        const projectHead = yield* git(project, ["rev-parse", "HEAD"]);
+
+        assert.equal((yield* mergeTask(a, "merge: pablo/a into staging"))._tag, "merged");
+        const conflicted = yield* driver.mergeTaskPrepare({ cwd: b, targetRef: "staging" });
+
+        assert.deepStrictEqual(conflicted, {
+          _tag: "conflicted",
+          mergedRef: "origin/staging",
+          conflictedFiles: ["README.md"],
+        });
+        assert.include(yield* git(b, ["status", "--porcelain"]), "UU README.md");
+        assert.equal(yield* git(project, ["rev-parse", "HEAD"]), projectHead);
+        assert.equal(yield* git(project, ["status", "--porcelain"]), "");
+
+        yield* driver.mergeAbort({ cwd: b });
+        assert.equal(yield* git(b, ["status", "--porcelain"]), "");
+      }),
+    );
+
+    it.effect("asks for a commit before merging a task with uncommitted work", () =>
+      Effect.gen(function* () {
+        const { a } = yield* withTasks;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* writeTextFile(a, "draft.ts", "wip\n");
+
+        const result = yield* driver.mergeTaskPrepare({ cwd: a, targetRef: "staging" });
+
+        assert.deepStrictEqual(result, { _tag: "dirty", files: ["draft.ts"] });
+      }),
+    );
+
+    it.effect("closes a merged task: worktree, local branch and remote branch", () =>
+      Effect.gen(function* () {
+        const { project, remote, a } = yield* withTasks;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* commitFile(a, "a.ts", "export const a = 1;\n");
+        yield* git(a, ["push", "-u", "origin", "pablo/a"]);
+        assert.equal((yield* mergeTask(a, "merge: pablo/a into staging"))._tag, "merged");
+
+        const closed = yield* driver.closeTask({
+          projectCwd: project,
+          worktreePath: a,
+          branch: "pablo/a",
+          targetRef: "staging",
+          deleteRemote: true,
+        });
+
+        assert.deepStrictEqual(closed, {
+          removedWorktree: true,
+          deletedBranch: true,
+          deletedRemote: true,
+        });
+        assert.notInclude(yield* git(project, ["branch", "--list"]), "pablo/a");
+        assert.notInclude(yield* git(remote, ["branch", "--list"]), "pablo/a");
+      }),
+    );
+
     it.effect("refuses to merge uncommitted work", () =>
       Effect.gen(function* () {
         const { cwd, base } = yield* withRemote;

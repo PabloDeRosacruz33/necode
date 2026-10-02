@@ -28,8 +28,11 @@ import {
   type ReviewDiffPreviewSource,
   type VcsLogCommit,
   type VcsLogRef,
+  type VcsMergeTaskPrepareResult,
+  type VcsMergeTaskPublishResult,
   type VcsRef,
 } from "@t3tools/contracts";
+import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import { dedupeRemoteBranchesWithLocalMatches, normalizeGitRemoteUrl } from "@t3tools/shared/git";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { compactTraceAttributes } from "@t3tools/shared/observability";
@@ -3939,6 +3942,220 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     },
   );
 
+  const mergeTaskPrepare: GitVcsDriver.GitVcsDriver["Service"]["mergeTaskPrepare"] = Effect.fn(
+    "mergeTaskPrepare",
+  )(function* ({ cwd, targetRef }) {
+    const args = ["merge", "--no-edit"];
+    const fail = (detail: string) =>
+      new GitCommandError({
+        ...gitCommandContext({ operation: "GitVcsDriver.mergeTaskPrepare", cwd, args }),
+        detail,
+      });
+    const details = yield* readStatusDetailsLocal(cwd);
+    const branch = details.branch;
+    if (!branch) return yield* fail("Switch to the task's branch before merging.");
+    if (branch === targetRef) return yield* fail(`This folder is on ${targetRef} itself.`);
+    if (details.hasWorkingTreeChanges) {
+      const status = yield* runGitStdout("GitVcsDriver.mergeTaskPrepare.status", cwd, [
+        "status",
+        "--porcelain",
+      ]);
+      return {
+        _tag: "dirty",
+        files: status
+          .split("\n")
+          .map((line) => line.slice(3).trim())
+          .filter((file) => file.length > 0),
+      } satisfies VcsMergeTaskPrepareResult;
+    }
+    const mergedRef = `origin/${targetRef}`;
+    yield* fetchRemoteRef("GitVcsDriver.mergeTaskPrepare.fetch", cwd, mergedRef);
+    if (
+      !(yield* refExists("GitVcsDriver.mergeTaskPrepare.target", cwd, `refs/remotes/${mergedRef}`))
+    ) {
+      return yield* fail(`There is no ${mergedRef} to merge into.`);
+    }
+    const merge = yield* executeGitWithStableDiagnostics(
+      "GitVcsDriver.mergeTaskPrepare.merge",
+      cwd,
+      [...args, mergedRef],
+      { timeoutMs: 60_000, allowNonZeroExit: true },
+    );
+    if (merge.exitCode !== 0) {
+      const conflictedFiles = yield* listConflictedFiles(
+        "GitVcsDriver.mergeTaskPrepare.conflicts",
+        cwd,
+      );
+      if (conflictedFiles.length === 0) {
+        return yield* fail(merge.stderr.trim() || merge.stdout.trim() || "git merge failed");
+      }
+      // The worktree belongs to this task alone, so the merge stays open for its agent.
+      return { _tag: "conflicted", mergedRef, conflictedFiles } satisfies VcsMergeTaskPrepareResult;
+    }
+    const headSha = (yield* runGitStdout("GitVcsDriver.mergeTaskPrepare.head", cwd, [
+      "rev-parse",
+      "HEAD",
+    ])).trim();
+    return { _tag: "ready", branch, mergedRef, headSha } satisfies VcsMergeTaskPrepareResult;
+  });
+
+  const mergeTaskPublish: GitVcsDriver.GitVcsDriver["Service"]["mergeTaskPublish"] = Effect.fn(
+    "mergeTaskPublish",
+  )(function* ({ cwd, targetRef, headSha, message }) {
+    const fail = (detail: string) =>
+      new GitCommandError({
+        ...gitCommandContext({ operation: "GitVcsDriver.mergeTaskPublish", cwd, args: [] }),
+        detail,
+      });
+    const version = (yield* runGitStdout("GitVcsDriver.mergeTaskPublish.version", cwd, [
+      "--version",
+    ])).match(/(\d+)\.(\d+)/);
+    if (
+      !version ||
+      Number(version[1]) < 2 ||
+      (Number(version[1]) === 2 && Number(version[2]) < 38)
+    ) {
+      return yield* fail("Merging without a checkout needs Git 2.38 or newer. Update Git.");
+    }
+    const commonDir = (yield* runGitStdout("GitVcsDriver.mergeTaskPublish.commonDir", cwd, [
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ])).trim();
+    // One publish per repository at a time on this machine; two tasks pushing the integration
+    // branch together would only race each other into a rejected push.
+    return yield* withWorkspaceLease(
+      `${commonDir}#integration`,
+      Effect.gen(function* () {
+        const head = (yield* runGitStdout("GitVcsDriver.mergeTaskPublish.head", cwd, [
+          "rev-parse",
+          "HEAD",
+        ])).trim();
+        if (head !== headSha) {
+          return { _tag: "stale", reason: "head-moved" } satisfies VcsMergeTaskPublishResult;
+        }
+        const mergedRef = `origin/${targetRef}`;
+        yield* fetchRemoteRef("GitVcsDriver.mergeTaskPublish.fetch", cwd, mergedRef);
+        const containsTarget = yield* executeGit(
+          "GitVcsDriver.mergeTaskPublish.containsTarget",
+          cwd,
+          ["merge-base", "--is-ancestor", mergedRef, headSha],
+          { allowNonZeroExit: true },
+        ).pipe(Effect.map((result) => result.exitCode === 0));
+        if (!containsTarget) {
+          return { _tag: "stale", reason: "target-moved" } satisfies VcsMergeTaskPublishResult;
+        }
+        const tree = yield* executeGitWithStableDiagnostics(
+          "GitVcsDriver.mergeTaskPublish.mergeTree",
+          cwd,
+          ["merge-tree", "--write-tree", mergedRef, headSha],
+          { allowNonZeroExit: true },
+        );
+        if (tree.exitCode !== 0) {
+          return { _tag: "stale", reason: "target-moved" } satisfies VcsMergeTaskPublishResult;
+        }
+        const commit = (yield* runGitStdout("GitVcsDriver.mergeTaskPublish.commitTree", cwd, [
+          "commit-tree",
+          tree.stdout.split("\n")[0]!.trim(),
+          "-p",
+          mergedRef,
+          "-p",
+          headSha,
+          "-m",
+          message,
+        ])).trim();
+        const push = yield* executeGitWithStableDiagnostics(
+          "GitVcsDriver.mergeTaskPublish.push",
+          cwd,
+          ["push", "--porcelain", "origin", `${commit}:refs/heads/${targetRef}`],
+          { timeoutMs: null, allowNonZeroExit: true },
+        );
+        if (push.exitCode !== 0) {
+          if (/rejected|non-fast-forward|fetch first/i.test(`${push.stdout}\n${push.stderr}`)) {
+            return { _tag: "stale", reason: "target-moved" } satisfies VcsMergeTaskPublishResult;
+          }
+          return yield* fail(push.stderr.trim() || "git push failed");
+        }
+        yield* fetchRemoteRef("GitVcsDriver.mergeTaskPublish.refresh", cwd, mergedRef);
+        // Fast-forward only, and refused by Git when the branch is checked out in a folder.
+        const localTargetUpdated =
+          (yield* refExists(
+            "GitVcsDriver.mergeTaskPublish.localTarget",
+            cwd,
+            `refs/heads/${targetRef}`,
+          )) &&
+          (yield* executeGit(
+            "GitVcsDriver.mergeTaskPublish.updateLocalTarget",
+            cwd,
+            ["fetch", "--quiet", ".", `refs/remotes/${mergedRef}:refs/heads/${targetRef}`],
+            { timeoutMs: 10_000, allowNonZeroExit: true },
+          ).pipe(Effect.map((result) => result.exitCode === 0)));
+        return {
+          _tag: "merged",
+          commit,
+          targetRef,
+          localTargetUpdated,
+        } satisfies VcsMergeTaskPublishResult;
+      }),
+    );
+  });
+
+  const mergeAbort: GitVcsDriver.GitVcsDriver["Service"]["mergeAbort"] = ({ cwd }) =>
+    executeGit("GitVcsDriver.mergeAbort", cwd, ["merge", "--abort"], {
+      timeoutMs: 10_000,
+      fallbackErrorDetail: "There is no merge to abort.",
+    }).pipe(Effect.asVoid);
+
+  const closeTask: GitVcsDriver.GitVcsDriver["Service"]["closeTask"] = Effect.fn("closeTask")(
+    function* ({ projectCwd, worktreePath, branch, targetRef, deleteRemote }) {
+      const removedWorktree = yield* executeGit(
+        "GitVcsDriver.closeTask.removeWorktree",
+        projectCwd,
+        ["worktree", "remove", worktreePath],
+        { timeoutMs: 30_000, allowNonZeroExit: true },
+      ).pipe(Effect.map((result) => result.exitCode === 0));
+      // Only a branch the integration branch already contains is deleted, so nothing is lost.
+      const merged =
+        removedWorktree &&
+        (yield* executeGit(
+          "GitVcsDriver.closeTask.isMerged",
+          projectCwd,
+          [
+            "merge-base",
+            "--is-ancestor",
+            `refs/heads/${branch}`,
+            `refs/remotes/origin/${targetRef}`,
+          ],
+          { timeoutMs: 10_000, allowNonZeroExit: true },
+        ).pipe(Effect.map((result) => result.exitCode === 0)));
+      const deletedBranch = merged
+        ? yield* executeGit(
+            "GitVcsDriver.closeTask.deleteBranch",
+            projectCwd,
+            ["branch", "-D", branch],
+            { timeoutMs: 10_000, allowNonZeroExit: true },
+          ).pipe(Effect.map((result) => result.exitCode === 0))
+        : false;
+      const remoteExists =
+        deleteRemote &&
+        deletedBranch &&
+        (yield* refExists(
+          "GitVcsDriver.closeTask.remoteExists",
+          projectCwd,
+          `refs/remotes/origin/${branch}`,
+        ));
+      const deletedRemote = remoteExists
+        ? yield* executeGit(
+            "GitVcsDriver.closeTask.deleteRemote",
+            projectCwd,
+            ["push", "--quiet", "origin", "--delete", branch],
+            { timeoutMs: 60_000, allowNonZeroExit: true },
+          ).pipe(Effect.map((result) => result.exitCode === 0))
+        : false;
+      return { removedWorktree, deletedBranch, deletedRemote };
+    },
+  );
+
   const log: GitVcsDriver.GitVcsDriver["Service"]["log"] = Effect.fn("log")(function* (input) {
     const { cwd } = input;
     const limit = input.limit ?? VCS_LOG_DEFAULT_LIMIT;
@@ -4144,6 +4361,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     syncWith: (input) => withListRefsInvalidation(input.cwd, syncWith(input)),
     log,
     commitDetails,
+    mergeTaskPrepare,
+    mergeTaskPublish: (input) => withListRefsInvalidation(input.cwd, mergeTaskPublish(input)),
+    mergeAbort,
+    closeTask: (input) => withListRefsInvalidation(input.projectCwd, closeTask(input)),
     initRepo: initRepoWithListRefsInvalidation,
     listLocalBranchNames,
   });

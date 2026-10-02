@@ -22,6 +22,7 @@ import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { runtimeModeConfig, runtimeModeOptions } from "../chat/runtimeModeConfig";
 import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDetail.logic";
 import { TraitsPicker } from "../chat/TraitsPicker";
+import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { Switch } from "../ui/switch";
@@ -380,6 +381,34 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
               </Select>
             }
           />
+          {isProjectScope ? (
+            <SettingsRow
+              serverScoped
+              settingKeys={["integrationBranch"]}
+              id="integration-branch"
+              title="Rama de integración"
+              description="Rama desde la que salen las tareas y en la que se fusionan. Vacío: la de t3.json, si no «staging» si existe, si no la rama por defecto del remoto."
+              control={
+                <Input
+                  key={effective?.integrationBranch ?? ""}
+                  size="sm"
+                  className="w-full sm:w-48"
+                  aria-label="Rama de integración"
+                  placeholder="automática"
+                  defaultValue={effective?.integrationBranch ?? ""}
+                  onBlur={(event) => {
+                    const value = event.currentTarget.value.trim() || null;
+                    if (value !== (effective?.integrationBranch ?? null)) {
+                      updateSettings({ integrationBranch: value });
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                  }}
+                />
+              }
+            />
+          ) : null}
         </>
       ) : category === "source-control" ? (
         <>

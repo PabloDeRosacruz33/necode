@@ -1475,6 +1475,20 @@ function releaseChatTimelineAnchor<T extends { readonly messageId: MessageId | n
   return current.messageId === null ? current : { ...current, messageId: null };
 }
 
+/**
+ * Branch and folder naming for a draft started with "Nueva tarea". A task with no name yet takes
+ * it from the first message.
+ */
+function taskWorktreeNaming(
+  taskName: string | null | undefined,
+  firstMessage: string,
+  branchPrefix: string,
+) {
+  if (taskName == null) return {};
+  const name = taskName.trim() || firstMessage.split("\n")[0]!.trim().slice(0, 60) || "tarea";
+  return { taskName: name, ...(branchPrefix ? { branchPrefix } : {}) };
+}
+
 export default function ChatView(props: ChatViewProps) {
   const {
     environmentId,
@@ -4602,6 +4616,7 @@ export default function ChatView(props: ChatViewProps) {
   // sessions must not resurrect closed tabs. A session whose device summary
   // has not arrived yet stays out of the baseline so a later snapshot opens it.
   const autoShowFloatingPreview = useClientSettings(selectAutoShowFloatingPreview);
+  const taskBranchPrefix = useClientSettings((settings) => settings.taskBranchPrefix);
   const previousDeviceSessions = useRef(new Map<string, Set<string>>());
   useEffect(() => {
     if (!activeThreadRef || !deviceStateLoaded) return;
@@ -8025,6 +8040,7 @@ export default function ChatView(props: ChatViewProps) {
                       requireWorktree: true,
                       branch: buildTemporaryWorktreeBranchName(randomHex),
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),
+                      ...taskWorktreeNaming(draftThread?.taskName, trimmed, taskBranchPrefix),
                     },
                     runSetupScript: true,
                   },
@@ -8363,6 +8379,7 @@ export default function ChatView(props: ChatViewProps) {
                       baseBranch: baseBranchForWorktree,
                       branch: buildTemporaryWorktreeBranchName(randomHex),
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),
+                      ...taskWorktreeNaming(draftThread?.taskName, trimmed, taskBranchPrefix),
                     },
                     runSetupScript: true,
                   }

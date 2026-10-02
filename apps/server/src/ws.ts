@@ -149,6 +149,9 @@ import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import { relocateProject } from "./project/ProjectRelocation.ts";
+import { runMergeTaskCheck } from "./vcs/mergeTaskCheck.ts";
+import { resolveTaskWorktree } from "./vcs/taskBranch.ts";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import { expandHomePath } from "./os-jank.ts";
 import * as ProcessRunner from "./processRunner.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
@@ -644,6 +647,7 @@ const makeWsRpcLayer = (
         | Path.Path
         | ServerConfig.ServerConfig
         | WorkspacePaths.WorkspacePaths
+        | ChildProcessSpawner.ChildProcessSpawner
       >();
       const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
@@ -1514,13 +1518,24 @@ const makeWsRpcLayer = (
                 threadId,
                 projectId: targetProjectId ?? null,
               });
+              const task = prepareWorktree.taskName
+                ? yield* resolveTaskWorktree({
+                    projectCwd: prepareWorktree.projectCwd,
+                    worktreesDir: config.worktreesDir,
+                    taskName: prepareWorktree.taskName,
+                    branchPrefix: prepareWorktree.branchPrefix,
+                  }).pipe(
+                    Effect.provide(ProcessRunner.layer),
+                    Effect.provideContext(normalizerContext),
+                  )
+                : null;
               const worktree = yield* gitWorkflow.createWorktree(
                 {
                   cwd: prepareWorktree.projectCwd,
                   refName: worktreeBaseRef,
-                  newRefName: prepareWorktree.branch,
+                  newRefName: task?.branch ?? prepareWorktree.branch,
                   baseRefName: prepareWorktree.baseBranch,
-                  path: null,
+                  path: task?.worktreePath ?? null,
                 },
                 {
                   submodules,
@@ -3491,6 +3506,58 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.vcsCommitDetails, gitWorkflow.commitDetails(input), {
             "rpc.aggregate": "vcs",
           }),
+        [WS_METHODS.vcsMergeTaskPrepare]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsMergeTaskPrepare,
+            gitWorkflow.mergeTaskPrepare(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsMergeTaskCheck]: (input) =>
+          observeRpcStream(WS_METHODS.vcsMergeTaskCheck, runMergeTaskCheck(input.cwd), {
+            "rpc.aggregate": "vcs",
+          }),
+        [WS_METHODS.vcsMergeTaskPublish]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsMergeTaskPublish,
+            gitWorkflow.mergeTaskPublish(input).pipe(
+              Effect.tap(() => refreshGitStatus(input.cwd)),
+              Effect.tap((result) =>
+                result._tag === "merged" && input.threadId
+                  ? Effect.gen(function* () {
+                      const createdAt = DateTime.formatIso(yield* DateTime.now);
+                      yield* orchestrationEngine.dispatch({
+                        type: "thread.activity.append",
+                        commandId: yield* serverCommandId("task-merged"),
+                        threadId: input.threadId!,
+                        activity: {
+                          id: yield* serverEventId,
+                          tone: "info",
+                          kind: "task.merged",
+                          summary: `Fusionada en ${result.targetRef} · ${result.commit.slice(0, 7)}`,
+                          payload: { commit: result.commit, targetRef: result.targetRef },
+                          turnId: null,
+                          createdAt,
+                        },
+                        createdAt,
+                      });
+                    }).pipe(Effect.ignoreCause({ log: true }))
+                  : Effect.void,
+              ),
+            ),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsMergeAbort]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsMergeAbort,
+            gitWorkflow.mergeAbort(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsCloseTask]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsCloseTask,
+            gitWorkflow.closeTask(input).pipe(Effect.tap(() => refreshGitStatus(input.projectCwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
         [WS_METHODS.vcsInit]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsInit,

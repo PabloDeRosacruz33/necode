@@ -21,6 +21,13 @@ import {
   type VcsSyncWithResult,
   type VcsLogInput,
   type VcsLogResult,
+  type VcsMergeTaskPrepareInput,
+  type VcsMergeTaskPrepareResult,
+  type VcsMergeTaskPublishInput,
+  type VcsMergeTaskPublishResult,
+  type VcsMergeAbortInput,
+  type VcsCloseTaskInput,
+  type VcsCloseTaskResult,
   type VcsCommitDetailsInput,
   type VcsCommitDetailsResult,
   type VcsCreateRefInput,
@@ -399,6 +406,16 @@ export class GitVcsDriver extends Context.Service<
       input: VcsSyncWithInput,
     ) => Effect.Effect<VcsSyncWithResult, GitCommandError>;
     readonly log: (input: VcsLogInput) => Effect.Effect<VcsLogResult, GitCommandError>;
+    readonly mergeTaskPrepare: (
+      input: VcsMergeTaskPrepareInput,
+    ) => Effect.Effect<VcsMergeTaskPrepareResult, GitCommandError>;
+    readonly mergeTaskPublish: (
+      input: VcsMergeTaskPublishInput,
+    ) => Effect.Effect<VcsMergeTaskPublishResult, GitCommandError>;
+    readonly mergeAbort: (input: VcsMergeAbortInput) => Effect.Effect<void, GitCommandError>;
+    readonly closeTask: (
+      input: VcsCloseTaskInput,
+    ) => Effect.Effect<VcsCloseTaskResult, GitCommandError>;
     readonly commitDetails: (
       input: VcsCommitDetailsInput,
     ) => Effect.Effect<VcsCommitDetailsResult, GitCommandError>;

@@ -1306,6 +1306,13 @@ const ThreadTurnStartBootstrapPrepareWorktree = Schema.Struct({
   projectCwd: TrimmedNonEmptyString,
   baseBranch: TrimmedNonEmptyString,
   branch: Schema.optional(TrimmedNonEmptyString),
+  /**
+   * A named task: the server names the branch `<branchPrefix>/<slug>` and the folder
+   * `<worktrees>/<repo>/<slug>`, adding -2, -3… when taken. Overrides `branch`.
+   */
+  taskName: Schema.optional(TrimmedNonEmptyString),
+  /** e.g. "pablo"; defaults to the first name in the server's git user.name. */
+  branchPrefix: Schema.optional(TrimmedNonEmptyString),
   startFromOrigin: Schema.optional(Schema.Boolean),
   requireWorktree: Schema.optional(Schema.Boolean),
 });

@@ -1,4 +1,4 @@
-import { ProjectId } from "@t3tools/contracts";
+import { ProjectId, type ProjectScript } from "@t3tools/contracts";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import {
   projectScriptRuntimeEnv,
@@ -17,6 +17,7 @@ import * as Schema from "effect/Schema";
 
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as T3ProjectFileLoader from "./T3ProjectFileLoader.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 
 export interface ProjectSetupScriptRunnerResultNoScript {
@@ -196,6 +197,7 @@ export const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const terminalManager = yield* TerminalManager.TerminalManager;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const t3ProjectFileLoader = yield* T3ProjectFileLoader.T3ProjectFileLoader;
   const completionShell = resolveCompletionShell(
     yield* HostProcessPlatform,
     yield* HostProcessEnvironment,
@@ -286,6 +288,25 @@ export const make = Effect.gen(function* () {
       return { completion, unsubscribe };
     });
 
+  const projectFileSetupScript = (worktreePath: string) =>
+    t3ProjectFileLoader.load(worktreePath).pipe(
+      Effect.map((file) => {
+        const script = Option.getOrUndefined(file)?.scripts?.find(
+          (entry) => entry.runOnWorktreeCreate,
+        );
+        return script
+          ? ({
+              id: "t3-json-setup",
+              name: script.name,
+              command: script.command,
+              icon: script.icon ?? "configure",
+              runOnWorktreeCreate: true,
+              ...(script.async === undefined ? {} : { async: script.async }),
+            } satisfies ProjectScript)
+          : null;
+      }),
+    );
+
   const runForThread: ProjectSetupScriptRunner["Service"]["runForThread"] = Effect.fn(
     "ProjectSetupScriptRunner.runForThread",
   )(function* (input) {
@@ -338,7 +359,10 @@ export const make = Effect.gen(function* () {
           }),
       ),
     );
-    const script = setupProjectScript(resolveProjectScripts(settings, project));
+    // A repository's t3.json counts even when nobody imported its scripts into Necode.
+    const script =
+      setupProjectScript(resolveProjectScripts(settings, project)) ??
+      (yield* projectFileSetupScript(input.worktreePath));
     if (!script) {
       return {
         status: "no-script",

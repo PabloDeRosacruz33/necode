@@ -12,12 +12,19 @@ import {
   VCS_SWITCH_REF_UNCOMMITTED_CHANGES_OPERATION,
   type ContextMenuItem,
   type EnvironmentId,
+  type ScopedProjectRef,
   type VcsRef,
   type ThreadId,
 } from "@t3tools/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import * as Schema from "effect/Schema";
-import { ChevronDownIcon, GitBranchIcon, GitBranchPlusIcon, MergeIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  GitBranchIcon,
+  GitBranchPlusIcon,
+  ListPlusIcon,
+  MergeIcon,
+} from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -40,7 +47,13 @@ import { readLocalApi } from "../localApi";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { shouldLoadNextBranchPageAfterScroll } from "../state/paginatedBranches";
 import { usePaginatedBranches } from "../state/queries";
-import { useProject, useThreadShell } from "../state/entities";
+import { useProject, useThreadShell, useThreadShellsForProjectRefs } from "../state/entities";
+import { useT3ProjectFileState } from "../hooks/useT3ProjectFileScripts";
+import { useEnvironmentSettings } from "../hooks/useSettings";
+import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { MergeTaskDialog } from "./git/MergeTaskDialog";
+import { NewTaskDialog } from "./git/NewTaskDialog";
 import { useEnvironmentQuery } from "../state/query";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -109,6 +122,8 @@ interface BranchToolbarBranchSelectorProps {
 }
 
 const isGitCommandError = Schema.is(GitCommandError);
+
+const NO_PROJECT_REFS: ReadonlyArray<ScopedProjectRef> = [];
 
 function toBranchActionErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "An error occurred.";
@@ -380,18 +395,43 @@ export function BranchToolbarBranchSelector({
       : queriedActiveBranch
         ? queriedActiveBranch.isRemote === true
         : null;
+  // t3.json first, then the project's setting; otherwise staging or the default branch.
+  const projectFile = useT3ProjectFileState(environmentId, activeProjectCwd);
+  const environmentSettings = useEnvironmentSettings(environmentId);
+  const configuredIntegrationBranch =
+    projectFile.file?.integrationBranch ??
+    resolveProjectSettings(
+      environmentSettings,
+      activeProject?.id ?? null,
+      activeProject ?? undefined,
+    ).settings.integrationBranch;
   const integrationRefQuery = useEnvironmentQuery(
-    isBranchMenuOpen && branchCwd !== null
+    isBranchMenuOpen && branchCwd !== null && !configuredIntegrationBranch
       ? vcsEnvironment.listRefs({
           environmentId,
           input: { cwd: branchCwd, query: INTEGRATION_BRANCH_NAME, limit: 10 },
         })
       : null,
   );
-  const integrationBranch = resolveIntegrationBranch([
-    ...(integrationRefQuery.data?.refs ?? []),
-    ...refs,
-  ]);
+  const integrationBranch = resolveIntegrationBranch(
+    [...(integrationRefQuery.data?.refs ?? []), ...refs],
+    configuredIntegrationBranch,
+  );
+  const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
+  const [isMergeTaskDialogOpen, setIsMergeTaskDialogOpen] = useState(false);
+  const handleNewThread = useNewThreadHandler();
+  const projectThreads = useThreadShellsForProjectRefs(
+    activeProjectRef ? [activeProjectRef] : NO_PROJECT_REFS,
+  );
+  // Threads that work in the project's own folder besides this one: switching the branch there
+  // switches it for them too.
+  const otherThreadsSharingFolder = projectThreads.filter(
+    (thread) =>
+      thread.id !== activeThreadId &&
+      thread.worktreePath === null &&
+      thread.archivedAt === null &&
+      thread.settledAt === null,
+  ).length;
   const [isBranchActionPending, startBranchActionTransition] = useTransition();
   const totalBranchCount = branchRefState.data?.totalCount ?? 0;
   const branchStatusText = isInitialBranchesLoadPending
@@ -614,6 +654,20 @@ export function BranchToolbarBranchSelector({
     );
   };
 
+  // Switching the branch of the project's own folder moves every thread working there.
+  const startNamingNewBranch = async () => {
+    if (activeWorktreePath === null && otherThreadsSharingFolder > 0) {
+      const message = `Esto cambia la rama de la carpeta del proyecto para ${otherThreadsSharingFolder} ${
+        otherThreadsSharingFolder === 1 ? "hilo más" : "hilos más"
+      } que trabajan en ella. Para trabajar aparte sin molestar a nadie, usa «Nueva tarea». ¿Seguir igualmente?`;
+      const api = readLocalApi();
+      const confirmed = api ? await api.dialogs.confirm(message) : window.confirm(message);
+      if (!confirmed) return;
+    }
+    setBranchQuery("");
+    setIsNamingNewBranch(true);
+  };
+
   const syncWithIntegrationBranch = () => {
     if (!branchCwd || !integrationBranch || isBranchActionPending) return;
     handleOpenChange(false);
@@ -627,7 +681,7 @@ export function BranchToolbarBranchSelector({
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: `Could not update from ${integrationBranch}`,
+              title: `No se pudo actualizar desde ${integrationBranch}`,
               description: toBranchActionErrorMessage(squashAtomCommandFailure(result)),
             }),
           );
@@ -637,7 +691,7 @@ export function BranchToolbarBranchSelector({
       const { status, refName, mergedRef, conflictedFiles, stashConflict } = result.value;
       if (status === "conflicted") {
         offerConflictResolution({
-          title: `${mergedRef} conflicts with ${refName}`,
+          title: `${mergedRef} choca con ${refName}`,
           mergedRef,
           refName,
           conflictedFiles,
@@ -649,12 +703,12 @@ export function BranchToolbarBranchSelector({
           type: stashConflict ? "warning" : "success",
           title:
             status === "up_to_date"
-              ? `Already up to date with ${mergedRef}`
-              : `${refName} now includes ${mergedRef}`,
+              ? `Ya estaba al día con ${mergedRef}`
+              : `${refName} incluye ya ${mergedRef}`,
           ...(stashConflict
             ? {
                 description:
-                  "Your uncommitted changes clashed with the update. Git kept a copy in the stash.",
+                  "Tus cambios sin commit chocaban con la actualización. Git guardó una copia en el stash.",
               }
             : {}),
         }),
@@ -667,7 +721,7 @@ export function BranchToolbarBranchSelector({
     if (!branchCwd || !integrationBranch || !sourceRef || isBranchActionPending) return;
     handleOpenChange(false);
     runBranchAction(async () => {
-      const message = `Merge ${sourceRef} into ${integrationBranch}? This thread moves to ${integrationBranch}, and it is pushed if it has a remote.`;
+      const message = `¿Fusionar ${sourceRef} en ${integrationBranch}? Este hilo pasa a ${integrationBranch} y se sube si tiene remoto. Cambia la rama de esta carpeta para todos sus hilos.`;
       const api = readLocalApi();
       const confirmed = api ? await api.dialogs.confirm(message) : window.confirm(message);
       if (!confirmed) return;
@@ -680,7 +734,7 @@ export function BranchToolbarBranchSelector({
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: `Could not merge into ${integrationBranch}`,
+              title: `No se pudo fusionar en ${integrationBranch}`,
               description: toBranchActionErrorMessage(squashAtomCommandFailure(result)),
             }),
           );
@@ -690,7 +744,7 @@ export function BranchToolbarBranchSelector({
       const { status, targetRef, pushed, conflictedFiles } = result.value;
       if (status === "conflicted") {
         offerConflictResolution({
-          title: `${sourceRef} conflicts with ${targetRef}`,
+          title: `${sourceRef} choca con ${targetRef}`,
           mergedRef: targetRef,
           refName: sourceRef,
           conflictedFiles,
@@ -702,10 +756,10 @@ export function BranchToolbarBranchSelector({
       toastManager.add(
         stackedThreadToast({
           type: "success",
-          title: `Merged ${sourceRef} into ${targetRef}`,
+          title: `${sourceRef} fusionada en ${targetRef}`,
           description: pushed
-            ? "Pushed, so your team can update from it."
-            : "Not pushed: it has no remote or the push failed.",
+            ? "Subida: el equipo ya puede actualizarse desde ahí."
+            : "Sin subir: no tiene remoto o la subida falló.",
         }),
       );
     });
@@ -967,213 +1021,265 @@ export function BranchToolbarBranchSelector({
   }
 
   return (
-    <Combobox
-      items={branchPickerItems}
-      filteredItems={filteredBranchPickerItems}
-      autoHighlight
-      virtualized
-      onItemHighlighted={(value, eventDetails) => {
-        highlightedBranchValueRef.current = typeof value === "string" ? value : null;
-        if (!isBranchMenuOpen || eventDetails.index < 0 || eventDetails.reason !== "keyboard") {
-          return;
-        }
-        void branchListRef.current?.scrollIndexIntoView?.({
-          index: eventDetails.index,
-          animated: false,
-        });
-      }}
-      onOpenChange={handleOpenChange}
-      open={isBranchMenuOpen}
-      value={resolvedActiveBranch}
-    >
-      <div
-        className={cn("flex min-w-0 items-center gap-1", className)}
-        data-composer-context-control
-      >
-        <ThreadPullRequestBadgeControl
-          render={<ComposerControl size="xs" />}
-          badge={prBadge}
-          number={prNumber}
-          url={prUrl}
-          status={displayedPrStatus}
-          onOpenList={() => useRightPanelStore.getState().open(threadRef, "pull-requests")}
-          onOpenPullRequest={(event) => {
-            if (prUrl) openPrLink(event, prUrl);
+    <>
+      {integrationBranch && activeProjectRef ? (
+        <NewTaskDialog
+          open={isNewTaskDialogOpen}
+          onOpenChange={setIsNewTaskDialogOpen}
+          integrationBranch={integrationBranch}
+          onCreate={(name) =>
+            void handleNewThread(activeProjectRef, {
+              envMode: "worktree",
+              branch: integrationBranch,
+              worktreePath: null,
+              startFromOrigin: true,
+              taskName: name,
+            })
+          }
+        />
+      ) : null}
+      {integrationBranch && activeWorktreePath && activeProjectCwd && resolvedActiveBranch ? (
+        <MergeTaskDialog
+          open={isMergeTaskDialogOpen}
+          onOpenChange={setIsMergeTaskDialogOpen}
+          environmentId={environmentId}
+          cwd={activeWorktreePath}
+          projectCwd={activeProjectCwd}
+          branch={resolvedActiveBranch}
+          targetRef={integrationBranch}
+          threadId={serverThread?.id ?? null}
+          threadTitle={serverThread?.title ?? null}
+          onAskAgent={(prompt) => {
+            setComposerPrompt(draftId ?? threadRef, prompt);
+            onComposerFocusRequest?.();
           }}
         />
-        {/* Context menu lives on the wrapper: the disabled Button has
+      ) : null}
+      <Combobox
+        items={branchPickerItems}
+        filteredItems={filteredBranchPickerItems}
+        autoHighlight
+        virtualized
+        onItemHighlighted={(value, eventDetails) => {
+          highlightedBranchValueRef.current = typeof value === "string" ? value : null;
+          if (!isBranchMenuOpen || eventDetails.index < 0 || eventDetails.reason !== "keyboard") {
+            return;
+          }
+          void branchListRef.current?.scrollIndexIntoView?.({
+            index: eventDetails.index,
+            animated: false,
+          });
+        }}
+        onOpenChange={handleOpenChange}
+        open={isBranchMenuOpen}
+        value={resolvedActiveBranch}
+      >
+        <div
+          className={cn("flex min-w-0 items-center gap-1", className)}
+          data-composer-context-control
+        >
+          <ThreadPullRequestBadgeControl
+            render={<ComposerControl size="xs" />}
+            badge={prBadge}
+            number={prNumber}
+            url={prUrl}
+            status={displayedPrStatus}
+            onOpenList={() => useRightPanelStore.getState().open(threadRef, "pull-requests")}
+            onOpenPullRequest={(event) => {
+              if (prUrl) openPrLink(event, prUrl);
+            }}
+          />
+          {/* Context menu lives on the wrapper: the disabled Button has
             pointer-events-none, so the trigger itself never sees right-clicks
             while refs are loading or a branch action is pending. */}
-        <span
-          className="flex min-w-0"
-          onContextMenu={(event) => handleBranchContextMenu(event, resolvedActiveBranch)}
-        >
-          <ComboboxTrigger
-            render={<ComposerControl size="xs" />}
-            // No press-scale: the popup aligns live to this trigger, so a
-            // momentary 0.97 shrink would drag the open popup ~3px sideways.
-            className="min-w-0 max-w-full active:scale-100"
-            disabled={isInitialBranchesLoadPending || isBranchActionPending}
+          <span
+            className="flex min-w-0"
+            onContextMenu={(event) => handleBranchContextMenu(event, resolvedActiveBranch)}
           >
-            <GitBranchIcon className="size-3 shrink-0 opacity-70" />
-            <span
-              data-composer-label
-              className="min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
+            <ComboboxTrigger
+              render={<ComposerControl size="xs" />}
+              // No press-scale: the popup aligns live to this trigger, so a
+              // momentary 0.97 shrink would drag the open popup ~3px sideways.
+              className="min-w-0 max-w-full active:scale-100"
+              disabled={isInitialBranchesLoadPending || isBranchActionPending}
             >
+              <GitBranchIcon className="size-3 shrink-0 opacity-70" />
               <span
-                data-composer-label-motion
-                className="flex w-full max-w-[240px] transition-opacity duration-180 ease-drawer group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
+                data-composer-label
+                className="min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
               >
-                <MiddleTruncate value={triggerLabel} />
+                <span
+                  data-composer-label-motion
+                  className="flex w-full max-w-[240px] transition-opacity duration-180 ease-drawer group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
+                >
+                  <MiddleTruncate value={triggerLabel} />
+                </span>
               </span>
-            </span>
-            <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
-          </ComboboxTrigger>
-        </span>
-      </div>
-      <ComboboxPopup
-        align="end"
-        side="top"
-        className="flex w-80 flex-col"
-        {...composerFloatingLayerProps}
-      >
-        <ComboboxSearchInput
-          placeholder={
-            isNamingNewBranch
-              ? `New branch from ${resolvedActiveBranch ?? "HEAD"}`
-              : "Search refs..."
-          }
-          value={branchQuery}
-          onChange={(event) => setBranchQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key !== "Enter" || event.nativeEvent.isComposing || event.keyCode === 229) {
-              return;
-            }
-            const highlightedValue = highlightedBranchValueRef.current;
-            if (
-              highlightedValue === null ||
-              !filteredBranchPickerItems.includes(highlightedValue)
-            ) {
-              return;
-            }
-            (
-              event as typeof event & { preventBaseUIHandler?: () => void }
-            ).preventBaseUIHandler?.();
-            event.preventDefault();
-            event.stopPropagation();
-            selectPickerItem(highlightedValue);
-          }}
-        />
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <ComboboxEmpty>No refs found.</ComboboxEmpty>
-          <div className="relative min-h-0 w-full max-h-56 flex-1 overflow-hidden">
-            <ComboboxListVirtualized>
-              <LegendList<string>
-                ref={branchListRef}
-                data={filteredBranchPickerItems}
-                keyExtractor={(item) => item}
-                getItemType={(item) =>
-                  item === checkoutPullRequestItemValue
-                    ? "checkout-pull-request"
-                    : item === createBranchItemValue
-                      ? "create-branch"
-                      : "branch"
-                }
-                renderItem={({ item, index }) => renderPickerItem(item, index)}
-                estimatedItemSize={28}
-                drawDistance={336}
-                onLayout={() => {
-                  updateBranchListScrollFades();
-                  previousBranchListScrollTopRef.current =
-                    branchListScrollElementRef.current?.scrollTop ?? null;
-                }}
-                onScroll={() => {
-                  updateBranchListScrollFades();
-                  maybeFetchNextBranchPage();
-                }}
-                className={cn(
-                  "scrollbar-gutter-stable overflow-x-hidden overscroll-y-contain ps-1 pe-0 pt-2 pb-1",
-                  getVirtualizedScrollFadeClassName({
-                    top: showTopBranchScrollFade,
-                    bottom: showBottomBranchScrollFade,
-                  }),
-                )}
-                style={{ maxHeight: "14rem" }}
-              />
-            </ComboboxListVirtualized>
-          </div>
-          {isSelectingWorktreeBase ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <label
-                    htmlFor={startFromOriginSwitchId}
-                    className="flex cursor-pointer items-center justify-between gap-3 border-t border-border/60 px-3 py-2 text-xs"
-                  >
-                    <span className="flex min-w-0 items-center gap-1.5 font-medium text-muted-foreground">
-                      <RefreshIcon aria-hidden="true" size="xs" className="shrink-0" />
-                      <span className="truncate">Start from origin</span>
-                    </span>
-                    <Switch
-                      id={startFromOriginSwitchId}
-                      checked={startFromOrigin}
-                      size="sm"
-                      aria-label="Start worktree from origin"
-                      onCheckedChange={(checked) => onStartFromOriginChange(Boolean(checked))}
-                    />
-                  </label>
-                }
-              />
-              <TooltipPopup side="top">
-                Creates the worktree from the latest matching branch on origin instead of your local
-                branch.
-              </TooltipPopup>
-            </Tooltip>
-          ) : null}
-          {!isSelectingWorktreeBase && !isNamingNewBranch ? (
-            <div className="flex flex-col border-t border-border/60 p-1">
-              <Button
-                variant="ghost"
-                size="xs"
-                className="justify-start"
-                onClick={() => {
-                  setBranchQuery("");
-                  setIsNamingNewBranch(true);
-                }}
-              >
-                <GitBranchPlusIcon />
-                New branch from {resolvedActiveBranch ?? "HEAD"}
-              </Button>
-              {integrationBranch ? (
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  className="justify-start"
-                  onClick={syncWithIntegrationBranch}
-                >
-                  <RefreshIcon aria-hidden="true" size="xs" />
-                  Update from {integrationBranch}
-                </Button>
-              ) : null}
-              {integrationBranch &&
-              activeWorktreePath === null &&
-              resolvedActiveBranch !== null &&
-              resolvedActiveBranch !== integrationBranch ? (
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  className="justify-start"
-                  onClick={mergeIntoIntegrationBranch}
-                >
-                  <MergeIcon />
-                  Merge into {integrationBranch}
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-          {branchStatusText ? <ComboboxStatus>{branchStatusText}</ComboboxStatus> : null}
+              <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+            </ComboboxTrigger>
+          </span>
         </div>
-      </ComboboxPopup>
-    </Combobox>
+        <ComboboxPopup
+          align="end"
+          side="top"
+          className="flex w-80 flex-col"
+          {...composerFloatingLayerProps}
+        >
+          <ComboboxSearchInput
+            placeholder={
+              isNamingNewBranch
+                ? `New branch from ${resolvedActiveBranch ?? "HEAD"}`
+                : "Search refs..."
+            }
+            value={branchQuery}
+            onChange={(event) => setBranchQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.nativeEvent.isComposing || event.keyCode === 229) {
+                return;
+              }
+              const highlightedValue = highlightedBranchValueRef.current;
+              if (
+                highlightedValue === null ||
+                !filteredBranchPickerItems.includes(highlightedValue)
+              ) {
+                return;
+              }
+              (
+                event as typeof event & { preventBaseUIHandler?: () => void }
+              ).preventBaseUIHandler?.();
+              event.preventDefault();
+              event.stopPropagation();
+              selectPickerItem(highlightedValue);
+            }}
+          />
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <ComboboxEmpty>No refs found.</ComboboxEmpty>
+            <div className="relative min-h-0 w-full max-h-56 flex-1 overflow-hidden">
+              <ComboboxListVirtualized>
+                <LegendList<string>
+                  ref={branchListRef}
+                  data={filteredBranchPickerItems}
+                  keyExtractor={(item) => item}
+                  getItemType={(item) =>
+                    item === checkoutPullRequestItemValue
+                      ? "checkout-pull-request"
+                      : item === createBranchItemValue
+                        ? "create-branch"
+                        : "branch"
+                  }
+                  renderItem={({ item, index }) => renderPickerItem(item, index)}
+                  estimatedItemSize={28}
+                  drawDistance={336}
+                  onLayout={() => {
+                    updateBranchListScrollFades();
+                    previousBranchListScrollTopRef.current =
+                      branchListScrollElementRef.current?.scrollTop ?? null;
+                  }}
+                  onScroll={() => {
+                    updateBranchListScrollFades();
+                    maybeFetchNextBranchPage();
+                  }}
+                  className={cn(
+                    "scrollbar-gutter-stable overflow-x-hidden overscroll-y-contain ps-1 pe-0 pt-2 pb-1",
+                    getVirtualizedScrollFadeClassName({
+                      top: showTopBranchScrollFade,
+                      bottom: showBottomBranchScrollFade,
+                    }),
+                  )}
+                  style={{ maxHeight: "14rem" }}
+                />
+              </ComboboxListVirtualized>
+            </div>
+            {isSelectingWorktreeBase ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <label
+                      htmlFor={startFromOriginSwitchId}
+                      className="flex cursor-pointer items-center justify-between gap-3 border-t border-border/60 px-3 py-2 text-xs"
+                    >
+                      <span className="flex min-w-0 items-center gap-1.5 font-medium text-muted-foreground">
+                        <RefreshIcon aria-hidden="true" size="xs" className="shrink-0" />
+                        <span className="truncate">Start from origin</span>
+                      </span>
+                      <Switch
+                        id={startFromOriginSwitchId}
+                        checked={startFromOrigin}
+                        size="sm"
+                        aria-label="Start worktree from origin"
+                        onCheckedChange={(checked) => onStartFromOriginChange(Boolean(checked))}
+                      />
+                    </label>
+                  }
+                />
+                <TooltipPopup side="top">
+                  Creates the worktree from the latest matching branch on origin instead of your
+                  local branch.
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
+            {!isSelectingWorktreeBase && !isNamingNewBranch ? (
+              <div className="flex flex-col border-t border-border/60 p-1">
+                {integrationBranch && activeProjectRef ? (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="justify-start"
+                    onClick={() => {
+                      handleOpenChange(false);
+                      setIsNewTaskDialogOpen(true);
+                    }}
+                  >
+                    <ListPlusIcon />
+                    Nueva tarea
+                  </Button>
+                ) : null}
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="justify-start"
+                  onClick={() => void startNamingNewBranch()}
+                >
+                  <GitBranchPlusIcon />
+                  Nueva rama desde {resolvedActiveBranch ?? "HEAD"}
+                </Button>
+                {integrationBranch ? (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="justify-start"
+                    onClick={syncWithIntegrationBranch}
+                  >
+                    <RefreshIcon aria-hidden="true" size="xs" />
+                    Actualizar desde {integrationBranch}
+                  </Button>
+                ) : null}
+                {integrationBranch &&
+                resolvedActiveBranch !== null &&
+                resolvedActiveBranch !== integrationBranch ? (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="justify-start"
+                    onClick={() => {
+                      if (activeWorktreePath === null) {
+                        mergeIntoIntegrationBranch();
+                        return;
+                      }
+                      handleOpenChange(false);
+                      setIsMergeTaskDialogOpen(true);
+                    }}
+                  >
+                    <MergeIcon />
+                    Fusionar en {integrationBranch}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            {branchStatusText ? <ComboboxStatus>{branchStatusText}</ComboboxStatus> : null}
+          </div>
+        </ComboboxPopup>
+      </Combobox>
+    </>
   );
 }
