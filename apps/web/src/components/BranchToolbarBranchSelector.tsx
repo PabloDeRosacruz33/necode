@@ -23,6 +23,7 @@ import {
   GitBranchIcon,
   GitBranchPlusIcon,
   ListPlusIcon,
+  MessageSquareShareIcon,
   MergeIcon,
 } from "lucide-react";
 import {
@@ -54,6 +55,7 @@ import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { MergeTaskDialog } from "./git/MergeTaskDialog";
 import { NewTaskDialog } from "./git/NewTaskDialog";
+import { ContinueTaskDialog } from "./git/ContinueTaskDialog";
 import { useEnvironmentQuery } from "../state/query";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -419,6 +421,7 @@ export function BranchToolbarBranchSelector({
   );
   const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
   const [isMergeTaskDialogOpen, setIsMergeTaskDialogOpen] = useState(false);
+  const [isContinueTaskDialogOpen, setIsContinueTaskDialogOpen] = useState(false);
   const handleNewThread = useNewThreadHandler();
   const projectThreads = useThreadShellsForProjectRefs(
     activeProjectRef ? [activeProjectRef] : NO_PROJECT_REFS,
@@ -1038,6 +1041,21 @@ export function BranchToolbarBranchSelector({
           }
         />
       ) : null}
+      {integrationBranch && activeProjectCwd && serverThread ? (
+        <ContinueTaskDialog
+          open={isContinueTaskDialogOpen}
+          onOpenChange={setIsContinueTaskDialogOpen}
+          environmentId={environmentId}
+          threadId={serverThread.id}
+          projectCwd={activeProjectCwd}
+          previous={
+            activeWorktreePath && resolvedActiveBranch
+              ? { worktreePath: activeWorktreePath, branch: resolvedActiveBranch }
+              : null
+          }
+          targetRef={integrationBranch}
+        />
+      ) : null}
       {integrationBranch && activeWorktreePath && activeProjectCwd && resolvedActiveBranch ? (
         <MergeTaskDialog
           open={isMergeTaskDialogOpen}
@@ -1053,6 +1071,7 @@ export function BranchToolbarBranchSelector({
             setComposerPrompt(draftId ?? threadRef, prompt);
             onComposerFocusRequest?.();
           }}
+          onContinueTask={() => setIsContinueTaskDialogOpen(true)}
         />
       ) : null}
       <Combobox
@@ -1232,6 +1251,20 @@ export function BranchToolbarBranchSelector({
                   >
                     <ListPlusIcon />
                     Nueva tarea
+                  </Button>
+                ) : null}
+                {integrationBranch && activeProjectCwd && serverThread ? (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="justify-start"
+                    onClick={() => {
+                      handleOpenChange(false);
+                      setIsContinueTaskDialogOpen(true);
+                    }}
+                  >
+                    <MessageSquareShareIcon />
+                    Seguir en una tarea nueva
                   </Button>
                 ) : null}
                 <Button

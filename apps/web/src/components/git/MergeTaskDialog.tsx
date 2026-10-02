@@ -61,6 +61,7 @@ export function MergeTaskDialog({
   threadId,
   threadTitle,
   onAskAgent,
+  onContinueTask,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -74,6 +75,8 @@ export function MergeTaskDialog({
   threadTitle: string | null;
   /** Puts a request in the thread's composer for the agent. */
   onAskAgent: (prompt: string) => void;
+  /** Keeps this thread's conversation in a new task once this one is merged. */
+  onContinueTask: () => void;
 }) {
   const prepare = useAtomCommand(vcsEnvironment.mergeTaskPrepare, { reportFailure: false });
   const publish = useAtomCommand(vcsEnvironment.mergeTaskPublish, { reportFailure: false });
@@ -143,7 +146,6 @@ export function MergeTaskDialog({
     setCommitMessage("");
     setForceConfirmation("");
     void runPrepare();
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- run once per opening
   }, [open]);
 
   const check = useEnvironmentQuery(
@@ -160,7 +162,6 @@ export function MergeTaskDialog({
     if (step.kind !== "checking" || !checkState?.done) return;
     if (checkState.exitCode === 0) void runPublish(step.headSha);
     else setStep({ kind: "check-failed", headSha: step.headSha, log: checkState.output });
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- reacts to the check finishing
   }, [checkState?.done]);
 
   const askAgent = (prompt: string) => {
@@ -187,7 +188,14 @@ export function MergeTaskDialog({
   const finishTask = async () => {
     const result = await closeTask({
       environmentId,
-      input: { projectCwd, worktreePath: cwd, branch, targetRef, deleteRemote: true },
+      input: {
+        projectCwd,
+        worktreePath: cwd,
+        branch,
+        targetRef,
+        deleteRemote: true,
+        ...(threadId ? { threadId } : {}),
+      },
     });
     if (result._tag === "Failure" || !result.value.removedWorktree) {
       toastManager.add({
@@ -204,7 +212,7 @@ export function MergeTaskDialog({
     toastManager.add({
       type: "success",
       title: "Tarea cerrada",
-      description: `Se borraron su carpeta y la rama ${branch}. El hilo queda como historial.`,
+      description: `Se borraron su carpeta y la rama ${branch}. El hilo sigue disponible en la carpeta del proyecto.`,
     });
     onOpenChange(false);
   };
@@ -393,8 +401,17 @@ export function MergeTaskDialog({
               <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
                 Dejar la tarea abierta
               </Button>
-              <Button size="sm" onClick={() => void finishTask()}>
+              <Button size="sm" variant="outline" onClick={() => void finishTask()}>
                 Cerrar tarea
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  onOpenChange(false);
+                  onContinueTask();
+                }}
+              >
+                Seguir en una tarea nueva
               </Button>
             </>
           ) : null}

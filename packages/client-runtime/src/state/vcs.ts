@@ -348,6 +348,15 @@ export function createVcsEnvironmentAtoms<R, E>(
           cwd: target.input.projectCwd,
         }),
     }),
+    continueTask: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:continue-task",
+      tag: WS_METHODS.vcsContinueTask,
+      onSettled: (target, registry) =>
+        invalidateCachedVcsRefs(registry, {
+          environmentId: target.environmentId,
+          cwd: target.input.projectCwd,
+        }),
+    }),
     // One run of the project's pre-merge check, keyed by `runId` so retrying starts it again.
     // Accumulates the log so the dialog can show it as it arrives.
     mergeTaskCheck: createEnvironmentSubscriptionAtomFamily(runtime, {

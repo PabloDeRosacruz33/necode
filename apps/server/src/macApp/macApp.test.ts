@@ -3,6 +3,7 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import { archiveMacApp, runMacAppBuild } from "./macApp.ts";
@@ -14,12 +15,14 @@ const FAKE_BUILD = [
   'echo "Resultado: $PWD/out/Demo.app"',
 ].join(" && ");
 
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const withProject = (build: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "mac-app-" });
-    yield* fs.writeFileString(path.join(cwd, "t3.json"), JSON.stringify({ macApp: { build } }));
+    yield* fs.writeFileString(path.join(cwd, "t3.json"), encodeJson({ macApp: { build } }));
     return yield* fs.realPath(cwd);
   });
 

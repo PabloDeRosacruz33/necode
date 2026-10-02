@@ -116,3 +116,34 @@ export const claudeSignedOutMessage = (input: {
       : "";
   return `Claude could not authenticate. Sign in to this Claude instance in Settings > Providers, or run \`claude auth login\` on this environment's machine${configuration}, then start a new thread. For API-key authentication, check this instance's configured credentials.`;
 };
+
+/** Claude keeps a folder's transcripts under `projects/<path with every non-alphanumeric as ->`. */
+export const claudeProjectDirName = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
+
+/**
+ * Claude only resumes a session whose transcript sits under the current folder's project
+ * directory. When a thread moves to another folder (a new task, a relocated repository), copy
+ * the transcript there from wherever it was written, so the conversation carries on.
+ */
+export const ensureClaudeTranscriptForCwd = Effect.fn("ensureClaudeTranscriptForCwd")(
+  function* (input: {
+    readonly claudeHome: string;
+    readonly cwd: string;
+    readonly sessionId: string;
+  }) {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const projectsDir = path.join(input.claudeHome, "projects");
+    const fileName = `${input.sessionId}.jsonl`;
+    const targetDir = path.join(projectsDir, claudeProjectDirName(input.cwd));
+    if (yield* fileSystem.exists(path.join(targetDir, fileName))) return false;
+    for (const entry of yield* fileSystem.readDirectory(projectsDir)) {
+      const candidate = path.join(projectsDir, entry, fileName);
+      if (!(yield* fileSystem.exists(candidate))) continue;
+      yield* fileSystem.makeDirectory(targetDir, { recursive: true });
+      yield* fileSystem.copyFile(candidate, path.join(targetDir, fileName));
+      return true;
+    }
+    return false;
+  },
+);

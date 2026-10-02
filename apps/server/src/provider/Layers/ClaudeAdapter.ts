@@ -90,7 +90,12 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
-import { claudeSignedOutMessage, makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
+import {
+  claudeSignedOutMessage,
+  ensureClaudeTranscriptForCwd,
+  makeClaudeEnvironment,
+  resolveClaudeHomePath,
+} from "../Drivers/ClaudeHome.ts";
 import { planClaudeSkillDispatch } from "../Drivers/ClaudeSkillDispatch.ts";
 import { discoverClaudeSkills } from "../Drivers/ClaudeSkills.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
@@ -2086,6 +2091,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, options?.environment).pipe(
     Effect.provideService(Path.Path, path),
   );
+  const claudeHome = yield* resolveClaudeHomePath(
+    claudeSettings,
+    options?.environment ?? process.env,
+  ).pipe(Effect.provideService(Path.Path, path));
   const claudeSdkExecutablePath = yield* resolveClaudeSdkExecutablePath(
     claudeSettings.binaryPath,
     claudeEnvironment,
@@ -4987,6 +4996,18 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "claude.query.path_to_executable": claudeBinaryPath,
       });
 
+      if (existingResumeSessionId && input.cwd) {
+        // A thread that moved folders (a new task, a relocated repository) still resumes.
+        yield* ensureClaudeTranscriptForCwd({
+          claudeHome,
+          cwd: input.cwd,
+          sessionId: existingResumeSessionId,
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+          Effect.ignore({ log: true }),
+        );
+      }
       const queryRuntime = yield* Effect.try({
         try: () =>
           createQuery({

@@ -294,6 +294,8 @@ export const VcsCloseTaskInput = Schema.Struct({
   /** The branch is deleted only once `origin/<targetRef>` contains it. */
   targetRef: TrimmedNonEmptyStringSchema,
   deleteRemote: Schema.Boolean,
+  /** The task's thread, moved back to the project's folder once the task's folder is gone. */
+  threadId: Schema.optional(ThreadId),
 });
 export type VcsCloseTaskInput = typeof VcsCloseTaskInput.Type;
 
@@ -303,6 +305,32 @@ export const VcsCloseTaskResult = Schema.Struct({
   deletedRemote: Schema.Boolean,
 });
 export type VcsCloseTaskResult = typeof VcsCloseTaskResult.Type;
+
+/**
+ * Moves a thread to a new task: closes the one it worked in (when its folder is still there) and
+ * gives it a new branch and folder from the latest integration branch, keeping the conversation.
+ */
+export const VcsContinueTaskInput = Schema.Struct({
+  threadId: ThreadId,
+  projectCwd: TrimmedNonEmptyStringSchema,
+  /** The task the thread is leaving; null when it has no folder of its own. */
+  previous: Schema.NullOr(
+    Schema.Struct({
+      worktreePath: TrimmedNonEmptyStringSchema,
+      branch: TrimmedNonEmptyStringSchema,
+    }),
+  ),
+  targetRef: TrimmedNonEmptyStringSchema,
+  taskName: TrimmedNonEmptyStringSchema,
+  branchPrefix: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type VcsContinueTaskInput = typeof VcsContinueTaskInput.Type;
+
+export const VcsContinueTaskResult = Schema.Struct({
+  branch: TrimmedNonEmptyStringSchema,
+  worktreePath: TrimmedNonEmptyStringSchema,
+});
+export type VcsContinueTaskResult = typeof VcsContinueTaskResult.Type;
 
 export const VCS_LOG_MAX_LIMIT = 2000;
 

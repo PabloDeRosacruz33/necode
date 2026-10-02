@@ -7,7 +7,9 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
 import {
+  claudeProjectDirName,
   claudeSignedOutMessage,
+  ensureClaudeTranscriptForCwd,
   linkClaudeSharedSessions,
   makeClaudeCapabilitiesCacheKey,
   makeClaudeContinuationGroupKey,
@@ -16,6 +18,25 @@ import {
 } from "./ClaudeHome.ts";
 
 it.layer(NodeServices.layer)("ClaudeHome", (it) => {
+  it.effect("copies a session's transcript to the folder a thread moved to", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const claudeHome = yield* fs.makeTempDirectoryScoped({ prefix: "claude-home-" });
+        const oldDir = path.join(claudeHome, "projects", claudeProjectDirName("/repo/task-a"));
+        yield* fs.makeDirectory(oldDir, { recursive: true });
+        yield* fs.writeFileString(path.join(oldDir, "abc.jsonl"), "{}\n");
+        const input = { claudeHome, cwd: "/repo/task-b", sessionId: "abc" };
+
+        expect(yield* ensureClaudeTranscriptForCwd(input)).toBe(true);
+        const copied = path.join(claudeHome, "projects", "-repo-task-b", "abc.jsonl");
+        expect(yield* fs.readFileString(copied)).toBe("{}\n");
+        expect(yield* ensureClaudeTranscriptForCwd(input)).toBe(false);
+      }),
+    ),
+  );
+
   describe("Claude home resolution", () => {
     it.effect("treats empty, ~/.claude, and the expanded default as the same Claude home", () =>
       Effect.gen(function* () {

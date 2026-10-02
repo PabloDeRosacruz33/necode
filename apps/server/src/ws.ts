@@ -24,6 +24,7 @@ import { subscribeCodexAuthCallback } from "./provider/CodexAuthCallback.ts";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
   AuthAccessStreamError,
+  GitCommandError,
   type AuthAccessStreamEvent,
   type AuthEnvironmentScope,
   AuthSessionId,
@@ -3572,9 +3573,136 @@ const makeWsRpcLayer = (
         [WS_METHODS.vcsCloseTask]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsCloseTask,
-            gitWorkflow.closeTask(input).pipe(Effect.tap(() => refreshGitStatus(input.projectCwd))),
+            gitWorkflow.closeTask(input).pipe(
+              Effect.tap(() => refreshGitStatus(input.projectCwd)),
+              // The thread keeps its conversation and works in the project's folder from now on.
+              Effect.tap((result) =>
+                result.removedWorktree && input.threadId
+                  ? Effect.gen(function* () {
+                      yield* dispatchFromClient({
+                        type: "thread.meta.update",
+                        commandId: yield* serverCommandId("close-task-meta"),
+                        threadId: input.threadId!,
+                        branch: null,
+                        worktreePath: null,
+                      });
+                    }).pipe(Effect.ignoreCause({ log: true }))
+                  : Effect.void,
+              ),
+            ),
             { "rpc.aggregate": "vcs" },
           ),
+        [WS_METHODS.vcsContinueTask]: (input) => {
+          const fail = (detail: string) =>
+            new GitCommandError({
+              operation: "GitWorkflowService.continueTask",
+              command: "continue task",
+              cwd: input.projectCwd,
+              detail,
+            });
+          return observeRpcEffect(
+            WS_METHODS.vcsContinueTask,
+            Effect.gen(function* () {
+              const previous = input.previous;
+              if (previous) {
+                const fs = yield* FileSystem.FileSystem;
+                if (
+                  yield* fs.exists(previous.worktreePath).pipe(Effect.orElseSucceed(() => false))
+                ) {
+                  const closed = yield* gitWorkflow.closeTask({
+                    projectCwd: input.projectCwd,
+                    worktreePath: previous.worktreePath,
+                    branch: previous.branch,
+                    targetRef: input.targetRef,
+                    deleteRemote: true,
+                  });
+                  if (!closed.removedWorktree) {
+                    return yield* fail(
+                      "La carpeta de la tarea tiene cambios sin guardar o está en uso.",
+                    );
+                  }
+                }
+              }
+              yield* gitWorkflow.fetchRemote({
+                cwd: input.projectCwd,
+                remoteName: "origin",
+                refName: input.targetRef,
+              });
+              const hasRemote = yield* gitWorkflow.remoteBranchExists({
+                cwd: input.projectCwd,
+                remoteName: "origin",
+                refName: input.targetRef,
+              });
+              const baseRef = hasRemote
+                ? (yield* gitWorkflow.resolveRemoteTrackingCommit({
+                    cwd: input.projectCwd,
+                    refName: input.targetRef,
+                    fallbackRemoteName: "origin",
+                  })).commitSha
+                : input.targetRef;
+              const task = yield* resolveTaskWorktree({
+                projectCwd: input.projectCwd,
+                worktreesDir: config.worktreesDir,
+                taskName: input.taskName,
+                branchPrefix: input.branchPrefix,
+              }).pipe(
+                Effect.provide(ProcessRunner.layer),
+                Effect.provideContext(normalizerContext),
+                Effect.mapError((cause) => fail(String(cause))),
+              );
+              const created = yield* gitWorkflow.createWorktree({
+                cwd: input.projectCwd,
+                refName: baseRef,
+                newRefName: task.branch,
+                baseRefName: input.targetRef,
+                path: task.worktreePath,
+              });
+              const worktreePath = created.worktree.path;
+              const branch = created.worktree.refName;
+              yield* dispatchFromClient({
+                type: "thread.meta.update",
+                commandId: yield* serverCommandId("continue-task-meta"),
+                threadId: input.threadId,
+                branch,
+                worktreePath,
+              }).pipe(Effect.mapError((error) => fail(error.message)));
+              const createdAt = DateTime.formatIso(yield* DateTime.now);
+              yield* orchestrationEngine
+                .dispatch({
+                  type: "thread.activity.append",
+                  commandId: yield* serverCommandId("continue-task"),
+                  threadId: input.threadId,
+                  activity: {
+                    id: yield* serverEventId,
+                    tone: "info",
+                    kind: "task.continued",
+                    summary: `Sigue en una tarea nueva · ${branch}`,
+                    payload: { branch, worktreePath },
+                    turnId: null,
+                    createdAt,
+                  },
+                  createdAt,
+                })
+                .pipe(Effect.ignoreCause({ log: true }));
+              // Installs and the like run in the thread's terminal; the agent can start meanwhile.
+              yield* projectSetupScriptRunner
+                .runForThread({
+                  threadId: input.threadId,
+                  projectCwd: input.projectCwd,
+                  worktreePath,
+                })
+                .pipe(Effect.ignoreCause({ log: true }));
+              yield* refreshGitStatus(input.projectCwd);
+              return { branch, worktreePath };
+            }).pipe(
+              Effect.provideContext(normalizerContext),
+              Effect.mapError((error) =>
+                error._tag === "GitCommandError" ? error : fail(error.message),
+              ),
+            ),
+            { "rpc.aggregate": "vcs" },
+          );
+        },
         [WS_METHODS.vcsInit]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsInit,
