@@ -95,8 +95,6 @@ import {
   VcsCloseTaskResult,
   VcsContinueTaskInput,
   VcsContinueTaskResult,
-  VcsDuplicateThreadInput,
-  VcsDuplicateThreadResult,
   VcsCommitDetailsInput,
   VcsCommitDetailsResult,
   GitCommandError,
@@ -120,6 +118,7 @@ import {
   VcsStatusResult,
   VcsStatusStreamEvent,
 } from "./git.ts";
+import { VcsDuplicateThreadInput, VcsDuplicateThreadResult } from "./threadDuplicate.ts";
 import {
   MacAppArchiveChunk,
   MacAppArchiveInput,

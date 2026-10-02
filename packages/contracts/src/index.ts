@@ -25,6 +25,7 @@ export * from "./keybindings.ts";
 export * from "./server.ts";
 export * from "./settings.ts";
 export * from "./git.ts";
+export * from "./threadDuplicate.ts";
 export * from "./vcs.ts";
 export * from "./sourceControl.ts";
 export * from "./projectClone.ts";

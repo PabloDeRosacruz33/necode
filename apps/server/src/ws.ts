@@ -23,6 +23,8 @@ import { subscribeChatGptHandoff } from "./provider/CodexChatGptHandoff.ts";
 import { subscribeCodexAuthCallback } from "./provider/CodexAuthCallback.ts";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
+  DEFAULT_RUNTIME_MODE,
   AuthAccessStreamError,
   GitCommandError,
   type AuthAccessStreamEvent,
@@ -3774,26 +3776,61 @@ const makeWsRpcLayer = (
           return observeRpcEffect(
             WS_METHODS.vcsDuplicateThread,
             Effect.gen(function* () {
-              const source = Option.getOrNull(
-                yield* projectionSnapshotQuery.getThreadDetailById(input.sourceThreadId),
-              );
-              if (!source) return yield* fail("No encuentro el hilo que quieres duplicar.");
+              const local =
+                input.source._tag === "local"
+                  ? Option.getOrNull(
+                      yield* projectionSnapshotQuery.getThreadDetailById(input.source.threadId),
+                    )
+                  : null;
+              if (input.source._tag === "local" && !local) {
+                return yield* fail("No encuentro el hilo que quieres duplicar.");
+              }
+              const transferred = input.source._tag === "transferred" ? input.source : null;
+              const projectId = local?.projectId ?? transferred!.projectId;
               const project = Option.getOrNull(
-                yield* projectionSnapshotQuery.getProjectShellById(source.projectId),
+                yield* projectionSnapshotQuery.getProjectShellById(projectId),
               );
-              if (!project) return yield* fail("No encuentro el proyecto del hilo.");
+              if (!project) return yield* fail("No encuentro el proyecto en este ordenador.");
               const projectCwd = project.workspaceRoot;
-              const targetRef = yield* resolveIntegrationRef(projectCwd, source.projectId);
+              const title = local?.title ?? transferred!.title;
+              const targetRef = yield* resolveIntegrationRef(projectCwd, projectId);
               const runner = yield* ProcessRunner.ProcessRunner.pipe(
                 Effect.provide(ProcessRunner.layer),
               );
-              const baseRef =
-                input.from === "current"
-                  ? (yield* runner.run({
-                      command: "git",
-                      args: ["-C", source.worktreePath ?? projectCwd, "rev-parse", "HEAD"],
-                    })).stdout.trim()
-                  : undefined;
+              let baseRef: string | undefined;
+              if (input.from === "current" && local) {
+                baseRef = (yield* runner.run({
+                  command: "git",
+                  args: ["-C", local.worktreePath ?? projectCwd, "rev-parse", "HEAD"],
+                })).stdout.trim();
+              } else if (input.from === "current" && transferred) {
+                // From another machine only what was pushed exists here.
+                const sourceBranch = transferred.branch;
+                const pushed =
+                  sourceBranch !== null &&
+                  (yield* gitWorkflow
+                    .fetchRemote({ cwd: projectCwd, remoteName: "origin", refName: sourceBranch })
+                    .pipe(
+                      Effect.andThen(
+                        gitWorkflow.remoteBranchExists({
+                          cwd: projectCwd,
+                          remoteName: "origin",
+                          refName: sourceBranch,
+                        }),
+                      ),
+                      Effect.orElseSucceed(() => false),
+                    ));
+                if (!pushed || sourceBranch === null) {
+                  return yield* fail(
+                    `La rama ${sourceBranch ?? "del hilo"} no está subida. Súbela o empieza desde lo último de integración.`,
+                  );
+                }
+                baseRef = (yield* gitWorkflow.resolveRemoteTrackingCommit({
+                  cwd: projectCwd,
+                  refName: sourceBranch,
+                  fallbackRemoteName: "origin",
+                })).commitSha;
+              }
               const { branch, worktreePath } = yield* prepareTaskWorktree({
                 projectCwd,
                 targetRef,
@@ -3803,14 +3840,18 @@ const makeWsRpcLayer = (
               });
 
               const threadId = ThreadId.make(yield* crypto.randomUUIDv4);
-              // The binding goes in before the thread exists, so its first turn forks the
-              // source's conversation instead of starting a blank one.
-              const binding = Option.getOrNull(
-                yield* providerSessionDirectory.getBinding(source.id),
-              );
-              const resumeCursor = binding
-                ? forkResumeCursor(binding.provider, binding.resumeCursor, threadId)
+              const modelSelection = input.modelSelection ?? local?.modelSelection;
+              if (!modelSelection) return yield* fail("Elige con qué agente seguir.");
+              // Only the same agent on the same machine can fork the conversation itself. The
+              // binding goes in before the thread exists, so the first turn forks, never resumes.
+              const binding = local
+                ? Option.getOrNull(yield* providerSessionDirectory.getBinding(local.id))
                 : null;
+              const resumeCursor =
+                binding && (binding.providerInstanceId ?? null) === modelSelection.instanceId
+                  ? forkResumeCursor(binding.provider, binding.resumeCursor, threadId)
+                  : null;
+              const runtimeMode = local?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
               if (binding && resumeCursor) {
                 yield* providerSessionDirectory.upsert({
                   threadId,
@@ -3819,7 +3860,7 @@ const makeWsRpcLayer = (
                     ? { providerInstanceId: binding.providerInstanceId }
                     : {}),
                   status: "stopped",
-                  runtimeMode: source.runtimeMode,
+                  runtimeMode,
                   resumeCursor,
                   runtimePayload: { cwd: worktreePath },
                 });
@@ -3829,22 +3870,25 @@ const makeWsRpcLayer = (
                 type: "thread.create",
                 commandId: yield* serverCommandId("duplicate-thread"),
                 threadId,
-                projectId: source.projectId,
-                title: `${source.title} · ${input.taskName}`,
-                modelSelection: source.modelSelection,
-                runtimeMode: source.runtimeMode,
-                interactionMode: source.interactionMode,
+                projectId,
+                title: `${title} · ${input.taskName}`,
+                modelSelection,
+                runtimeMode,
+                interactionMode: local?.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
                 branch,
                 worktreePath,
                 createdAt,
                 historyImport: true,
               });
-              const history = source.messages.filter(
-                (message) =>
-                  (message.role === "user" || message.role === "assistant") &&
-                  !message.streaming &&
-                  message.text.trim().length > 0,
-              );
+              const history = (
+                local
+                  ? local.messages.filter(
+                      (message) =>
+                        (message.role === "user" || message.role === "assistant") &&
+                        !message.streaming,
+                    )
+                  : transferred!.messages
+              ).filter((message) => message.text.trim().length > 0);
               if (history.length > 0) {
                 yield* orchestrationEngine.dispatch({
                   type: "thread.history.import",
@@ -3877,15 +3921,15 @@ const makeWsRpcLayer = (
                       tone: "info",
                       kind: "thread.duplicated",
                       summary,
-                      payload: { sourceThreadId: source.id, threadId },
+                      payload: { threadId },
                       turnId: null,
                       createdAt: at,
                     },
                     createdAt: at,
                   });
                 }).pipe(Effect.ignoreCause({ log: true }));
-              yield* note(threadId, `Duplicado de «${source.title}» · ${branch}`);
-              yield* note(source.id, `Duplicado en un hilo paralelo · ${branch}`);
+              yield* note(threadId, `Duplicado de «${title}» · ${branch}`);
+              if (local) yield* note(local.id, `Duplicado en un hilo paralelo · ${branch}`);
               yield* projectSetupScriptRunner
                 .runForThread({ threadId, projectCwd, worktreePath })
                 .pipe(Effect.ignoreCause({ log: true }));
