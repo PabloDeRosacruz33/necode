@@ -345,11 +345,6 @@ export function MergeTaskDialog({
                 />
               </label>
             ) : null}
-            {step.kind === "continued" ? (
-              <Button size="sm" onClick={() => onOpenChange(false)}>
-                Seguir trabajando
-              </Button>
-            ) : null}
             {step.kind === "merged" ? (
               <p className="flex gap-2 text-success-foreground">
                 <CheckCircle2Icon className="mt-0.5 size-4 shrink-0" />
@@ -449,6 +444,11 @@ export function MergeTaskDialog({
           {step.kind === "error" ? (
             <Button size="sm" variant="outline" onClick={() => void runPrepare()}>
               Reintentar
+            </Button>
+          ) : null}
+          {step.kind === "continued" ? (
+            <Button size="sm" onClick={() => onOpenChange(false)}>
+              Seguir trabajando
             </Button>
           ) : null}
           {step.kind === "merged" ? (
