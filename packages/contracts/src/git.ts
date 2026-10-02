@@ -241,6 +241,8 @@ export const VcsMergeTaskPrepareResult = Schema.Union([
     mergedRef: TrimmedNonEmptyStringSchema,
     conflictedFiles: Schema.Array(Schema.String),
   }),
+  /** The integration branch already has everything this task holds. */
+  Schema.TaggedStruct("upToDate", { mergedRef: TrimmedNonEmptyStringSchema }),
   Schema.TaggedStruct("ready", {
     branch: TrimmedNonEmptyStringSchema,
     mergedRef: TrimmedNonEmptyStringSchema,

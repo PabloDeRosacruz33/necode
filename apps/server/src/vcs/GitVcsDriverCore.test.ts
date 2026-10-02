@@ -2543,6 +2543,17 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("has nothing to merge for a task with no work of its own", () =>
+      Effect.gen(function* () {
+        const { a } = yield* withTasks;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const result = yield* driver.mergeTaskPrepare({ cwd: a, targetRef: "staging" });
+
+        assert.deepStrictEqual(result, { _tag: "upToDate", mergedRef: "origin/staging" });
+      }),
+    );
+
     it.effect("closes a merged task: worktree, local branch and remote branch", () =>
       Effect.gen(function* () {
         const { project, remote, a } = yield* withTasks;

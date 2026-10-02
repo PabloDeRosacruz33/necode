@@ -45,6 +45,7 @@ type Step =
   | { readonly kind: "publishing" }
   | { readonly kind: "merged"; readonly commit: string; readonly localTargetUpdated: boolean }
   | { readonly kind: "closed" }
+  | { readonly kind: "upToDate" }
   | { readonly kind: "continuing"; readonly commit: string; readonly next: string }
   | { readonly kind: "continued"; readonly commit: string; readonly branch: string }
   | { readonly kind: "error"; readonly message: string };
@@ -105,7 +106,8 @@ export function MergeTaskDialog({
       return;
     }
     const prepared: VcsMergeTaskPrepareResult = result.value;
-    if (prepared._tag === "dirty") setStep({ kind: "dirty", files: prepared.files });
+    if (prepared._tag === "upToDate") setStep({ kind: "upToDate" });
+    else if (prepared._tag === "dirty") setStep({ kind: "dirty", files: prepared.files });
     else if (prepared._tag === "conflicted") {
       setStep({
         kind: "conflicted",
@@ -354,6 +356,11 @@ export function MergeTaskDialog({
                     ? ""
                     : ` La carpeta principal no se ha tocado; actualízala desde ${targetRef} cuando quieras.`}
                 </span>
+              </p>
+            ) : null}
+            {step.kind === "upToDate" ? (
+              <p className="text-muted-foreground">
+                No hay nada que fusionar: {targetRef} ya tiene todo lo de esta tarea.
               </p>
             ) : null}
             {step.kind === "continuing" ? (

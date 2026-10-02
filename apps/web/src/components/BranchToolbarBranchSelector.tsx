@@ -420,7 +420,14 @@ export function BranchToolbarBranchSelector({
     configuredIntegrationBranch,
   );
   const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
-  const [isMergeTaskDialogOpen, setIsMergeTaskDialogOpen] = useState(false);
+  // Pinned when the merge starts: a permanent thread moves to its next task meanwhile, and the
+  // dialog must keep showing (and never restart on) the task it was opened for.
+  const [mergeTask, setMergeTask] = useState<{
+    readonly cwd: string;
+    readonly projectCwd: string;
+    readonly branch: string;
+    readonly targetRef: string;
+  } | null>(null);
   const [isContinueTaskDialogOpen, setIsContinueTaskDialogOpen] = useState(false);
   const handleNewThread = useNewThreadHandler();
   const projectThreads = useThreadShellsForProjectRefs(
@@ -1056,15 +1063,17 @@ export function BranchToolbarBranchSelector({
           targetRef={integrationBranch}
         />
       ) : null}
-      {integrationBranch && activeWorktreePath && activeProjectCwd && resolvedActiveBranch ? (
+      {mergeTask ? (
         <MergeTaskDialog
-          open={isMergeTaskDialogOpen}
-          onOpenChange={setIsMergeTaskDialogOpen}
+          open
+          onOpenChange={(open) => {
+            if (!open) setMergeTask(null);
+          }}
           environmentId={environmentId}
-          cwd={activeWorktreePath}
-          projectCwd={activeProjectCwd}
-          branch={resolvedActiveBranch}
-          targetRef={integrationBranch}
+          cwd={mergeTask.cwd}
+          projectCwd={mergeTask.projectCwd}
+          branch={mergeTask.branch}
+          targetRef={mergeTask.targetRef}
           threadId={serverThread?.id ?? null}
           threadTitle={serverThread?.title ?? null}
           onAskAgent={(prompt) => {
@@ -1300,7 +1309,14 @@ export function BranchToolbarBranchSelector({
                         return;
                       }
                       handleOpenChange(false);
-                      setIsMergeTaskDialogOpen(true);
+                      if (activeProjectCwd && resolvedActiveBranch) {
+                        setMergeTask({
+                          cwd: activeWorktreePath,
+                          projectCwd: activeProjectCwd,
+                          branch: resolvedActiveBranch,
+                          targetRef: integrationBranch,
+                        });
+                      }
                     }}
                   >
                     <MergeIcon />

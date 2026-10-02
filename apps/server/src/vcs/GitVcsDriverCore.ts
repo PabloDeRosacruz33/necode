@@ -3992,6 +3992,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       // The worktree belongs to this task alone, so the merge stays open for its agent.
       return { _tag: "conflicted", mergedRef, conflictedFiles } satisfies VcsMergeTaskPrepareResult;
     }
+    // Nothing of the task's own is missing from the target: there is nothing to merge.
+    const contained = yield* executeGitWithStableDiagnostics(
+      "GitVcsDriver.mergeTaskPrepare.contained",
+      cwd,
+      ["merge-base", "--is-ancestor", "HEAD", mergedRef],
+      { timeoutMs: 15_000, allowNonZeroExit: true },
+    );
+    if (contained.exitCode === 0) {
+      return { _tag: "upToDate", mergedRef } satisfies VcsMergeTaskPrepareResult;
+    }
     const headSha = (yield* runGitStdout("GitVcsDriver.mergeTaskPrepare.head", cwd, [
       "rev-parse",
       "HEAD",
