@@ -25,7 +25,7 @@ import {
 import { createPortal } from "react-dom";
 import GitActionsControl from "../GitActionsControl";
 import { isTrailingDoubleClick } from "../Sidebar.logic";
-import { type DraftId } from "~/composerDraftStore";
+import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ThreadTeamPresence } from "./ThreadTeamPresence";
 import { toastManager } from "../ui/toast";
@@ -34,6 +34,7 @@ import ProjectScriptsControl, {
   type ProjectScriptActionResult,
 } from "../ProjectScriptsControl";
 import { OpenInPicker } from "./OpenInPicker";
+import { MacAppControl } from "./MacAppControl";
 import { useRemoteOpenState, type RemoteOpenMode } from "../../remoteOpen";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useT3ProjectFileScripts } from "~/hooks/useT3ProjectFileScripts";
@@ -203,6 +204,7 @@ export const ChatHeader = memo(function ChatHeader({
     activeProjectScripts ? activeProjectCwd : null,
   );
   const remoteOpenState = useRemoteOpenState(activeThreadEnvironmentId);
+  const setComposerPrompt = useComposerDraftStore((store) => store.setPrompt);
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
     activeThreadEnvironmentId,
@@ -381,6 +383,14 @@ export const ChatHeader = memo(function ChatHeader({
             openInCwd={openInCwd}
           />
         </>
+      )}
+      {activeProjectName && gitCwd && (
+        <MacAppControl
+          environmentId={activeThreadEnvironmentId}
+          cwd={gitCwd}
+          presentation={actionsCollapsed ? "menu" : "toolbar"}
+          onAskAgent={(prompt) => setComposerPrompt(draftId ?? activeThreadRef, prompt)}
+        />
       )}
       {activeProjectName && gitCwd && (
         <>

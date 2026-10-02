@@ -96,6 +96,21 @@ the next message runs in the new folder; worktrees are repaired to point at the 
 Necode checks that the folder is the top of a Git repository and asks before switching to one whose
 remote differs from the project's.
 
+## Build and open a Mac app
+
+If the project builds a macOS app, add its build command to `t3.json`:
+
+```json
+{ "macApp": { "build": "npm run build:apple:mac" } }
+```
+
+A thread's header then shows **Compilar y abrir**. It builds in that thread's folder with the log
+live, finds the `.app` the command printed last (or the one at `macApp.appPath`) and opens it,
+quitting any copy of the same app that was running, so the one on screen is always the newest
+build. **Cerrar app** quits it. When the project lives on another Mac, the desktop app downloads
+the build and opens it on the Mac you are using. In a browser the button only appears when Necode
+runs on that same Mac.
+
 ## Project icons
 
 Select the project and open Project to choose an icon, emoji, monogram, or image. The choice applies to

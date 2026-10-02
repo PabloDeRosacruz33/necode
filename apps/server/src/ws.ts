@@ -150,6 +150,7 @@ import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import { relocateProject } from "./project/ProjectRelocation.ts";
 import { runMergeTaskCheck } from "./vcs/mergeTaskCheck.ts";
+import { archiveMacApp, openMacApp, quitMacApp, runMacAppBuild } from "./macApp/macApp.ts";
 import { resolveTaskWorktree } from "./vcs/taskBranch.ts";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { expandHomePath } from "./os-jank.ts";
@@ -3512,6 +3513,22 @@ const makeWsRpcLayer = (
             gitWorkflow.mergeTaskPrepare(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
             { "rpc.aggregate": "vcs" },
           ),
+        [WS_METHODS.macAppBuild]: (input) =>
+          observeRpcStream(WS_METHODS.macAppBuild, runMacAppBuild(input.cwd), {
+            "rpc.aggregate": "mac-app",
+          }),
+        [WS_METHODS.macAppArchive]: (input) =>
+          observeRpcStream(WS_METHODS.macAppArchive, archiveMacApp(input.appPath), {
+            "rpc.aggregate": "mac-app",
+          }),
+        [WS_METHODS.macAppOpen]: (input) =>
+          observeRpcEffect(WS_METHODS.macAppOpen, openMacApp(input), {
+            "rpc.aggregate": "mac-app",
+          }),
+        [WS_METHODS.macAppQuit]: (input) =>
+          observeRpcEffect(WS_METHODS.macAppQuit, quitMacApp(input.bundleId), {
+            "rpc.aggregate": "mac-app",
+          }),
         [WS_METHODS.vcsMergeTaskCheck]: (input) =>
           observeRpcStream(WS_METHODS.vcsMergeTaskCheck, runMergeTaskCheck(input.cwd), {
             "rpc.aggregate": "vcs",

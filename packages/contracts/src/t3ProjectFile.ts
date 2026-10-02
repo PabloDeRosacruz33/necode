@@ -111,6 +111,20 @@ export const T3ProjectFile = Schema.Struct({
         'Shell command that must succeed before a task merges into the integration branch, run in the task\'s folder (e.g. "npm run verify").',
     }),
   ),
+  macApp: Schema.optionalKey(
+    Schema.Struct({
+      build: trimmedNonEmpty({
+        description:
+          'Shell command that builds the macOS app in the thread\'s folder (e.g. "npm run build:apple:mac"). Necode then opens the result on your Mac, closing the copy that was running.',
+      }),
+      appPath: Schema.optionalKey(
+        trimmedNonEmpty({
+          description:
+            "Path of the built .app, relative to the thread's folder or absolute. When absent, Necode uses the last .app path the build printed.",
+        }),
+      ),
+    }).annotate({ description: "The project's macOS app, built and opened from Necode." }),
+  ),
   scripts: Schema.optionalKey(
     Schema.Array(T3ProjectFileScript)
       .annotate({

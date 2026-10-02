@@ -1,5 +1,7 @@
 import {
   type EnvironmentId,
+  type MacAppBuildEvent,
+  type MacAppBuilt,
   type VcsListRefsInput,
   type VcsListRefsResult,
   type VcsMergeTaskCheckEvent,
@@ -17,6 +19,7 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 import { Atom, AtomRegistry } from "effect/unstable/reactivity";
 
 import {
+  createEnvironmentCommand,
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
   createEnvironmentRpcSubscriptionAtomFamily,
@@ -26,7 +29,7 @@ import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import { safeErrorLogAttributes } from "../errors/safeLog.ts";
 import { EnvironmentCacheStore } from "../platform/persistence.ts";
-import { request, subscribe, type EnvironmentRpcInput } from "../rpc/client.ts";
+import { request, runStream, subscribe, type EnvironmentRpcInput } from "../rpc/client.ts";
 import { followStreamInEnvironment } from "./runtime.ts";
 import { vcsCommandConcurrency, vcsCommandScheduler } from "./vcsCommandScheduler.ts";
 import {
@@ -43,6 +46,14 @@ export interface MergeTaskCheckState {
   readonly command: string | null;
   readonly output: string;
   readonly exitCode: number | null;
+  readonly done: boolean;
+}
+
+export interface MacAppBuildState {
+  readonly command: string | null;
+  readonly output: string;
+  readonly exitCode: number | null;
+  readonly app: MacAppBuilt | null;
   readonly done: boolean;
 }
 const VCS_REFS_IDLE_TTL_MS = 30_000;
@@ -360,6 +371,51 @@ export function createVcsEnvironmentAtoms<R, E>(
             },
           ),
         ),
+    }),
+    // One build of the project's Mac app (t3.json `macApp.build`), keyed by `runId`.
+    macAppBuild: createEnvironmentSubscriptionAtomFamily(runtime, {
+      label: "environment-data:mac-app:build",
+      idleTtlMs: VCS_STATUS_IDLE_TTL_MS,
+      subscribe: (input: { readonly cwd: string; readonly runId: string }) =>
+        subscribe(WS_METHODS.macAppBuild, { cwd: input.cwd }).pipe(
+          Stream.mapAccum(
+            (): MacAppBuildState => ({
+              command: null,
+              output: "",
+              exitCode: null,
+              app: null,
+              done: false,
+            }),
+            (state, event: MacAppBuildEvent) => {
+              const next: MacAppBuildState =
+                event._tag === "started"
+                  ? { ...state, command: event.command }
+                  : event._tag === "output"
+                    ? {
+                        ...state,
+                        output: (state.output + event.text).slice(-MERGE_CHECK_LOG_LIMIT),
+                      }
+                    : { ...state, exitCode: event.exitCode, app: event.app, done: true };
+              return [next, [next]] as const;
+            },
+          ),
+        ),
+    }),
+    // Streams the built app zipped, so a client on another Mac can install and run it.
+    macAppDownload: createEnvironmentCommand(runtime, {
+      label: "environment-data:mac-app:download",
+      execute: (input: { readonly appPath: string; readonly onChunk: (data: string) => void }) =>
+        runStream(WS_METHODS.macAppArchive, { appPath: input.appPath }).pipe(
+          Stream.runForEach((chunk) => Effect.sync(() => input.onChunk(chunk.data))),
+        ),
+    }),
+    macAppOpen: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:mac-app:open",
+      tag: WS_METHODS.macAppOpen,
+    }),
+    macAppQuit: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:mac-app:quit",
+      tag: WS_METHODS.macAppQuit,
     }),
     status: createEnvironmentSubscriptionAtomFamily(runtime, {
       label: "environment-data:vcs:status",

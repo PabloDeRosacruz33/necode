@@ -1152,6 +1152,17 @@ export interface DesktopBridge {
   discoverSshHosts: () => Promise<readonly DesktopDiscoveredSshHost[]>;
   /** Resolves a suggested SSH alias before populating the connection form. */
   resolveSshHost: (alias: string) => Promise<DesktopSshEnvironmentTarget>;
+  /** Opens a Mac app built on this machine, quitting the copies already running. */
+  openMacApp?: (input: { appPath: string; bundleId: string | null }) => Promise<void>;
+  quitMacApp?: (input: { bundleId: string }) => Promise<void>;
+  /** Receives a Mac app built on another machine, in zipped pieces, then installs and opens it. */
+  beginMacAppInstall?: () => Promise<string>;
+  appendMacAppInstall?: (input: { id: string; data: string }) => Promise<void>;
+  finishMacAppInstall?: (input: {
+    id: string;
+    name: string;
+    bundleId: string | null;
+  }) => Promise<string>;
   requestSnapShotPermissions?: (includeAccessibility: boolean) => Promise<void>;
   getSnapShotState?: () => Promise<DesktopSnapShotState>;
   setupSnapShot?: (action: DesktopSnapShotSetupAction) => Promise<void>;

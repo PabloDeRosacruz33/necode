@@ -36,6 +36,7 @@ describe("buildT3ProjectFileJsonSchema", () => {
       "defaultThreadEnvMode",
       "iconPath",
       "integrationBranch",
+      "macApp",
       "preMergeCheck",
       "scripts",
       "worktreeSubmodules",

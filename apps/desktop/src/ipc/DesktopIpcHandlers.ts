@@ -69,6 +69,7 @@ import {
   setSnapShotShortcutSuppressed,
 } from "./methods/snapShot.ts";
 import * as PreviewIpc from "./methods/preview.ts";
+import * as MacAppIpc from "./methods/macApp.ts";
 import * as AppActivationIpc from "./methods/appActivation.ts";
 import { getWslState, setWslBackendEnabled, setWslDistro, setWslOnly } from "./methods/wsl.ts";
 
@@ -132,6 +133,11 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(setTheme);
   yield* ipc.handle(showContextMenu);
   yield* ipc.handle(openExternal);
+  yield* ipc.handle(MacAppIpc.openMacApp);
+  yield* ipc.handle(MacAppIpc.quitMacApp);
+  yield* ipc.handle(MacAppIpc.beginMacAppInstall);
+  yield* ipc.handle(MacAppIpc.appendMacAppInstall);
+  yield* ipc.handle(MacAppIpc.finishMacAppInstall);
   yield* ipc.handle(receiveProviderAuthCallback);
   yield* ipc.handle(cancelProviderAuthCallback);
   yield* ipc.handle(openSystemSettings);
