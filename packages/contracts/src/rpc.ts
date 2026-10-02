@@ -95,6 +95,8 @@ import {
   VcsCloseTaskResult,
   VcsContinueTaskInput,
   VcsContinueTaskResult,
+  VcsDuplicateThreadInput,
+  VcsDuplicateThreadResult,
   VcsCommitDetailsInput,
   VcsCommitDetailsResult,
   GitCommandError,
@@ -382,6 +384,7 @@ export const WS_METHODS = {
   vcsMergeAbort: "vcs.mergeAbort",
   vcsCloseTask: "vcs.closeTask",
   vcsContinueTask: "vcs.continueTask",
+  vcsDuplicateThread: "vcs.duplicateThread",
   macAppBuild: "macApp.build",
   macAppArchive: "macApp.archive",
   macAppOpen: "macApp.open",
@@ -1247,6 +1250,12 @@ const WsVcsContinueTaskRpc = Rpc.make(WS_METHODS.vcsContinueTask, {
   error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
 });
 
+const WsVcsDuplicateThreadRpc = Rpc.make(WS_METHODS.vcsDuplicateThread, {
+  payload: VcsDuplicateThreadInput,
+  success: VcsDuplicateThreadResult,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
 const WsMacAppBuildRpc = Rpc.make(WS_METHODS.macAppBuild, {
   payload: MacAppBuildInput,
   success: MacAppBuildEvent,
@@ -1742,6 +1751,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsMergeAbortRpc,
   WsVcsCloseTaskRpc,
   WsVcsContinueTaskRpc,
+  WsVcsDuplicateThreadRpc,
   WsVcsCommitDetailsRpc,
   WsVcsInitRpc,
   WsReviewGetDiffPreviewRpc,

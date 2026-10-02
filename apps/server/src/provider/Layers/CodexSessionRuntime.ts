@@ -83,6 +83,8 @@ function configuredMcpToolAvailability(
 
 export const CodexResumeCursorSchema = Schema.Struct({
   threadId: Schema.String,
+  /** Set on a duplicated thread: open a fork of this conversation instead of resuming it. */
+  fork: Schema.optionalKey(Schema.Boolean),
 });
 const CodexUserInputAnswerObject = Schema.Struct({
   answers: Schema.Array(Schema.String),
@@ -717,8 +719,11 @@ const decodeCodexThreadResumeMetadata = Schema.decodeUnknownEffect(CodexThreadRe
 interface CodexThreadOpenClient {
   readonly raw: {
     readonly request: (
-      method: "thread/resume",
-      payload: CodexRpc.ClientRequestParamsByMethod["thread/resume"] & {
+      method: "thread/resume" | "thread/fork",
+      payload: (
+        | CodexRpc.ClientRequestParamsByMethod["thread/resume"]
+        | CodexRpc.ClientRequestParamsByMethod["thread/fork"]
+      ) & {
         readonly excludeTurns?: boolean;
       },
     ) => Effect.Effect<unknown, CodexErrors.CodexAppServerError>;
@@ -740,6 +745,8 @@ export const openCodexThread = (input: {
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
+  /** Open a new conversation forked from `resumeThreadId`, leaving the original untouched. */
+  readonly fork?: boolean;
 }): Effect.Effect<typeof CodexThreadResumeMetadata.Type, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
   const startParams = buildThreadStartParams({
@@ -751,6 +758,25 @@ export const openCodexThread = (input: {
 
   if (resumeThreadId === undefined) {
     return input.client.request("thread/start", startParams);
+  }
+
+  if (input.fork) {
+    // No fallback: a fresh start would silently drop the context the duplicate exists for.
+    return input.client.raw
+      .request("thread/fork", { threadId: resumeThreadId, ...startParams, excludeTurns: true })
+      .pipe(
+        Effect.flatMap((response) =>
+          decodeCodexThreadResumeMetadata(response).pipe(
+            Effect.mapError((error) =>
+              CodexErrors.CodexAppServerRequestError.invalidPayload(
+                "thread/fork",
+                "decode-payload",
+                error,
+              ),
+            ),
+          ),
+        ),
+      );
   }
 
   // Older providers may still return history despite excludeTurns. Only the
@@ -2493,6 +2519,7 @@ export const makeCodexSessionRuntime = (
         requestedModel,
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
+        fork: isCodexResumeCursorSchema(options.resumeCursor) && options.resumeCursor.fork === true,
       });
 
       const providerThreadId = opened.thread.id;

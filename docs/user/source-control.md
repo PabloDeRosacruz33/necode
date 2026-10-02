@@ -120,6 +120,10 @@ else the remote's default branch.
 - **Permanent threads** suit work that never ends (UI, performance, the Mac app). Turn on
   **Hilo permanente** in **Nueva tarea**: the task starts as `name-v1`, and every merge continues
   the same thread in the next version (`name-v2`, `name-v3`…) with its whole conversation.
+- **Duplicar en un hilo paralelo**, from the branch menu or the thread menu, opens a new thread with
+  the same conversation in its own task, starting from the integration branch or from where the
+  thread is now. Claude and Codex carry the agent's full context over; other agents get the history
+  and a written summary. Work in the copy never changes the original.
 
 Threads without their own folder share the project's checkout, so switching branches there
 changes it for all of them; Necode warns before it does. If uncommitted edits would be overwritten,

@@ -334,6 +334,27 @@ export const VcsContinueTaskResult = Schema.Struct({
 });
 export type VcsContinueTaskResult = typeof VcsContinueTaskResult.Type;
 
+/**
+ * A parallel copy of a thread: a new thread with the same history and, for providers that can
+ * fork a conversation, the same agent context, working in its own new task.
+ */
+export const VcsDuplicateThreadInput = Schema.Struct({
+  sourceThreadId: ThreadId,
+  taskName: TrimmedNonEmptyStringSchema,
+  /** Start from the integration branch's latest, or from where the source thread is now. */
+  from: Schema.Literals(["integration", "current"]),
+  branchPrefix: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type VcsDuplicateThreadInput = typeof VcsDuplicateThreadInput.Type;
+
+export const VcsDuplicateThreadResult = Schema.Struct({
+  threadId: ThreadId,
+  branch: TrimmedNonEmptyStringSchema,
+  /** False when the provider cannot fork: the new agent sees the history but not its context. */
+  forked: Schema.Boolean,
+});
+export type VcsDuplicateThreadResult = typeof VcsDuplicateThreadResult.Type;
+
 export const VCS_LOG_MAX_LIMIT = 2000;
 
 /** Newest-first history of every branch, remote branch and tag, for the Git panel's graph. */

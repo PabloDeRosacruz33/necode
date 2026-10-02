@@ -10,6 +10,7 @@ export type ThreadActionMenuId =
   | "new-thread-on-branch"
   | "continue-with"
   | `continue-with:${string}`
+  | "duplicate"
   | "filter-by-project"
   | "project-settings"
   | "pin"
@@ -63,6 +64,8 @@ export interface ThreadActionMenuState {
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
   /** Providers this thread can hand off to; omitted or empty hides "Continue with…". */
   readonly continueWith?: ReadonlyArray<{ readonly instanceId: string; readonly label: string }>;
+  /** Offers "Duplicar en un hilo paralelo…" for a thread that already has a conversation. */
+  readonly canDuplicate?: boolean;
 }
 
 /**
@@ -93,6 +96,15 @@ export function buildThreadActionMenuItems(
               id: `continue-with:${target.instanceId}` as const,
               label: target.label,
             })),
+          },
+        ]
+      : []),
+    ...(state.canDuplicate
+      ? [
+          {
+            id: "duplicate" as const,
+            label: "Duplicar en un hilo paralelo…",
+            icon: "message-square-plus",
           },
         ]
       : []),

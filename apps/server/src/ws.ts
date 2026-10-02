@@ -34,6 +34,7 @@ import {
   ClientSurface,
   ClientWebDeployment,
   CommandId,
+  MessageId,
   type DiscoveredLocalServerList,
   EventId,
   type EditorId,
@@ -156,6 +157,8 @@ import { resolveTaskWorktree } from "./vcs/taskBranch.ts";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { expandHomePath } from "./os-jank.ts";
 import * as ProcessRunner from "./processRunner.ts";
+import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
+import { forkResumeCursor } from "./provider/forkResumeCursor.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import { importRecentAgentThreads } from "./project/AgentSessionImporter.ts";
@@ -1907,6 +1910,99 @@ const makeWsRpcLayer = (
           .refreshStatus(cwd)
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
+      const taskError = (cwd: string, detail: string) =>
+        new GitCommandError({
+          operation: "GitWorkflowService.prepareTask",
+          command: "task worktree",
+          cwd,
+          detail,
+        });
+
+      /** A task's own branch and folder, from `baseRef` or else the integration branch's latest. */
+      const prepareTaskWorktree = (input: {
+        readonly projectCwd: string;
+        readonly targetRef: string;
+        readonly taskName: string;
+        readonly branchPrefix?: string | undefined;
+        readonly baseRef?: string | undefined;
+      }) =>
+        Effect.gen(function* () {
+          let baseRef = input.baseRef;
+          if (baseRef === undefined) {
+            yield* gitWorkflow.fetchRemote({
+              cwd: input.projectCwd,
+              remoteName: "origin",
+              refName: input.targetRef,
+            });
+            const hasRemote = yield* gitWorkflow.remoteBranchExists({
+              cwd: input.projectCwd,
+              remoteName: "origin",
+              refName: input.targetRef,
+            });
+            baseRef = hasRemote
+              ? (yield* gitWorkflow.resolveRemoteTrackingCommit({
+                  cwd: input.projectCwd,
+                  refName: input.targetRef,
+                  fallbackRemoteName: "origin",
+                })).commitSha
+              : input.targetRef;
+          }
+          const task = yield* resolveTaskWorktree({
+            projectCwd: input.projectCwd,
+            worktreesDir: config.worktreesDir,
+            taskName: input.taskName,
+            branchPrefix: input.branchPrefix,
+          }).pipe(
+            Effect.provide(ProcessRunner.layer),
+            Effect.provideContext(normalizerContext),
+            Effect.mapError((cause) => taskError(input.projectCwd, String(cause))),
+          );
+          const created = yield* gitWorkflow.createWorktree({
+            cwd: input.projectCwd,
+            refName: baseRef,
+            newRefName: task.branch,
+            baseRefName: input.targetRef,
+            path: task.worktreePath,
+          });
+          return { branch: created.worktree.refName, worktreePath: created.worktree.path };
+        });
+
+      /** The branch tasks start from and merge into, resolved the way the branch menu does. */
+      const resolveIntegrationRef = (projectCwd: string, projectId: ProjectId) =>
+        Effect.gen(function* () {
+          const projectFile = yield* T3ProjectFileLoader.T3ProjectFileLoader.pipe(
+            Effect.flatMap((loader) => loader.load(projectCwd)),
+            Effect.map(Option.getOrNull),
+            Effect.provide(T3ProjectFileLoader.layer),
+            Effect.provideContext(normalizerContext),
+            Effect.orElseSucceed(() => null),
+          );
+          const settings = yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null));
+          const configured = settings
+            ? resolveProjectSettings(settings, projectId, undefined, projectFile).settings
+                .integrationBranch
+            : projectFile?.integrationBranch;
+          if (configured) return configured;
+          const hasStaging = yield* gitWorkflow
+            .remoteBranchExists({ cwd: projectCwd, remoteName: "origin", refName: "staging" })
+            .pipe(Effect.orElseSucceed(() => false));
+          if (hasStaging) return "staging";
+          const runner = yield* ProcessRunner.ProcessRunner.pipe(
+            Effect.provide(ProcessRunner.layer),
+            Effect.provideContext(normalizerContext),
+          );
+          const head = yield* runner
+            .run({
+              command: "git",
+              args: ["-C", projectCwd, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+            })
+            .pipe(
+              Effect.map((output) => output.stdout.trim().replace(/^origin\//, "")),
+              Effect.orElseSucceed(() => ""),
+            );
+          return head || "main";
+        });
+
       return WsRpcGroup.of({
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
@@ -3623,42 +3719,12 @@ const makeWsRpcLayer = (
                   }
                 }
               }
-              yield* gitWorkflow.fetchRemote({
-                cwd: input.projectCwd,
-                remoteName: "origin",
-                refName: input.targetRef,
-              });
-              const hasRemote = yield* gitWorkflow.remoteBranchExists({
-                cwd: input.projectCwd,
-                remoteName: "origin",
-                refName: input.targetRef,
-              });
-              const baseRef = hasRemote
-                ? (yield* gitWorkflow.resolveRemoteTrackingCommit({
-                    cwd: input.projectCwd,
-                    refName: input.targetRef,
-                    fallbackRemoteName: "origin",
-                  })).commitSha
-                : input.targetRef;
-              const task = yield* resolveTaskWorktree({
+              const { branch, worktreePath } = yield* prepareTaskWorktree({
                 projectCwd: input.projectCwd,
-                worktreesDir: config.worktreesDir,
+                targetRef: input.targetRef,
                 taskName: input.taskName,
                 branchPrefix: input.branchPrefix,
-              }).pipe(
-                Effect.provide(ProcessRunner.layer),
-                Effect.provideContext(normalizerContext),
-                Effect.mapError((cause) => fail(String(cause))),
-              );
-              const created = yield* gitWorkflow.createWorktree({
-                cwd: input.projectCwd,
-                refName: baseRef,
-                newRefName: task.branch,
-                baseRefName: input.targetRef,
-                path: task.worktreePath,
               });
-              const worktreePath = created.worktree.path;
-              const branch = created.worktree.refName;
               yield* dispatchFromClient({
                 type: "thread.meta.update",
                 commandId: yield* serverCommandId("continue-task-meta"),
@@ -3694,6 +3760,137 @@ const makeWsRpcLayer = (
                 .pipe(Effect.ignoreCause({ log: true }));
               yield* refreshGitStatus(input.projectCwd);
               return { branch, worktreePath };
+            }).pipe(
+              Effect.provideContext(normalizerContext),
+              Effect.mapError((error) =>
+                error._tag === "GitCommandError" ? error : fail(error.message),
+              ),
+            ),
+            { "rpc.aggregate": "vcs" },
+          );
+        },
+        [WS_METHODS.vcsDuplicateThread]: (input) => {
+          const fail = (detail: string) => taskError("", detail);
+          return observeRpcEffect(
+            WS_METHODS.vcsDuplicateThread,
+            Effect.gen(function* () {
+              const source = Option.getOrNull(
+                yield* projectionSnapshotQuery.getThreadDetailById(input.sourceThreadId),
+              );
+              if (!source) return yield* fail("No encuentro el hilo que quieres duplicar.");
+              const project = Option.getOrNull(
+                yield* projectionSnapshotQuery.getProjectShellById(source.projectId),
+              );
+              if (!project) return yield* fail("No encuentro el proyecto del hilo.");
+              const projectCwd = project.workspaceRoot;
+              const targetRef = yield* resolveIntegrationRef(projectCwd, source.projectId);
+              const runner = yield* ProcessRunner.ProcessRunner.pipe(
+                Effect.provide(ProcessRunner.layer),
+              );
+              const baseRef =
+                input.from === "current"
+                  ? (yield* runner.run({
+                      command: "git",
+                      args: ["-C", source.worktreePath ?? projectCwd, "rev-parse", "HEAD"],
+                    })).stdout.trim()
+                  : undefined;
+              const { branch, worktreePath } = yield* prepareTaskWorktree({
+                projectCwd,
+                targetRef,
+                taskName: input.taskName,
+                branchPrefix: input.branchPrefix,
+                baseRef,
+              });
+
+              const threadId = ThreadId.make(yield* crypto.randomUUIDv4);
+              // The binding goes in before the thread exists, so its first turn forks the
+              // source's conversation instead of starting a blank one.
+              const binding = Option.getOrNull(
+                yield* providerSessionDirectory.getBinding(source.id),
+              );
+              const resumeCursor = binding
+                ? forkResumeCursor(binding.provider, binding.resumeCursor, threadId)
+                : null;
+              if (binding && resumeCursor) {
+                yield* providerSessionDirectory.upsert({
+                  threadId,
+                  provider: binding.provider,
+                  ...(binding.providerInstanceId
+                    ? { providerInstanceId: binding.providerInstanceId }
+                    : {}),
+                  status: "stopped",
+                  runtimeMode: source.runtimeMode,
+                  resumeCursor,
+                  runtimePayload: { cwd: worktreePath },
+                });
+              }
+              const createdAt = DateTime.formatIso(yield* DateTime.now);
+              yield* orchestrationEngine.dispatch({
+                type: "thread.create",
+                commandId: yield* serverCommandId("duplicate-thread"),
+                threadId,
+                projectId: source.projectId,
+                title: `${source.title} · ${input.taskName}`,
+                modelSelection: source.modelSelection,
+                runtimeMode: source.runtimeMode,
+                interactionMode: source.interactionMode,
+                branch,
+                worktreePath,
+                createdAt,
+                historyImport: true,
+              });
+              const history = source.messages.filter(
+                (message) =>
+                  (message.role === "user" || message.role === "assistant") &&
+                  !message.streaming &&
+                  message.text.trim().length > 0,
+              );
+              if (history.length > 0) {
+                yield* orchestrationEngine.dispatch({
+                  type: "thread.history.import",
+                  commandId: yield* serverCommandId("duplicate-thread-history"),
+                  threadId,
+                  messages: history.map((message, index) => ({
+                    messageId: MessageId.make(`${threadId}:${String(index).padStart(6, "0")}`),
+                    role: message.role === "user" ? "user" : "assistant",
+                    text: message.text,
+                    createdAt: message.createdAt,
+                  })),
+                });
+                // Imported history settles a thread; this one is about to be worked in.
+                yield* orchestrationEngine.dispatch({
+                  type: "thread.unsettle",
+                  commandId: yield* serverCommandId("duplicate-thread-unsettle"),
+                  threadId,
+                  reason: "user",
+                });
+              }
+              const note = (target: ThreadId, summary: string) =>
+                Effect.gen(function* () {
+                  const at = DateTime.formatIso(yield* DateTime.now);
+                  yield* orchestrationEngine.dispatch({
+                    type: "thread.activity.append",
+                    commandId: yield* serverCommandId("duplicate-thread-note"),
+                    threadId: target,
+                    activity: {
+                      id: yield* serverEventId,
+                      tone: "info",
+                      kind: "thread.duplicated",
+                      summary,
+                      payload: { sourceThreadId: source.id, threadId },
+                      turnId: null,
+                      createdAt: at,
+                    },
+                    createdAt: at,
+                  });
+                }).pipe(Effect.ignoreCause({ log: true }));
+              yield* note(threadId, `Duplicado de «${source.title}» · ${branch}`);
+              yield* note(source.id, `Duplicado en un hilo paralelo · ${branch}`);
+              yield* projectSetupScriptRunner
+                .runForThread({ threadId, projectCwd, worktreePath })
+                .pipe(Effect.ignoreCause({ log: true }));
+              yield* refreshGitStatus(projectCwd);
+              return { threadId, branch, forked: resumeCursor !== null };
             }).pipe(
               Effect.provideContext(normalizerContext),
               Effect.mapError((error) =>

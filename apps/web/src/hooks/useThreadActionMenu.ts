@@ -39,6 +39,7 @@ import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
 import { useUiStateStore } from "../uiStateStore";
 import { useContinueThreadWith } from "./useContinueThreadWith";
 import { useCopyToClipboard } from "./useCopyToClipboard";
+import { useDuplicateThread } from "./useDuplicateThread";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
 import { useThreadActions } from "./useThreadActions";
@@ -99,6 +100,7 @@ export function useThreadActionMenu(input: {
   });
   const handleNewThread = useNewThreadHandler();
   const { targetsFor: handoffTargetsFor, continueWith } = useContinueThreadWith();
+  const duplicateThread = useDuplicateThread();
   const markThreadUnread = useUiStateStore((s) => s.markThreadUnread);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
@@ -157,6 +159,7 @@ export function useThreadActionMenu(input: {
           isRunning: thread.session?.status === "running" && thread.session.activeTurnId != null,
           supports,
           snoozePresets,
+          canDuplicate: thread.latestTurn != null,
           continueWith: handoffTargetsFor(threadRef).map((target) => ({
             instanceId: target.modelSelection.instanceId,
             label: target.label,
@@ -175,6 +178,10 @@ export function useThreadActionMenu(input: {
           if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
             failureToast("Failed to snooze thread", squashAtomCommandFailure(result));
           }
+          return;
+        }
+        if (action === "duplicate") {
+          await duplicateThread(threadRef);
           return;
         }
         if (action.startsWith("continue-with:")) {
@@ -345,6 +352,7 @@ export function useThreadActionMenu(input: {
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
+      duplicateThread,
       handleNewThread,
       handoffTargetsFor,
       logicalProjectKeyByPhysicalKey,

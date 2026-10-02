@@ -33,6 +33,15 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
         const copied = path.join(claudeHome, "projects", "-repo-task-b", "abc.jsonl");
         expect(yield* fs.readFileString(copied)).toBe("{}\n");
         expect(yield* ensureClaudeTranscriptForCwd(input)).toBe(false);
+
+        // After several moves, the newest copy wins over older ones left behind.
+        const stale = path.join(claudeHome, "projects", "-repo-task-c");
+        yield* fs.makeDirectory(stale, { recursive: true });
+        yield* fs.writeFileString(path.join(stale, "abc.jsonl"), "old\n");
+        yield* fs.utimes(path.join(stale, "abc.jsonl"), 1_000, 1_000);
+        yield* ensureClaudeTranscriptForCwd({ ...input, cwd: "/repo/task-d" });
+        const moved = path.join(claudeHome, "projects", "-repo-task-d", "abc.jsonl");
+        expect(yield* fs.readFileString(moved)).toBe("{}\n");
       }),
     ),
   );

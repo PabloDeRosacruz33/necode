@@ -993,16 +993,55 @@ describe("openCodexThread", () => {
     }),
   );
 
+  it.effect("forks a duplicated thread's conversation instead of resuming it", () =>
+    Effect.gen(function* () {
+      const calls: Array<{ method: string; payload: unknown }> = [];
+      const client = {
+        raw: {
+          request: (method: "thread/resume" | "thread/fork", payload: unknown) => {
+            calls.push({ method, payload });
+            return Effect.succeed(makeThreadOpenResponse("forked-thread"));
+          },
+        },
+        request: (
+          method: "thread/start",
+          payload: CodexRpc.ClientRequestParamsByMethod["thread/start"],
+        ) => {
+          calls.push({ method, payload });
+          return Effect.succeed(makeThreadOpenResponse("fresh-thread"));
+        },
+      };
+
+      const opened = yield* openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-2"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/task",
+        requestedModel: undefined,
+        serviceTier: undefined,
+        resumeThreadId: "source-thread",
+        fork: true,
+      });
+
+      NodeAssert.equal(opened.thread.id, "forked-thread");
+      NodeAssert.deepEqual(
+        calls.map((call) => call.method),
+        ["thread/fork"],
+      );
+      NodeAssert.equal((calls[0]!.payload as { threadId: string }).threadId, "source-thread");
+    }),
+  );
+
   it.effect("falls back to thread/start when resume fails recoverably", () =>
     Effect.gen(function* () {
-      const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
+      const calls: Array<{
+        method: "thread/start" | "thread/resume" | "thread/fork";
+        payload: unknown;
+      }> = [];
       const started = makeThreadOpenResponse("fresh-thread");
       const client = {
         raw: {
-          request: (
-            method: "thread/resume",
-            payload: CodexRpc.ClientRequestParamsByMethod["thread/resume"],
-          ) => {
+          request: (method: "thread/resume" | "thread/fork", payload: unknown) => {
             calls.push({ method, payload });
             return Effect.fail(
               new CodexErrors.CodexAppServerRequestError({

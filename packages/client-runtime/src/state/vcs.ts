@@ -357,6 +357,10 @@ export function createVcsEnvironmentAtoms<R, E>(
           cwd: target.input.projectCwd,
         }),
     }),
+    duplicateThread: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:duplicate-thread",
+      tag: WS_METHODS.vcsDuplicateThread,
+    }),
     // One run of the project's pre-merge check, keyed by `runId` so retrying starts it again.
     // Accumulates the log so the dialog can show it as it arrives.
     mergeTaskCheck: createEnvironmentSubscriptionAtomFamily(runtime, {

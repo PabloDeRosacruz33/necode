@@ -146,6 +146,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.vcsMergeAbort]: AuthOrchestrationOperateScope,
   [WS_METHODS.vcsCloseTask]: AuthOrchestrationOperateScope,
   [WS_METHODS.vcsContinueTask]: AuthOrchestrationOperateScope,
+  [WS_METHODS.vcsDuplicateThread]: AuthOrchestrationOperateScope,
   [WS_METHODS.vcsCommitDetails]: AuthOrchestrationReadScope,
   [WS_METHODS.vcsCreateWorktree]: AuthOrchestrationOperateScope,
   [WS_METHODS.vcsRemoveWorktree]: AuthOrchestrationOperateScope,

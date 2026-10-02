@@ -3,6 +3,7 @@ import * as NodeOS from "node:os";
 import type { ClaudeSettings } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
@@ -137,13 +138,21 @@ export const ensureClaudeTranscriptForCwd = Effect.fn("ensureClaudeTranscriptFor
     const fileName = `${input.sessionId}.jsonl`;
     const targetDir = path.join(projectsDir, claudeProjectDirName(input.cwd));
     if (yield* fileSystem.exists(path.join(targetDir, fileName))) return false;
+    // A thread that moved several times leaves a copy in each folder; only the newest is current.
+    let newest: { readonly file: string; readonly mtime: number } | null = null;
     for (const entry of yield* fileSystem.readDirectory(projectsDir)) {
       const candidate = path.join(projectsDir, entry, fileName);
-      if (!(yield* fileSystem.exists(candidate))) continue;
-      yield* fileSystem.makeDirectory(targetDir, { recursive: true });
-      yield* fileSystem.copyFile(candidate, path.join(targetDir, fileName));
-      return true;
+      const info = yield* fileSystem.stat(candidate).pipe(Effect.option);
+      if (Option.isNone(info)) continue;
+      const mtime = Option.match(info.value.mtime, {
+        onNone: () => 0,
+        onSome: (date) => date.getTime(),
+      });
+      if (newest === null || mtime > newest.mtime) newest = { file: candidate, mtime };
     }
-    return false;
+    if (newest === null) return false;
+    yield* fileSystem.makeDirectory(targetDir, { recursive: true });
+    yield* fileSystem.copyFile(newest.file, path.join(targetDir, fileName));
+    return true;
   },
 );

@@ -260,6 +260,8 @@ interface ClaudeResumeState {
   readonly resumeSessionAt?: string;
   readonly turnCount?: number;
   readonly turnStartMessageIds?: ReadonlyArray<string | null>;
+  /** A duplicated thread: fork `resume` into a new session rather than continuing it. */
+  readonly forkSession?: boolean;
 }
 
 interface ClaudeTurnState {
@@ -988,6 +990,7 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     resumeSessionAt?: unknown;
     turnCount?: unknown;
     turnStartMessageIds?: unknown;
+    forkSession?: unknown;
   };
 
   const threadIdCandidate = typeof cursor.threadId === "string" ? cursor.threadId : undefined;
@@ -1019,6 +1022,7 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     ...(turnCountValue !== undefined && Number.isInteger(turnCountValue) && turnCountValue >= 0
       ? { turnCount: turnCountValue }
       : {}),
+    ...(cursor.forkSession === true && resume ? { forkSession: true } : {}),
   };
 }
 
@@ -4948,6 +4952,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           : {}),
         ...(Object.keys(settings).length > 0 ? { settings } : {}),
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
+        ...(resumeState?.forkSession ? { forkSession: true } : {}),
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
@@ -5040,6 +5045,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ...(resumeState?.turnStartMessageIds
             ? { turnStartMessageIds: resumeState.turnStartMessageIds }
             : {}),
+          // Until Claude reports the forked session's id, a restart must fork again: resuming
+          // `resume` directly would write into the original thread's conversation.
+          ...(resumeState?.forkSession ? { forkSession: true } : {}),
         },
         createdAt: startedAt,
         updatedAt: startedAt,

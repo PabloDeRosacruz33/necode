@@ -24,6 +24,7 @@ import {
   GitBranchPlusIcon,
   ListPlusIcon,
   MessageSquareShareIcon,
+  CopyPlusIcon,
   MergeIcon,
 } from "lucide-react";
 import {
@@ -56,6 +57,7 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { MergeTaskDialog } from "./git/MergeTaskDialog";
 import { NewTaskDialog } from "./git/NewTaskDialog";
 import { ContinueTaskDialog } from "./git/ContinueTaskDialog";
+import { useDuplicateThread } from "../hooks/useDuplicateThread";
 import { useEnvironmentQuery } from "../state/query";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -429,6 +431,7 @@ export function BranchToolbarBranchSelector({
     readonly targetRef: string;
   } | null>(null);
   const [isContinueTaskDialogOpen, setIsContinueTaskDialogOpen] = useState(false);
+  const duplicateThread = useDuplicateThread();
   const handleNewThread = useNewThreadHandler();
   const projectThreads = useThreadShellsForProjectRefs(
     activeProjectRef ? [activeProjectRef] : NO_PROJECT_REFS,
@@ -1274,6 +1277,20 @@ export function BranchToolbarBranchSelector({
                   >
                     <MessageSquareShareIcon />
                     Seguir en una tarea nueva
+                  </Button>
+                ) : null}
+                {serverThread?.latestTurn ? (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="justify-start"
+                    onClick={() => {
+                      handleOpenChange(false);
+                      void duplicateThread(threadRef);
+                    }}
+                  >
+                    <CopyPlusIcon />
+                    Duplicar en un hilo paralelo
                   </Button>
                 ) : null}
                 <Button
