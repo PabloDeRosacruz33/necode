@@ -362,3 +362,13 @@ export function buildResolveConflictsPrompt(input: {
     "Keep the intent of both sides, run the relevant checks, then commit the merge.",
   ].join("\n");
 }
+
+/**
+ * A task named `…-v<N>` is a permanent thread (a "department": UI, performance…): merging it
+ * continues the same thread in `…-v<N+1>`. Returns that next task name, or null for other tasks.
+ */
+export function nextPermanentTaskName(branch: string): string | null {
+  const name = branch.slice(branch.lastIndexOf("/") + 1);
+  const match = /^(.+)-v(\d+)$/.exec(name);
+  return match ? `${match[1]}-v${Number(match[2]) + 1}` : null;
+}

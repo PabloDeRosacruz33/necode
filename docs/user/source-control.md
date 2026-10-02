@@ -117,6 +117,9 @@ else the remote's default branch.
 - **Seguir en una tarea nueva**, after a merge or from the branch menu, keeps the thread and its
   whole conversation: the current task is closed and the same thread continues on a new branch and
   folder from the latest integration branch.
+- **Permanent threads** suit work that never ends (UI, performance, the Mac app). Turn on
+  **Hilo permanente** in **Nueva tarea**: the task starts as `name-v1`, and every merge continues
+  the same thread in the next version (`name-v2`, `name-v3`…) with its whole conversation.
 
 Threads without their own folder share the project's checkout, so switching branches there
 changes it for all of them; Necode warns before it does. If uncommitted edits would be overwritten,

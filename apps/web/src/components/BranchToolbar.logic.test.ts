@@ -16,6 +16,7 @@ import {
   resolveLocalCheckoutBranchMismatch,
   resolvePreviousWorktreeLabel,
   resolvePreviousWorktreeSeed,
+  nextPermanentTaskName,
   resolveIntegrationBranch,
   sanitizeNewRefName,
   shouldIncludeBranchPickerItem,
@@ -894,5 +895,14 @@ describe("resolveIntegrationBranch", () => {
       ]),
     ).toBe("main");
     expect(resolveIntegrationBranch([ref("feature")])).toBeNull();
+  });
+});
+
+describe("nextPermanentTaskName", () => {
+  it("bumps the version of a permanent task and ignores other branches", () => {
+    expect(nextPermanentTaskName("pablo/ui-v1")).toBe("ui-v2");
+    expect(nextPermanentTaskName("roi/app-de-mac-v12")).toBe("app-de-mac-v13");
+    expect(nextPermanentTaskName("pablo/arreglar-sidebar")).toBeNull();
+    expect(nextPermanentTaskName("v2")).toBeNull();
   });
 });

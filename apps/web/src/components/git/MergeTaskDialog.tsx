@@ -11,8 +11,10 @@ import { useEffect, useRef, useState } from "react";
 import { randomUUID } from "~/lib/utils";
 import { useEnvironmentQuery } from "~/state/query";
 import { useGitStackedAction } from "~/state/sourceControlActions";
+import { useClientSettings } from "~/hooks/useSettings";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsEnvironment } from "~/state/vcs";
+import { nextPermanentTaskName } from "../BranchToolbar.logic";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -43,6 +45,8 @@ type Step =
   | { readonly kind: "publishing" }
   | { readonly kind: "merged"; readonly commit: string; readonly localTargetUpdated: boolean }
   | { readonly kind: "closed" }
+  | { readonly kind: "continuing"; readonly commit: string; readonly next: string }
+  | { readonly kind: "continued"; readonly commit: string; readonly branch: string }
   | { readonly kind: "error"; readonly message: string };
 
 function failureMessage(result: { readonly cause: Cause.Cause<unknown> }): string {
@@ -82,11 +86,15 @@ export function MergeTaskDialog({
   const publish = useAtomCommand(vcsEnvironment.mergeTaskPublish, { reportFailure: false });
   const abort = useAtomCommand(vcsEnvironment.mergeAbort, { reportFailure: false });
   const closeTask = useAtomCommand(vcsEnvironment.closeTask, { reportFailure: false });
+  const continueTask = useAtomCommand(vcsEnvironment.continueTask, { reportFailure: false });
+  const branchPrefix = useClientSettings((settings) => settings.taskBranchPrefix);
   const commit = useGitStackedAction({ environmentId, cwd });
   const [step, setStep] = useState<Step>({ kind: "preparing" });
   const [commitMessage, setCommitMessage] = useState("");
   const [forceConfirmation, setForceConfirmation] = useState("");
   const attempts = useRef(0);
+  // A permanent thread moves to its next version while this dialog is still open.
+  const [mergingBranch, setMergingBranch] = useState(branch);
 
   const runPrepare = async () => {
     attempts.current += 1;
@@ -121,10 +129,36 @@ export function MergeTaskDialog({
       return;
     }
     if (result.value._tag === "merged") {
+      const merged = result.value;
+      const next = nextPermanentTaskName(branch);
+      if (next && threadId) {
+        // A permanent thread never stops: it carries straight on in its next version.
+        setStep({ kind: "continuing", commit: merged.commit, next });
+        const continued = await continueTask({
+          environmentId,
+          input: {
+            threadId,
+            projectCwd,
+            previous: { worktreePath: cwd, branch },
+            targetRef,
+            taskName: next,
+            ...(branchPrefix.trim() ? { branchPrefix: branchPrefix.trim() } : {}),
+          },
+        });
+        setStep(
+          continued._tag === "Success"
+            ? { kind: "continued", commit: merged.commit, branch: continued.value.branch }
+            : {
+                kind: "error",
+                message: `Fusionada en ${targetRef} · ${merged.commit.slice(0, 7)}, pero no se pudo crear ${next}: ${failureMessage(continued)}`,
+              },
+        );
+        return;
+      }
       setStep({
         kind: "merged",
-        commit: result.value.commit,
-        localTargetUpdated: result.value.localTargetUpdated,
+        commit: merged.commit,
+        localTargetUpdated: merged.localTargetUpdated,
       });
       return;
     }
@@ -143,6 +177,7 @@ export function MergeTaskDialog({
   useEffect(() => {
     if (!open) return;
     attempts.current = 0;
+    setMergingBranch(branch);
     setCommitMessage("");
     setForceConfirmation("");
     void runPrepare();
@@ -223,7 +258,7 @@ export function MergeTaskDialog({
         <DialogHeader>
           <DialogTitle>Fusionar en {targetRef}</DialogTitle>
           <DialogDescription>
-            {branch} entra en {targetRef} sin cambiar de rama en ninguna carpeta.
+            {mergingBranch} entra en {targetRef} sin cambiar de rama en ninguna carpeta.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
@@ -310,6 +345,11 @@ export function MergeTaskDialog({
                 />
               </label>
             ) : null}
+            {step.kind === "continued" ? (
+              <Button size="sm" onClick={() => onOpenChange(false)}>
+                Seguir trabajando
+              </Button>
+            ) : null}
             {step.kind === "merged" ? (
               <p className="flex gap-2 text-success-foreground">
                 <CheckCircle2Icon className="mt-0.5 size-4 shrink-0" />
@@ -318,6 +358,21 @@ export function MergeTaskDialog({
                   {step.localTargetUpdated
                     ? ""
                     : ` La carpeta principal no se ha tocado; actualízala desde ${targetRef} cuando quieras.`}
+                </span>
+              </p>
+            ) : null}
+            {step.kind === "continuing" ? (
+              <p className="flex items-center gap-2 text-muted-foreground">
+                <Spinner className="size-4" />
+                Fusionada en {targetRef} · {step.commit.slice(0, 7)}. Preparando {step.next}…
+              </p>
+            ) : null}
+            {step.kind === "continued" ? (
+              <p className="flex gap-2 text-success-foreground">
+                <CheckCircle2Icon className="mt-0.5 size-4 shrink-0" />
+                <span>
+                  Fusionada en {targetRef} · {step.commit.slice(0, 7)}. Este hilo sigue en{" "}
+                  {step.branch}, con toda la conversación.
                 </span>
               </p>
             ) : null}

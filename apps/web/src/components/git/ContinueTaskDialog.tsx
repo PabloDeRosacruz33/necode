@@ -1,10 +1,11 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useClientSettings } from "~/hooks/useSettings";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsEnvironment } from "~/state/vcs";
+import { nextPermanentTaskName } from "../BranchToolbar.logic";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -46,6 +47,11 @@ export function ContinueTaskDialog({
   const [error, setError] = useState<string | null>(null);
   const branchPrefix = useClientSettings((settings) => settings.taskBranchPrefix);
   const continueTask = useAtomCommand(vcsEnvironment.continueTask, { reportFailure: false });
+  // A permanent thread suggests its next version.
+  const previousBranch = previous?.branch ?? null;
+  useEffect(() => {
+    if (open) setName(previousBranch ? (nextPermanentTaskName(previousBranch) ?? "") : "");
+  }, [open, previousBranch]);
 
   const start = async () => {
     const taskName = name.trim();
