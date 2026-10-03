@@ -995,6 +995,38 @@ describe("AssetAccess", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
+  it.effect("serves an app icon the resolver drew outside the workspace", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-asset-favicon-icon-",
+      });
+      const bundle = path.join(root, "AppIcon.icon");
+      yield* fileSystem.makeDirectory(path.join(bundle, "Assets"), { recursive: true });
+      yield* fileSystem.writeFileString(
+        path.join(bundle, "icon.json"),
+        '{"fill":{"solid":"srgb:0,0,1,1"},"groups":[{"layers":[{"image-name":"a.svg"}]}]}',
+      );
+      yield* fileSystem.writeFileString(
+        path.join(bundle, "Assets", "a.svg"),
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4"><path d="M0 0h4v4z"/></svg>',
+      );
+
+      const result = yield* issueAssetUrl({ resource: { _tag: "project-favicon", cwd: root } });
+      const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const separatorIndex = suffix.indexOf("/");
+      const resolved = yield* resolveAsset(
+        suffix.slice(0, separatorIndex),
+        suffix.slice(separatorIndex + 1),
+      );
+
+      expect(resolved?.kind).toBe("file");
+      const drawn = yield* fileSystem.readFileString((resolved as { path: string }).path);
+      expect(drawn).toContain('<path d="M0 0h4v4z"/>');
+    }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect("ignores a client favicon path hint", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

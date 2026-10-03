@@ -584,11 +584,14 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
               }),
           ),
         );
+      // Outside the workspace: a favicon the user picked elsewhere, or one the resolver drew
+      // (an Icon Composer app icon) into its own folder.
       const isExternalOverride =
         faviconPath !== null &&
-        input.projectFaviconPath !== undefined &&
-        path.isAbsolute(input.projectFaviconPath) &&
-        path.normalize(faviconPath) === path.normalize(input.projectFaviconPath);
+        ((input.projectFaviconPath !== undefined &&
+          path.isAbsolute(input.projectFaviconPath) &&
+          path.normalize(faviconPath) === path.normalize(input.projectFaviconPath)) ||
+          path.relative(workspaceRoot, faviconPath).startsWith(".."));
       const relativePath =
         faviconPath && !isExternalOverride ? path.relative(workspaceRoot, faviconPath) : null;
       const sourceFaviconPath = isExternalOverride ? faviconPath : relativePath;
