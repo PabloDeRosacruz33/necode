@@ -349,17 +349,32 @@ export function resolveIntegrationBranch(
     : defaultRef.name;
 }
 
-/** Composer text that asks the agent to finish a merge Necode backed out of. */
+/**
+ * Composer text that asks the agent to resolve a merge of the integration branch into a task.
+ * `inProgress` means the merge was left open in the folder; otherwise Necode backed out of it.
+ * What already landed on the integration branch is kept, and the task's goal is reapplied on
+ * top of it, including where the teammate's work merged cleanly but still overlaps the task.
+ */
 export function buildResolveConflictsPrompt(input: {
   readonly mergedRef: string;
   readonly refName: string;
   readonly conflictedFiles: ReadonlyArray<string>;
+  readonly inProgress: boolean;
 }): string {
+  const { mergedRef, refName } = input;
   return [
-    `Merge ${input.mergedRef} into this branch (${input.refName}) and resolve the conflicts in:`,
+    input.inProgress
+      ? `Hay un merge de ${mergedRef} a medias en esta rama (${refName}). Archivos en conflicto:`
+      : `Fusiona ${mergedRef} en esta rama (${refName}). Necode lo intentó y lo deshizo por conflictos en:`,
     ...input.conflictedFiles.map((file) => `- ${file}`),
     "",
-    "Keep the intent of both sides, run the relevant checks, then commit the merge.",
+    `${mergedRef} trae trabajo de otras tareas que ya está integrado. Para resolverlo:`,
+    `1. Entiende qué entró con \`git log --format='%h %an %s%n%b' ${refName}..${mergedRef}\` (los merges de tareas llevan el título del hilo que las hizo) y el objetivo de esta rama por esta conversación y \`git log ${mergedRef}..${refName}\`.`,
+    `2. Conserva todo lo que ya está en ${mergedRef}: funcionalidades, props, textos y arreglos. No devuelvas un archivo a su versión antigua para que encaje con esta rama.`,
+    `3. Vuelve a aplicar el objetivo de esta rama sobre el código nuevo, también donde ${mergedRef} cambió la zona que toca esta rama aunque Git no marque conflicto.`,
+    "4. Si los dos lados son incompatibles y no puedes conservar ambos, para y pregúntame antes de elegir.",
+    "5. Ejecuta las comprobaciones que correspondan y haz commit del merge.",
+    `6. Al terminar, resume qué conservaste de ${mergedRef}, qué adaptaste de esta rama y qué revisaste sin conflicto.`,
   ].join("\n");
 }
 

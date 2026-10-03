@@ -659,7 +659,10 @@ export function BranchToolbarBranchSelector({
           children: "Ask the agent to resolve",
           onClick: () => {
             toastManager.close(toastId);
-            setComposerPrompt(draftId ?? threadRef, buildResolveConflictsPrompt(input));
+            setComposerPrompt(
+              draftId ?? threadRef,
+              buildResolveConflictsPrompt({ ...input, inProgress: false }),
+            );
             onComposerFocusRequest?.();
           },
         },

@@ -14,7 +14,7 @@ import { useGitStackedAction } from "~/state/sourceControlActions";
 import { useClientSettings } from "~/hooks/useSettings";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsEnvironment } from "~/state/vcs";
-import { nextPermanentTaskName } from "../BranchToolbar.logic";
+import { buildResolveConflictsPrompt, nextPermanentTaskName } from "../BranchToolbar.logic";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -413,12 +413,12 @@ export function MergeTaskDialog({
                 size="sm"
                 onClick={() =>
                   askAgent(
-                    [
-                      `Hay un merge de ${step.mergedRef} a medias en esta rama (${branch}). Archivos en conflicto:`,
-                      ...step.conflictedFiles.map((file) => `- ${file}`),
-                      "",
-                      "Resuélvelo manteniendo la intención de los dos lados, ejecuta las comprobaciones y haz commit del merge.",
-                    ].join("\n"),
+                    buildResolveConflictsPrompt({
+                      mergedRef: step.mergedRef,
+                      refName: branch,
+                      conflictedFiles: step.conflictedFiles,
+                      inProgress: true,
+                    }),
                   )
                 }
               >
