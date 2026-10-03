@@ -18,7 +18,11 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
+import * as NodeCrypto from "node:crypto";
+import * as NodeOS from "node:os";
+
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
+import { renderIconComposerSvg } from "./iconComposer.ts";
 import * as T3ProjectFileLoader from "./T3ProjectFileLoader.ts";
 
 // Resolution walks up to 12 well-known paths plus 7 source files, so a miss
@@ -69,6 +73,22 @@ const FAVICON_CANDIDATES = [
   "assets/logo.png",
   ".idea/icon.svg",
 ] as const;
+
+// Apple app icons (an Icon Composer `*.icon` bundle or an Xcode `AppIcon.appiconset`) are found
+// by a bounded breadth-first walk, since apps keep them in their own resource folders.
+const decodeIconJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+const APPLE_ICON_SEARCH_DEPTH = 4;
+const APPLE_ICON_SEARCH_MAX_DIRS = 400;
+const APPLE_ICON_SKIPPED_DIRS = new Set([
+  "node_modules",
+  "build",
+  "dist",
+  "out",
+  "target",
+  "vendor",
+  "Pods",
+  "DerivedData",
+]);
 
 // Files that may contain a <link rel="icon"> or icon metadata declaration.
 const ICON_SOURCE_FILES = [
@@ -205,6 +225,93 @@ export const make = Effect.gen(function* () {
     return null;
   });
 
+  /** The biggest PNG an Xcode app icon set holds. */
+  const largestAppIconImage = Effect.fn("ProjectFaviconResolver.largestAppIconImage")(function* (
+    iconSetDir: string,
+  ) {
+    let best: { readonly file: string; readonly size: number } | null = null;
+    const entries = yield* fileSystem
+      .readDirectory(iconSetDir)
+      .pipe(Effect.orElseSucceed(() => []));
+    for (const name of entries) {
+      if (!name.toLowerCase().endsWith(".png")) continue;
+      const file = path.join(iconSetDir, name);
+      const info = yield* fileSystem.stat(file).pipe(Effect.option);
+      if (Option.isNone(info) || info.value.type !== "File") continue;
+      const size = Number(info.value.size);
+      if (best === null || size > best.size) best = { file, size };
+    }
+    return best?.file ?? null;
+  });
+
+  /** An Icon Composer bundle drawn as a flat SVG, written once per version of the bundle. */
+  const renderIconBundle = Effect.fn("ProjectFaviconResolver.renderIconBundle")(function* (
+    bundleDir: string,
+  ) {
+    const json = yield* fileSystem
+      .readFileString(path.join(bundleDir, "icon.json"))
+      .pipe(Effect.option);
+    if (Option.isNone(json)) return null;
+    const assetsDir = path.join(bundleDir, "Assets");
+    const layers = new Map<string, string>();
+    for (const name of yield* fileSystem
+      .readDirectory(assetsDir)
+      .pipe(Effect.orElseSucceed(() => []))) {
+      if (!name.toLowerCase().endsWith(".svg")) continue;
+      const source = yield* fileSystem
+        .readFileString(path.join(assetsDir, name))
+        .pipe(Effect.option);
+      if (Option.isSome(source)) layers.set(name, source.value);
+    }
+    const parsed = yield* decodeIconJson(json.value).pipe(Effect.option);
+    if (Option.isNone(parsed)) return null;
+    const svg = renderIconComposerSvg(parsed.value, (name) => layers.get(name) ?? null);
+    if (svg === null) return null;
+    const digest = NodeCrypto.createHash("sha1").update(bundleDir).update(svg).digest("hex");
+    const outputDir = path.join(NodeOS.tmpdir(), "necode-project-icons");
+    const output = path.join(outputDir, `${digest}.svg`);
+    const written = yield* fileSystem
+      .makeDirectory(outputDir, { recursive: true })
+      .pipe(Effect.andThen(fileSystem.writeFileString(output, svg)), Effect.option);
+    return Option.isSome(written) ? output : null;
+  });
+
+  /** The first Apple app icon found walking down from the project, nearest folders first. */
+  const findAppleAppIcon = Effect.fn("ProjectFaviconResolver.findAppleAppIcon")(function* (
+    projectCwd: string,
+  ) {
+    const queue: Array<{ readonly dir: string; readonly depth: number }> = [
+      { dir: projectCwd, depth: 0 },
+    ];
+    let visited = 0;
+    while (queue.length > 0 && visited < APPLE_ICON_SEARCH_MAX_DIRS) {
+      const { dir, depth } = queue.shift()!;
+      visited += 1;
+      const entries = (yield* fileSystem
+        .readDirectory(dir)
+        .pipe(Effect.orElseSucceed(() => []))).toSorted();
+      for (const name of entries) {
+        if (name.endsWith(".icon")) {
+          const rendered = yield* renderIconBundle(path.join(dir, name));
+          if (rendered) return rendered;
+        } else if (name === "AppIcon.appiconset") {
+          const image = yield* largestAppIconImage(path.join(dir, name));
+          if (image) return image;
+        }
+      }
+      if (depth >= APPLE_ICON_SEARCH_DEPTH) continue;
+      for (const name of entries) {
+        // Folders rarely have an extension; asset catalogs are the one that matters here.
+        const isCandidate =
+          !name.startsWith(".") &&
+          !APPLE_ICON_SKIPPED_DIRS.has(name) &&
+          (!name.includes(".") || name.endsWith(".xcassets"));
+        if (isCandidate) queue.push({ dir: path.join(dir, name), depth: depth + 1 });
+      }
+    }
+    return null;
+  });
+
   const resolvePathUncached = Effect.fn("ProjectFaviconResolver.resolvePathUncached")(function* (
     cwd: string,
     faviconPath?: string,
@@ -292,7 +399,7 @@ export const make = Effect.gen(function* () {
       }
     }
 
-    return null;
+    return yield* findAppleAppIcon(projectCwd);
   });
 
   const faviconCache = yield* Cache.makeWith<string, string | null, ProjectFaviconResolutionError>(

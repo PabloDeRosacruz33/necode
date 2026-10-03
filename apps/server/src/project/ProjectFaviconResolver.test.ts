@@ -110,6 +110,44 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
       }).pipe(Effect.provide(TestClock.layer())),
     );
 
+    it.effect("draws an Icon Composer bundle found in the app's own folders", () =>
+      Effect.gen(function* () {
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(
+          cwd,
+          "apps/apple/Resources/AppIcon.icon/icon.json",
+          '{"fill":{"linear-gradient":["display-p3:0,0,1,1","display-p3:0,0,0.5,1"]},"groups":[{"layers":[{"image-name":"mark.svg"}]}]}',
+        );
+        yield* writeTextFile(
+          cwd,
+          "apps/apple/Resources/AppIcon.icon/Assets/mark.svg",
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0h10v10z"/></svg>',
+        );
+
+        const resolved = yield* resolver.resolvePath(cwd);
+
+        expect(resolved?.endsWith(".svg")).toBe(true);
+        const svg = yield* fileSystem.readFileString(resolved!);
+        expect(svg).toContain("color(display-p3 0 0 1)");
+        expect(svg).toContain('<path d="M0 0h10v10z"/>');
+      }),
+    );
+
+    it.effect("uses the biggest image of an Xcode app icon set", () =>
+      Effect.gen(function* () {
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const iconSet = "Resources/Assets.xcassets/AppIcon.appiconset";
+        yield* writeTextFile(cwd, `${iconSet}/icon-120.png`, "small");
+        yield* writeTextFile(cwd, `${iconSet}/icon-1024.png`, "the biggest one");
+
+        expect(yield* resolver.resolvePath(cwd)).toBe(path.join(cwd, iconSet, "icon-1024.png"));
+      }),
+    );
+
     it.effect("prefers well-known favicon files", () =>
       Effect.gen(function* () {
         const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
