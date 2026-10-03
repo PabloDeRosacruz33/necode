@@ -1,4 +1,5 @@
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
+import { TextGeneration } from "./textGeneration/TextGeneration.ts";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeCrypto from "node:crypto";
@@ -823,6 +824,10 @@ const buildAppUnderTest = (options?: {
             setProviderMaintenanceActionState: () => Effect.succeed([]),
             streamChanges: Stream.empty,
             ...options?.layers?.providerRegistry,
+          }),
+          Layer.mock(TextGeneration)({
+            // Worktrees started without a task name fall back to the first message's words.
+            generateBranchName: () => Effect.succeed({ branch: "" }),
           }),
           Layer.mock(ProviderService.ProviderService)({
             uploadFeedback: () => Effect.die("Provider feedback is not stubbed in this test"),
@@ -11515,13 +11520,19 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             defaultModelSelection.instanceId,
           );
         }
-        assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
-          cwd: "/tmp/project",
-          refName: fetchedOriginCommit,
-          newRefName: "t3code/bootstrap-refName",
-          baseRefName: "main",
-          path: null,
-        });
+        // A worktree started without a task name is still a task, named from the first message.
+        const created = createWorktree.mock.calls[0]?.[0];
+        assert.deepEqual(
+          { ...created, path: undefined },
+          {
+            cwd: "/tmp/project",
+            refName: fetchedOriginCommit,
+            newRefName: "tarea/hello",
+            baseRefName: "main",
+            path: undefined,
+          },
+        );
+        assert.isTrue(created?.path?.endsWith("/worktrees/project/hello"));
         assert.deepEqual(fetchRemote.mock.calls[0]?.[0], {
           cwd: "/tmp/project",
           remoteName: "origin",

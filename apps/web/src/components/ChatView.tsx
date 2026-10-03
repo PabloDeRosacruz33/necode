@@ -1476,15 +1476,16 @@ function releaseChatTimelineAnchor<T extends { readonly messageId: MessageId | n
 }
 
 /**
- * Branch and folder naming for a draft started with "Nueva tarea". A task with no name yet takes
- * it from the first message.
+ * Branch and folder naming for a new worktree. A "Nueva tarea" with no name yet takes it from the
+ * first message.
  */
 function taskWorktreeNaming(
   taskName: string | null | undefined,
   firstMessage: string,
   branchPrefix: string,
 ) {
-  if (taskName == null) return {};
+  // Without a name the server names the task from the first message, with the same prefix.
+  if (taskName == null) return branchPrefix ? { branchPrefix } : {};
   const name = taskName.trim() || firstMessage.split("\n")[0]!.trim().slice(0, 60) || "tarea";
   return { taskName: name, ...(branchPrefix ? { branchPrefix } : {}) };
 }

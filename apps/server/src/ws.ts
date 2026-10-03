@@ -155,12 +155,13 @@ import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolve
 import { relocateProject } from "./project/ProjectRelocation.ts";
 import { runMergeTaskCheck } from "./vcs/mergeTaskCheck.ts";
 import { archiveMacApp, openMacApp, quitMacApp, runMacAppBuild } from "./macApp/macApp.ts";
-import { resolveTaskWorktree } from "./vcs/taskBranch.ts";
+import { resolveTaskWorktree, slugifyTaskName } from "./vcs/taskBranch.ts";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { expandHomePath } from "./os-jank.ts";
 import * as ProcessRunner from "./processRunner.ts";
 import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
 import { forkResumeCursor } from "./provider/forkResumeCursor.ts";
+import { TextGeneration } from "./textGeneration/TextGeneration.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import { importRecentAgentThreads } from "./project/AgentSessionImporter.ts";
@@ -591,6 +592,7 @@ const makeWsRpcLayer = (
         yield* Effect.context<Effect.Services<ReturnType<typeof remoteSshDeviceHosts>>>();
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
+      const textGeneration = yield* TextGeneration;
       const modelManifest = yield* ModelManifest.ModelManifest;
       const providerVersionCache = yield* ProviderMaintenance.ProviderVersionCache;
       const providerService = yield* ProviderService.ProviderService;
@@ -1358,6 +1360,15 @@ const makeWsRpcLayer = (
 
           const bootstrapProgram = Effect.gen(function* () {
             const prepareWorktree = bootstrap?.prepareWorktree;
+            // Every worktree is a task: one started without a name gets one while the base is fetched.
+            const taskNameFiber =
+              prepareWorktree && !prepareWorktree.taskName
+                ? yield* suggestTaskName({
+                    projectId: targetProjectId ?? null,
+                    cwd: prepareWorktree.projectCwd,
+                    message: command.message.text,
+                  }).pipe(Effect.forkChild)
+                : null;
             let shouldPrepareWorktree = prepareWorktree
               ? yield* gitWorkflow.isRepository(prepareWorktree.projectCwd)
               : false;
@@ -1525,11 +1536,14 @@ const makeWsRpcLayer = (
                 threadId,
                 projectId: targetProjectId ?? null,
               });
-              const task = prepareWorktree.taskName
+              const taskName =
+                prepareWorktree.taskName ??
+                (taskNameFiber ? yield* Fiber.join(taskNameFiber) : null);
+              const task = taskName
                 ? yield* resolveTaskWorktree({
                     projectCwd: prepareWorktree.projectCwd,
                     worktreesDir: config.worktreesDir,
-                    taskName: prepareWorktree.taskName,
+                    taskName,
                     branchPrefix: prepareWorktree.branchPrefix,
                   }).pipe(
                     Effect.provide(ProcessRunner.layer),
@@ -2004,6 +2018,44 @@ const makeWsRpcLayer = (
             );
           return head || "main";
         });
+
+      /**
+       * A task name for a worktree started without one, written by the source control model from
+       * the first message ("fabulas-v1" rather than the message's first words). Falls back to
+       * those words when the model is slow or unavailable.
+       */
+      const suggestTaskName = (input: {
+        readonly projectId: ProjectId | null;
+        readonly cwd: string;
+        readonly message: string;
+      }) => {
+        const fallback = input.message.split("\n")[0]!.trim().slice(0, 60) || "tarea";
+        return Effect.gen(function* () {
+          const settings = resolveProjectSettings(
+            yield* serverSettings.getSettings,
+            input.projectId,
+          ).settings;
+          const modelSelection =
+            settings.sourceControlWriterModelSelection === null
+              ? settings.textGenerationModelSelection
+              : ServerSettings.resolveSourceControlWriterModelSelection(
+                  settings,
+                  yield* providerRegistry.getProviders,
+                );
+          const generated = yield* textGeneration.generateBranchName({
+            cwd: input.cwd,
+            message: input.message,
+            modelSelection,
+          });
+          // Models answer with a full branch ("feature/fabulas-v1"); only the name matters here.
+          const name = generated.branch.slice(generated.branch.lastIndexOf("/") + 1);
+          return slugifyTaskName(name) === "tarea" ? fallback : name;
+        }).pipe(
+          Effect.timeoutOption(Duration.seconds(8)),
+          Effect.map((name) => Option.getOrElse(name, () => fallback)),
+          Effect.orElseSucceed(() => fallback),
+        );
+      };
 
       return WsRpcGroup.of({
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
