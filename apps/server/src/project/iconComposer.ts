@@ -52,6 +52,7 @@ function readFill(value: unknown): Fill | null {
   const fill = value as
     | {
         "linear-gradient"?: unknown;
+        "automatic-gradient"?: unknown;
         solid?: unknown;
         orientation?: { start?: unknown; stop?: unknown };
       }
