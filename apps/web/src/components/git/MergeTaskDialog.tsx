@@ -1,9 +1,16 @@
 /**
  * "Fusionar en <integración>" for a task in its own worktree: brings the integration branch into
- * the worktree, runs the project's pre-merge check with its log live, then has the server build
- * the merge commit and push it. No folder ever checks the integration branch out.
+ * the worktree, shows what is being brought together, runs the project's pre-merge check with its
+ * log live, then has the server build the merge commit and push it. No folder ever checks the
+ * integration branch out. When others merged since the task started, the person merging must
+ * tick every incoming change and every change of the task as tried by hand before it goes on.
  */
-import type { EnvironmentId, ThreadId, VcsMergeTaskPrepareResult } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ThreadId,
+  VcsMergeTaskPrepareResult,
+  VcsMergeTaskReviewResult,
+} from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { CheckCircle2Icon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -16,6 +23,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsEnvironment } from "~/state/vcs";
 import { buildResolveConflictsPrompt, nextPermanentTaskName } from "../BranchToolbar.logic";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import {
   Dialog,
   DialogDescription,
@@ -28,6 +36,12 @@ import {
 import { Input } from "../ui/input";
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
+import {
+  buildReviewChecklist,
+  buildTaskMergeMessage,
+  buildTestMissionPrompt,
+  type ReviewChecklistItem,
+} from "./mergeTaskReview.logic";
 
 /** A push rejected because someone merged first starts over this many times. */
 const MAX_ATTEMPTS = 3;
@@ -40,8 +54,20 @@ type Step =
       readonly mergedRef: string;
       readonly conflictedFiles: ReadonlyArray<string>;
     }
+  | { readonly kind: "reviewing"; readonly headSha: string }
+  | {
+      readonly kind: "review";
+      readonly headSha: string;
+      readonly review: VcsMergeTaskReviewResult;
+    }
   | { readonly kind: "checking"; readonly runId: string; readonly headSha: string }
-  | { readonly kind: "check-failed"; readonly headSha: string; readonly log: string }
+  | {
+      readonly kind: "check-failed";
+      readonly headSha: string;
+      readonly log: string;
+      /** The task's setup script failed before the check could run. */
+      readonly setupFailed: boolean;
+    }
   | { readonly kind: "publishing" }
   | { readonly kind: "merged"; readonly commit: string; readonly localTargetUpdated: boolean }
   | { readonly kind: "closed" }
@@ -84,6 +110,7 @@ export function MergeTaskDialog({
   onContinueTask: () => void;
 }) {
   const prepare = useAtomCommand(vcsEnvironment.mergeTaskPrepare, { reportFailure: false });
+  const readReview = useAtomCommand(vcsEnvironment.mergeTaskReview, { reportFailure: false });
   const publish = useAtomCommand(vcsEnvironment.mergeTaskPublish, { reportFailure: false });
   const abort = useAtomCommand(vcsEnvironment.mergeAbort, { reportFailure: false });
   const closeTask = useAtomCommand(vcsEnvironment.closeTask, { reportFailure: false });
@@ -94,6 +121,9 @@ export function MergeTaskDialog({
   const [commitMessage, setCommitMessage] = useState("");
   const [forceConfirmation, setForceConfirmation] = useState("");
   const attempts = useRef(0);
+  // What the merge commit records; read again after every prepare.
+  const reviewRef = useRef<VcsMergeTaskReviewResult | null>(null);
+  const [tested, setTested] = useState<ReadonlySet<string>>(new Set());
   // A permanent thread moves to its next version while this dialog is still open.
   const [mergingBranch, setMergingBranch] = useState(branch);
 
@@ -114,14 +144,29 @@ export function MergeTaskDialog({
         mergedRef: prepared.mergedRef,
         conflictedFiles: prepared.conflictedFiles,
       });
-    } else setStep({ kind: "checking", runId: randomUUID(), headSha: prepared.headSha });
+    } else await runReview(prepared.headSha);
+  };
+
+  const runReview = async (headSha: string) => {
+    setStep({ kind: "reviewing", headSha });
+    const result = await readReview({ environmentId, input: { cwd, targetRef } });
+    if (result._tag === "Failure") {
+      setStep({ kind: "error", message: failureMessage(result) });
+      return;
+    }
+    reviewRef.current = result.value;
+    setTested(new Set());
+    setStep({ kind: "review", headSha, review: result.value });
   };
 
   const runPublish = async (headSha: string) => {
     setStep({ kind: "publishing" });
-    const message = threadTitle
-      ? `merge: ${branch} into ${targetRef}\n\n${threadTitle}`
-      : `merge: ${branch} into ${targetRef}`;
+    const message = buildTaskMergeMessage({
+      branch,
+      targetRef,
+      threadTitle,
+      review: reviewRef.current,
+    });
     const result = await publish({
       environmentId,
       input: { cwd, targetRef, headSha, message, ...(threadId ? { threadId } : {}) },
@@ -179,6 +224,7 @@ export function MergeTaskDialog({
   useEffect(() => {
     if (!open) return;
     attempts.current = 0;
+    reviewRef.current = null;
     setMergingBranch(branch);
     setCommitMessage("");
     setForceConfirmation("");
@@ -198,7 +244,14 @@ export function MergeTaskDialog({
   useEffect(() => {
     if (step.kind !== "checking" || !checkState?.done) return;
     if (checkState.exitCode === 0) void runPublish(step.headSha);
-    else setStep({ kind: "check-failed", headSha: step.headSha, log: checkState.output });
+    else {
+      setStep({
+        kind: "check-failed",
+        headSha: step.headSha,
+        log: checkState.output,
+        setupFailed: checkState.setupFailed,
+      });
+    }
   }, [checkState?.done]);
 
   const askAgent = (prompt: string) => {
@@ -319,14 +372,46 @@ export function MergeTaskDialog({
                 </ul>
               </>
             ) : null}
+            {step.kind === "reviewing" ? (
+              <p className="flex items-center gap-2 text-muted-foreground">
+                <Spinner className="size-4" />
+                Preparando el resumen de lo que se va a juntar…
+              </p>
+            ) : null}
+            {step.kind === "review" ? (
+              <MergeTaskReviewPanel
+                review={step.review}
+                targetRef={targetRef}
+                checklist={buildReviewChecklist(step.review)}
+                tested={tested}
+                onTestedChange={(key, checked) =>
+                  setTested((current) => {
+                    const next = new Set(current);
+                    if (checked) next.add(key);
+                    else next.delete(key);
+                    return next;
+                  })
+                }
+              />
+            ) : null}
             {step.kind === "checking" || step.kind === "check-failed" ? (
               <>
-                <p className="text-muted-foreground">
+                <p
+                  className={
+                    step.kind === "check-failed" && step.setupFailed
+                      ? "flex gap-2 text-destructive-foreground"
+                      : "text-muted-foreground"
+                  }
+                >
                   {step.kind === "check-failed"
-                    ? "La comprobación ha fallado."
-                    : checkState?.command
-                      ? `Comprobando: ${checkState.command}`
-                      : "Comprobando…"}
+                    ? step.setupFailed
+                      ? "No se pudieron reinstalar las dependencias de esta tarea. No se ha comprobado ni subido nada."
+                      : "La comprobación ha fallado."
+                    : checkState?.setup && !checkState.command
+                      ? `Las dependencias han cambiado: reinstalando con «${checkState.setup.name}»…`
+                      : checkState?.command
+                        ? `Comprobando: ${checkState.command}`
+                        : "Comprobando…"}
                 </p>
                 <pre
                   ref={checkLogRef}
@@ -336,7 +421,7 @@ export function MergeTaskDialog({
                 </pre>
               </>
             ) : null}
-            {step.kind === "check-failed" ? (
+            {step.kind === "check-failed" && !step.setupFailed ? (
               <label className="grid gap-1.5 text-xs text-muted-foreground">
                 Para fusionar igualmente, escribe «fusionar»:
                 <Input
@@ -426,21 +511,56 @@ export function MergeTaskDialog({
               </Button>
             </>
           ) : null}
-          {step.kind === "check-failed" ? (
+          {step.kind === "review" ? (
             <>
+              {step.review.incoming.length > 0 ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    askAgent(buildTestMissionPrompt({ branch, targetRef, review: step.review }))
+                  }
+                >
+                  Pedir al agente cómo probarlo
+                </Button>
+              ) : null}
               <Button
                 size="sm"
-                variant="outline"
-                disabled={forceConfirmation.trim().toLowerCase() !== "fusionar"}
-                onClick={() => void runPublish(step.headSha)}
+                disabled={
+                  step.review.incoming.length > 0 &&
+                  buildReviewChecklist(step.review).some((item) => !tested.has(item.key))
+                }
+                onClick={() =>
+                  setStep({ kind: "checking", runId: randomUUID(), headSha: step.headSha })
+                }
               >
-                Fusionar igualmente
+                Comprobar y fusionar
               </Button>
+            </>
+          ) : null}
+          {step.kind === "check-failed" ? (
+            <>
+              {step.setupFailed ? (
+                <Button size="sm" variant="outline" onClick={() => void runPrepare()}>
+                  Reintentar
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={forceConfirmation.trim().toLowerCase() !== "fusionar"}
+                  onClick={() => void runPublish(step.headSha)}
+                >
+                  Fusionar igualmente
+                </Button>
+              )}
               <Button
                 size="sm"
                 onClick={() =>
                   askAgent(
-                    `La comprobación previa a fusionar en ${targetRef} ha fallado. Arréglalo y haz commit. Final del log:\n\n${step.log.slice(-4000)}`,
+                    step.setupFailed
+                      ? `Al preparar esta tarea para fusionar en ${targetRef}, la reinstalación de dependencias ha fallado. Averigua por qué, arréglalo y haz commit si hace falta. Final del log:\n\n${step.log.slice(-4000)}`
+                      : `La comprobación previa a fusionar en ${targetRef} ha fallado. Arréglalo y haz commit. Final del log:\n\n${step.log.slice(-4000)}`,
                   )
                 }
               >
@@ -480,5 +600,133 @@ export function MergeTaskDialog({
         </DialogFooter>
       </DialogPopup>
     </Dialog>
+  );
+}
+
+function formatMergeDate(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? ""
+    : date.toLocaleString("es-ES", {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+}
+
+/** What is being brought together, in plain words, and the checklist when others merged first. */
+function MergeTaskReviewPanel({
+  review,
+  targetRef,
+  checklist,
+  tested,
+  onTestedChange,
+}: {
+  review: VcsMergeTaskReviewResult;
+  targetRef: string;
+  checklist: ReadonlyArray<ReviewChecklistItem>;
+  tested: ReadonlySet<string>;
+  onTestedChange: (key: string, checked: boolean) => void;
+}) {
+  const othersMerged = review.incoming.length > 0;
+  const sharedNames = review.sharedFiles.map((file) => file.slice(file.lastIndexOf("/") + 1));
+  return (
+    <>
+      {othersMerged ? (
+        <>
+          <p className="flex gap-2 text-warning-foreground">
+            <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
+            <span>
+              Espera: mientras trabajabas, otros subieron cambios a {targetRef}. Ya están juntados
+              con tu tarea en su carpeta, pero todavía no se ha subido nada.
+            </span>
+          </p>
+          <section className="grid gap-2">
+            <h3 className="font-medium">Lo que subieron otros</h3>
+            <ul className="grid gap-2">
+              {review.incoming.map((entry) => (
+                <li key={entry.commit}>
+                  <p>
+                    <span className="font-medium">{entry.author}</span>
+                    <span className="text-muted-foreground"> · {formatMergeDate(entry.date)}</span>
+                    {" — "}
+                    {entry.title}
+                  </p>
+                  {entry.summary.length > 0 ? (
+                    <ul className="list-disc pl-5 text-muted-foreground">
+                      {entry.summary.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+            {review.incomingTruncated ? (
+              <p className="text-xs text-muted-foreground">Y otros cambios anteriores.</p>
+            ) : null}
+          </section>
+        </>
+      ) : null}
+      <section className="grid gap-2">
+        <h3 className="font-medium">
+          {othersMerged
+            ? "Lo que has hecho tú en esta tarea"
+            : `Esto es lo que se sube a ${targetRef}`}
+        </h3>
+        <p>{review.own.title}</p>
+        {review.own.summary.length > 0 ? (
+          <ul className="list-disc pl-5 text-muted-foreground">
+            {review.own.summary.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        ) : null}
+        {review.own.generated ? null : (
+          <p className="text-xs text-muted-foreground">
+            No se pudo escribir un resumen; estos son los commits de la tarea.
+          </p>
+        )}
+      </section>
+      {othersMerged && sharedNames.length > 0 ? (
+        <p className="text-warning-foreground">
+          Los dos habéis tocado{" "}
+          {sharedNames.length === 1 ? "un archivo" : `${sharedNames.length} archivos`} en común (
+          {sharedNames.slice(0, 5).join(", ")}
+          {sharedNames.length > 5 ? "…" : ""}). Prueba con cuidado esas partes.
+        </p>
+      ) : null}
+      {othersMerged ? (
+        <section className="grid gap-2">
+          <h3 className="font-medium">Antes de subir, pruébalo tú en la app de esta tarea</h3>
+          <p className="text-xs text-muted-foreground">
+            Marca cada punto cuando lo hayas probado a mano. Las comprobaciones automáticas se pasan
+            después, pero no sustituyen tu prueba.
+          </p>
+          <ul className="grid gap-1.5">
+            {checklist.map((item) => (
+              <li key={item.key}>
+                <label className="flex items-start gap-2">
+                  <Checkbox
+                    className="mt-0.5"
+                    checked={tested.has(item.key)}
+                    onCheckedChange={(checked) => onTestedChange(item.key, checked === true)}
+                  />
+                  <span>
+                    {item.text}
+                    {item.author ? (
+                      <span className="text-muted-foreground"> · de {item.author}</span>
+                    ) : (
+                      <span className="text-muted-foreground"> · tuyo</span>
+                    )}
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </>
   );
 }

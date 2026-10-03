@@ -113,6 +113,11 @@ export class ProjectSetupScriptRunner extends Context.Service<
     readonly runForThread: (
       input: ProjectSetupScriptRunnerInput,
     ) => Effect.Effect<ProjectSetupScriptRunnerResult, ProjectSetupScriptRunnerError>;
+    /** The setup script `runForThread` would run in this worktree, or null when there is none. */
+    readonly setupScriptFor: (input: {
+      readonly projectCwd: string;
+      readonly worktreePath: string;
+    }) => Effect.Effect<{ readonly name: string; readonly command: string } | null>;
   }
 >()("t3/project/ProjectSetupScriptRunner") {}
 
@@ -459,7 +464,23 @@ export const make = Effect.gen(function* () {
     } as const;
   });
 
-  return ProjectSetupScriptRunner.of({ runForThread });
+  const setupScriptFor: ProjectSetupScriptRunner["Service"]["setupScriptFor"] = Effect.fn(
+    "ProjectSetupScriptRunner.setupScriptFor",
+  )(function* (input) {
+    const project = yield* projectionSnapshotQuery
+      .getActiveProjectByWorkspaceRoot(input.projectCwd)
+      .pipe(
+        Effect.map(Option.getOrUndefined),
+        Effect.orElseSucceed(() => undefined),
+      );
+    const settings = yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null));
+    const script =
+      (project && settings ? setupProjectScript(resolveProjectScripts(settings, project)) : null) ??
+      (yield* projectFileSetupScript(input.worktreePath).pipe(Effect.orElseSucceed(() => null)));
+    return script ? { name: script.name, command: script.command } : null;
+  });
+
+  return ProjectSetupScriptRunner.of({ runForThread, setupScriptFor });
 });
 
 export const layer = Layer.effect(ProjectSetupScriptRunner, make);

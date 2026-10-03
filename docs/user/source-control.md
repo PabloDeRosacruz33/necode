@@ -107,13 +107,21 @@ else the remote's default branch.
   first message.
 - **Actualizar desde …** fetches the integration branch and merges it into the thread's folder,
   keeping uncommitted work.
+- When work brought into a task (Actualizar desde, Pull or a merge) changes its lockfiles, Necode runs
+  the setup script (`runOnWorktreeCreate`) again in that task before it is used or merged, so its
+  dependencies match its code. If the reinstall fails, Necode says so and the merge does not go
+  ahead.
 - **Fusionar en …**, in a task, merges without checking the integration branch out anywhere: it
-  brings the integration branch into the task's folder, runs the project's pre-merge check
-  (`preMergeCheck` in `t3.json`, or the script marked `runBeforeMerge`) with its log live, then
-  builds the merge commit and pushes it. If a teammate merged in between, it starts over by itself.
-  Uncommitted work, conflicts (left in the task's folder for its agent) and a failed check stop the
-  merge with a way forward. Afterwards, **Cerrar tarea** deletes the task's folder and its branch,
-  locally and on the remote; the thread stays usable in the project's folder.
+  brings the integration branch into the task's folder and shows a plain summary of what this task
+  changes. If teammates merged since the task started, it first lists what each of them brought in,
+  with the summary their merge recorded, and asks you to try every change, theirs and yours, by
+  hand in the task's app and tick each one. **Pedir al agente cómo probarlo** has the task's agent
+  run the automatic checks and explain how to try each item. Then it runs the project's pre-merge
+  check (`preMergeCheck` in `t3.json`, or the script marked `runBeforeMerge`) with its log live, and
+  builds the merge commit, which records this task's summary for whoever merges next, and pushes
+  it. Uncommitted work, conflicts (left in the task's folder for its agent) and a failed check stop
+  the merge with a way forward. Afterwards, **Cerrar tarea** deletes the task's folder and its
+  branch, locally and on the remote; the thread stays usable in the project's folder.
 - **Seguir en una tarea nueva**, after a merge or from the branch menu, keeps the thread and its
   whole conversation: the current task is closed and the same thread continues on a new branch and
   folder from the latest integration branch.

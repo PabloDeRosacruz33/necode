@@ -211,6 +211,18 @@ export const VcsSyncWithInput = Schema.Struct({
 });
 export type VcsSyncWithInput = typeof VcsSyncWithInput.Type;
 
+/**
+ * The task's setup script ran again because new lockfiles came in. A non-zero or null exit
+ * code means the task's dependencies may not match its code; `output` is the end of its log.
+ */
+export const VcsWorktreeSetupRun = Schema.Struct({
+  name: Schema.String,
+  command: Schema.String,
+  exitCode: Schema.NullOr(Schema.Int),
+  output: Schema.String,
+});
+export type VcsWorktreeSetupRun = typeof VcsWorktreeSetupRun.Type;
+
 export const VcsSyncWithResult = Schema.Struct({
   status: Schema.Literals(["updated", "up_to_date", "conflicted"]),
   refName: TrimmedNonEmptyStringSchema,
@@ -219,6 +231,7 @@ export const VcsSyncWithResult = Schema.Struct({
   conflictedFiles: Schema.Array(Schema.String),
   /** Uncommitted work clashed with the update; git kept it in the stash. */
   stashConflict: Schema.Boolean,
+  setup: Schema.optional(VcsWorktreeSetupRun),
 });
 export type VcsSyncWithResult = typeof VcsSyncWithResult.Type;
 
@@ -256,12 +269,109 @@ export const VcsMergeTaskCheckInput = Schema.Struct({ cwd: TrimmedNonEmptyString
 export type VcsMergeTaskCheckInput = typeof VcsMergeTaskCheckInput.Type;
 
 export const VcsMergeTaskCheckEvent = Schema.Union([
+  /** The task's setup script runs first because its lockfiles changed since it last ran. */
+  Schema.TaggedStruct("setup", { name: Schema.String, command: Schema.String }),
+  /** The setup script failed; nothing else runs and the merge must not go ahead. */
+  Schema.TaggedStruct("setupFailed", { exitCode: Schema.NullOr(Schema.Int) }),
   /** `command` is null when the project declares no pre-merge check. */
   Schema.TaggedStruct("started", { command: Schema.NullOr(Schema.String) }),
   Schema.TaggedStruct("output", { text: Schema.String }),
   Schema.TaggedStruct("finished", { exitCode: Schema.NullOr(Schema.Int) }),
 ]);
 export type VcsMergeTaskCheckEvent = typeof VcsMergeTaskCheckEvent.Type;
+
+/**
+ * What a task merge brings together, for the person merging: the work that reached the
+ * integration branch since the task started (each entry one merge or direct commit, with the
+ * summary its own merge recorded) and a plain-language summary of the task itself.
+ */
+export const VcsMergeTaskReviewInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  targetRef: TrimmedNonEmptyStringSchema,
+});
+export type VcsMergeTaskReviewInput = typeof VcsMergeTaskReviewInput.Type;
+
+export const VcsMergeTaskReviewEntry = Schema.Struct({
+  commit: TrimmedNonEmptyStringSchema,
+  author: Schema.String,
+  /** ISO 8601. */
+  date: Schema.String,
+  title: Schema.String,
+  summary: Schema.Array(Schema.String),
+  howToTest: Schema.Array(Schema.String),
+});
+export type VcsMergeTaskReviewEntry = typeof VcsMergeTaskReviewEntry.Type;
+
+export const VcsMergeTaskReviewResult = Schema.Struct({
+  incoming: Schema.Array(VcsMergeTaskReviewEntry),
+  /** True when more entries arrived than `incoming` lists. */
+  incomingTruncated: Schema.Boolean,
+  own: Schema.Struct({
+    title: Schema.String,
+    summary: Schema.Array(Schema.String),
+    howToTest: Schema.Array(Schema.String),
+    /** False when the summary could not be written and only lists the task's commits. */
+    generated: Schema.Boolean,
+  }),
+  /** Files changed both by the incoming work and by the task. */
+  sharedFiles: Schema.Array(Schema.String),
+});
+export type VcsMergeTaskReviewResult = typeof VcsMergeTaskReviewResult.Type;
+
+const SUMMARY_HEADING = "## Resumen";
+const HOW_TO_TEST_HEADING = "## Cómo probarlo";
+
+/**
+ * The merge commit message of a task: its subject, the thread's title, and the plain-language
+ * summary and manual test steps that the next person merging reads back as incoming work.
+ */
+export function formatTaskMergeMessage(input: {
+  readonly branch: string;
+  readonly targetRef: string;
+  readonly title: string | null;
+  readonly summary: ReadonlyArray<string>;
+  readonly howToTest: ReadonlyArray<string>;
+  /** Incoming work the person merging tried by hand together with this task. */
+  readonly testedWith: ReadonlyArray<string>;
+}): string {
+  const section = (heading: string, items: ReadonlyArray<string>) =>
+    items.length > 0 ? [heading, ...items.map((item) => `- ${item}`)].join("\n") : null;
+  return [
+    `merge: ${input.branch} into ${input.targetRef}`,
+    input.title,
+    section(SUMMARY_HEADING, input.summary),
+    section(HOW_TO_TEST_HEADING, input.howToTest),
+    section("## Probado a mano junto con", input.testedWith),
+  ]
+    .filter((part): part is string => part !== null && part.trim().length > 0)
+    .join("\n\n");
+}
+
+/** Reads back what `formatTaskMergeMessage` recorded; empty lists for other commits. */
+export function parseTaskMergeMessage(body: string): {
+  readonly title: string | null;
+  readonly summary: ReadonlyArray<string>;
+  readonly howToTest: ReadonlyArray<string>;
+} {
+  const summary: Array<string> = [];
+  const howToTest: Array<string> = [];
+  let title: string | null = null;
+  let section: Array<string> | null = null;
+  let inHeadingSection = false;
+  for (const raw of body.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("#")) {
+      inHeadingSection = true;
+      section =
+        line === SUMMARY_HEADING ? summary : line === HOW_TO_TEST_HEADING ? howToTest : null;
+      continue;
+    }
+    const bullet = /^[-*]\s+(.+)$/.exec(line)?.[1]?.trim();
+    if (bullet && section) section.push(bullet);
+    else if (line && !inHeadingSection && title === null) title = line;
+  }
+  return { title, summary, howToTest };
+}
 
 export const VcsMergeTaskPublishInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
@@ -566,6 +676,7 @@ export const VcsPullResult = Schema.Struct({
   status: Schema.Literals(["pulled", "skipped_up_to_date"]),
   refName: TrimmedNonEmptyStringSchema,
   upstreamRef: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
+  setup: Schema.optional(VcsWorktreeSetupRun),
 });
 export type VcsPullResult = typeof VcsPullResult.Type;
 

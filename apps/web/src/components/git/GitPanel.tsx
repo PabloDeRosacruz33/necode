@@ -45,6 +45,7 @@ import { Button } from "../ui/button";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
+import { describeWorktreeSetup } from "./worktreeSetupNotice";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { layoutCommitGraph, type GraphRow, type GraphSegment } from "./commitGraph.logic";
 import {
@@ -214,7 +215,12 @@ function GitPanelHeader({
   const runPull = async () => {
     const result = await pull.run();
     if (result._tag === "Success") {
-      toastManager.add({ type: "success", title: `Pulled ${branchLabel}` });
+      const setupNotice = describeWorktreeSetup(result.value.setup);
+      toastManager.add({
+        type: setupNotice?.failed ? "error" : "success",
+        title: `Pulled ${branchLabel}`,
+        ...(setupNotice ? { description: setupNotice.text } : {}),
+      });
     } else {
       toastManager.add({
         type: "error",

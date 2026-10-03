@@ -2,6 +2,8 @@
  * Runs a project's pre-merge check in a task's folder and streams its output, so the merge
  * dialog can show the log live and decide on the exit code. The command comes from the
  * repository's own t3.json (`preMergeCheck` or a `runBeforeMerge` script), never from the client.
+ * When the task's lockfiles changed since its setup script last succeeded, `setup` runs first
+ * in the same log, and a failed setup ends the stream without running the check.
  */
 import {
   GitCommandError,
@@ -16,6 +18,11 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as T3ProjectFileLoader from "../project/T3ProjectFileLoader.ts";
+import {
+  runWorktreeSetup,
+  type TaskWorktree,
+  type WorktreeSetupScript,
+} from "../project/worktreeDependencies.ts";
 import * as ProcessRunner from "../processRunner.ts";
 
 const fail = (cwd: string, detail: string) =>
@@ -26,7 +33,35 @@ const fail = (cwd: string, detail: string) =>
     detail,
   });
 
-export const runMergeTaskCheck = (cwd: string) =>
+export const runMergeTaskCheck = (
+  cwd: string,
+  setup?: { readonly worktree: TaskWorktree; readonly script: WorktreeSetupScript },
+) =>
+  setup
+    ? Stream.fromIterable<VcsMergeTaskCheckEvent>([
+        { _tag: "setup", name: setup.script.name, command: setup.script.command },
+      ]).pipe(
+        Stream.concat(
+          runWorktreeSetup(setup.worktree, setup.script).pipe(
+            Stream.provide(ProcessRunner.layer),
+            Stream.flatMap((event) =>
+              event._tag === "output"
+                ? Stream.fromIterable<VcsMergeTaskCheckEvent>([
+                    { _tag: "output", text: event.text },
+                  ])
+                : event.exitCode === 0
+                  ? runCheck(cwd)
+                  : Stream.fromIterable<VcsMergeTaskCheckEvent>([
+                      { _tag: "setupFailed", exitCode: event.exitCode },
+                      { _tag: "finished", exitCode: event.exitCode },
+                    ]),
+            ),
+          ),
+        ),
+      )
+    : runCheck(cwd);
+
+const runCheck = (cwd: string) =>
   Stream.unwrap(
     Effect.gen(function* () {
       const loader = yield* T3ProjectFileLoader.T3ProjectFileLoader;

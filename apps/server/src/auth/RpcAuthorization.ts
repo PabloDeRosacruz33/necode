@@ -141,6 +141,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.macAppOpen]: AuthOrchestrationOperateScope,
   [WS_METHODS.macAppQuit]: AuthOrchestrationOperateScope,
   [WS_METHODS.vcsMergeTaskPrepare]: AuthOrchestrationOperateScope,
+  [WS_METHODS.vcsMergeTaskReview]: AuthOrchestrationOperateScope,
   [WS_METHODS.vcsMergeTaskCheck]: AuthOrchestrationOperateScope,
   [WS_METHODS.vcsMergeTaskPublish]: AuthOrchestrationOperateScope,
   [WS_METHODS.vcsMergeAbort]: AuthOrchestrationOperateScope,

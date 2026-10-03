@@ -86,6 +86,8 @@ import {
   VcsLogResult,
   VcsMergeTaskPrepareInput,
   VcsMergeTaskPrepareResult,
+  VcsMergeTaskReviewInput,
+  VcsMergeTaskReviewResult,
   VcsMergeTaskCheckInput,
   VcsMergeTaskCheckEvent,
   VcsMergeTaskPublishInput,
@@ -378,6 +380,7 @@ export const WS_METHODS = {
   vcsSyncWith: "vcs.syncWith",
   vcsLog: "vcs.log",
   vcsMergeTaskPrepare: "vcs.mergeTask.prepare",
+  vcsMergeTaskReview: "vcs.mergeTask.review",
   vcsMergeTaskCheck: "vcs.mergeTask.check",
   vcsMergeTaskPublish: "vcs.mergeTask.publish",
   vcsMergeAbort: "vcs.mergeAbort",
@@ -1219,6 +1222,12 @@ const WsVcsMergeTaskPrepareRpc = Rpc.make(WS_METHODS.vcsMergeTaskPrepare, {
   error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
 });
 
+const WsVcsMergeTaskReviewRpc = Rpc.make(WS_METHODS.vcsMergeTaskReview, {
+  payload: VcsMergeTaskReviewInput,
+  success: VcsMergeTaskReviewResult,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
 const WsVcsMergeTaskCheckRpc = Rpc.make(WS_METHODS.vcsMergeTaskCheck, {
   payload: VcsMergeTaskCheckInput,
   success: VcsMergeTaskCheckEvent,
@@ -1745,6 +1754,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsMacAppOpenRpc,
   WsMacAppQuitRpc,
   WsVcsMergeTaskPrepareRpc,
+  WsVcsMergeTaskReviewRpc,
   WsVcsMergeTaskCheckRpc,
   WsVcsMergeTaskPublishRpc,
   WsVcsMergeAbortRpc,

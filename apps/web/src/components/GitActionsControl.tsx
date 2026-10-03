@@ -93,6 +93,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Textarea } from "~/components/ui/textarea";
 import { stackedThreadToast, toastManager, type ThreadToastData } from "~/components/ui/toast";
+import { describeWorktreeSetup } from "./git/worktreeSetupNotice";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useOpenInPreferredEditor } from "~/editorPreferences";
 import {
@@ -1541,13 +1542,15 @@ export default function GitActionsControl({
         }
 
         const pullResult = result.value;
+        const setupNotice = describeWorktreeSetup(pullResult.setup);
+        const summary =
+          pullResult.status === "pulled"
+            ? `Updated ${pullResult.refName} from ${pullResult.upstreamRef ?? "upstream"}`
+            : `${pullResult.refName} is already synchronized.`;
         toastManager.update(toastId, {
-          type: "success",
+          type: setupNotice?.failed ? "error" : "success",
           title: pullResult.status === "pulled" ? "Pulled" : "Already up to date",
-          description:
-            pullResult.status === "pulled"
-              ? `Updated ${pullResult.refName} from ${pullResult.upstreamRef ?? "upstream"}`
-              : `${pullResult.refName} is already synchronized.`,
+          description: setupNotice ? `${summary}\n${setupNotice.text}` : summary,
           data: threadToastData,
         });
       })();

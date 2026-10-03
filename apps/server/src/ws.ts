@@ -154,6 +154,13 @@ import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import { relocateProject } from "./project/ProjectRelocation.ts";
 import { runMergeTaskCheck } from "./vcs/mergeTaskCheck.ts";
+import { readTaskReview } from "./vcs/taskReview.ts";
+import {
+  locateTaskWorktree,
+  recordWorktreeDependencies,
+  refreshWorktreeDependencies,
+  worktreeDependenciesStale,
+} from "./project/worktreeDependencies.ts";
 import { archiveMacApp, openMacApp, quitMacApp, runMacAppBuild } from "./macApp/macApp.ts";
 import { resolveTaskWorktree, slugifyTaskName } from "./vcs/taskBranch.ts";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -658,6 +665,51 @@ const makeWsRpcLayer = (
         | WorkspacePaths.WorkspacePaths
         | ChildProcessSpawner.ChildProcessSpawner
       >();
+      const withTaskWorktreeServices = <A, E>(
+        effect: Effect.Effect<
+          A,
+          E,
+          | FileSystem.FileSystem
+          | Path.Path
+          | ChildProcessSpawner.ChildProcessSpawner
+          | ProcessRunner.ProcessRunner
+        >,
+      ) =>
+        effect.pipe(Effect.provide(ProcessRunner.layer), Effect.provideContext(normalizerContext));
+      const taskSetupScript = (worktree: { readonly projectRoot: string; readonly root: string }) =>
+        projectSetupScriptRunner.setupScriptFor({
+          projectCwd: worktree.projectRoot,
+          worktreePath: worktree.root,
+        });
+      // Work just brought into a task can change its lockfiles; its setup script runs again then.
+      const refreshTaskDependencies = (cwd: string) =>
+        withTaskWorktreeServices(refreshWorktreeDependencies(cwd, taskSetupScript));
+      // A setup that succeeded at task creation leaves its lockfiles recorded, so the first
+      // merge does not reinstall for nothing.
+      const recordTaskSetup = (worktreePath: string) =>
+        withTaskWorktreeServices(recordWorktreeDependencies(worktreePath)).pipe(
+          Effect.ignoreCause({ log: true }),
+        );
+      // Starts a new task's setup script without waiting for it; success records its lockfiles.
+      const runTaskSetup = (input: {
+        readonly threadId: ThreadId;
+        readonly projectCwd: string;
+        readonly worktreePath: string;
+      }) =>
+        projectSetupScriptRunner.runForThread({ ...input, observeCompletion: {} }).pipe(
+          Effect.flatMap((result) =>
+            result.status === "started" && result.completion
+              ? result.completion.pipe(
+                  Effect.flatMap(({ exitCode }) =>
+                    exitCode === 0 ? recordTaskSetup(input.worktreePath) : Effect.void,
+                  ),
+                  Effect.forkDetach,
+                  Effect.asVoid,
+                )
+              : Effect.void,
+          ),
+          Effect.ignoreCause({ log: true }),
+        );
       const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
@@ -1336,7 +1388,9 @@ const makeWsRpcLayer = (
               const completionFiber = yield* setupResult.completion.pipe(
                 Effect.flatMap((completion) => {
                   if (completion.exitCode === 0) {
-                    return worktreeSetupTracker.stageStatus(threadId, "setup-script", "done");
+                    return worktreeSetupTracker
+                      .stageStatus(threadId, "setup-script", "done")
+                      .pipe(Effect.andThen(recordTaskSetup(worktreePath)));
                   }
                   const detail =
                     completion.exitCode === null
@@ -3546,6 +3600,13 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.vcsPull,
             gitWorkflow.pullCurrentBranch(input.cwd).pipe(
+              Effect.flatMap((result) =>
+                result.status === "pulled"
+                  ? refreshTaskDependencies(input.cwd).pipe(
+                      Effect.map((setup) => (setup ? { ...result, setup } : result)),
+                    )
+                  : Effect.succeed(result),
+              ),
               Effect.matchCauseEffect({
                 onFailure: (cause) => Effect.failCause(cause),
                 onSuccess: (result) =>
@@ -3647,7 +3708,16 @@ const makeWsRpcLayer = (
         [WS_METHODS.vcsSyncWith]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsSyncWith,
-            gitWorkflow.syncWith(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            gitWorkflow.syncWith(input).pipe(
+              Effect.flatMap((result) =>
+                result.status === "conflicted"
+                  ? Effect.succeed(result)
+                  : refreshTaskDependencies(input.cwd).pipe(
+                      Effect.map((setup) => (setup ? { ...result, setup } : result)),
+                    ),
+              ),
+              Effect.tap(() => refreshGitStatus(input.cwd)),
+            ),
             { "rpc.aggregate": "vcs" },
           ),
         [WS_METHODS.vcsLog]: (input) =>
@@ -3681,9 +3751,49 @@ const makeWsRpcLayer = (
             "rpc.aggregate": "mac-app",
           }),
         [WS_METHODS.vcsMergeTaskCheck]: (input) =>
-          observeRpcStream(WS_METHODS.vcsMergeTaskCheck, runMergeTaskCheck(input.cwd), {
-            "rpc.aggregate": "vcs",
-          }),
+          observeRpcStream(
+            WS_METHODS.vcsMergeTaskCheck,
+            Stream.unwrap(
+              withTaskWorktreeServices(
+                Effect.gen(function* () {
+                  const worktree = yield* locateTaskWorktree(input.cwd);
+                  if (!worktree || !(yield* worktreeDependenciesStale(worktree))) return undefined;
+                  const script = yield* taskSetupScript(worktree);
+                  return script ? { worktree, script } : undefined;
+                }),
+              ).pipe(Effect.map((setup) => runMergeTaskCheck(input.cwd, setup))),
+            ),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsMergeTaskReview]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsMergeTaskReview,
+            Effect.gen(function* () {
+              const settings = yield* serverSettings.getSettings.pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new GitCommandError({
+                      operation: "MergeTaskReview.settings",
+                      command: "merge review",
+                      cwd: input.cwd,
+                      detail: `Could not read the settings: ${cause.message}`,
+                    }),
+                ),
+              );
+              const providers = yield* providerRegistry.getProviders;
+              return yield* withTaskWorktreeServices(
+                readTaskReview({
+                  cwd: input.cwd,
+                  targetRef: input.targetRef,
+                  modelSelection: ServerSettings.resolveSourceControlWriterModelSelection(
+                    settings,
+                    providers,
+                  ),
+                }).pipe(Effect.provideService(TextGeneration, textGeneration)),
+              );
+            }),
+            { "rpc.aggregate": "vcs" },
+          ),
         [WS_METHODS.vcsMergeTaskPublish]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsMergeTaskPublish,
@@ -3805,13 +3915,11 @@ const makeWsRpcLayer = (
                 })
                 .pipe(Effect.ignoreCause({ log: true }));
               // Installs and the like run in the thread's terminal; the agent can start meanwhile.
-              yield* projectSetupScriptRunner
-                .runForThread({
-                  threadId: input.threadId,
-                  projectCwd: input.projectCwd,
-                  worktreePath,
-                })
-                .pipe(Effect.ignoreCause({ log: true }));
+              yield* runTaskSetup({
+                threadId: input.threadId,
+                projectCwd: input.projectCwd,
+                worktreePath,
+              });
               yield* refreshGitStatus(input.projectCwd);
               return { branch, worktreePath };
             }).pipe(
@@ -3982,9 +4090,7 @@ const makeWsRpcLayer = (
                 }).pipe(Effect.ignoreCause({ log: true }));
               yield* note(threadId, `Duplicado de «${title}» · ${branch}`);
               if (local) yield* note(local.id, `Duplicado en un hilo paralelo · ${branch}`);
-              yield* projectSetupScriptRunner
-                .runForThread({ threadId, projectCwd, worktreePath })
-                .pipe(Effect.ignoreCause({ log: true }));
+              yield* runTaskSetup({ threadId, projectCwd, worktreePath });
               yield* refreshGitStatus(projectCwd);
               return { threadId, branch, forked: resumeCursor !== null };
             }).pipe(

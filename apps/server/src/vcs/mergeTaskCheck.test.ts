@@ -17,8 +17,16 @@ const withProjectFile = (file: string | null) =>
     return cwd;
   });
 
-const collect = (cwd: string) =>
-  runMergeTaskCheck(cwd).pipe(
+const collect = (cwd: string, setupCommand?: string) =>
+  runMergeTaskCheck(
+    cwd,
+    setupCommand === undefined
+      ? undefined
+      : {
+          worktree: { root: cwd, projectRoot: cwd, gitDir: cwd },
+          script: { name: "Preparar worktree", command: setupCommand },
+        },
+  ).pipe(
     Stream.runCollect,
     Effect.map((events) => Array.from(events)),
   );
@@ -62,6 +70,47 @@ it.layer(NodeServices.layer)("runMergeTaskCheck", (it) => {
         assert.deepStrictEqual(yield* collect(cwd), [
           { _tag: "started", command: null },
           { _tag: "finished", exitCode: 0 },
+        ]);
+      }),
+    ),
+  );
+
+  it.effect("reinstalls first when the task's dependencies are stale, then checks", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const cwd = yield* withProjectFile('{"preMergeCheck": "echo checking"}');
+
+        const events = yield* collect(cwd, "echo installing");
+
+        assert.deepStrictEqual(events[0], {
+          _tag: "setup",
+          name: "Preparar worktree",
+          command: "echo installing",
+        });
+        const tags = events.map((event) => event._tag);
+        assert.isBelow(tags.indexOf("setup"), tags.indexOf("started"));
+        const output = events.flatMap((event) => (event._tag === "output" ? [event.text] : []));
+        assert.include(output.join(""), "installing");
+        assert.include(output.join(""), "checking");
+        assert.deepStrictEqual(events.at(-1), { _tag: "finished", exitCode: 0 });
+      }),
+    ),
+  );
+
+  it.effect("stops without running the check when the reinstall fails", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const cwd = yield* withProjectFile('{"preMergeCheck": "echo checking"}');
+
+        const events = yield* collect(cwd, "exit 5");
+
+        assert.notInclude(
+          events.map((event) => event._tag),
+          "started",
+        );
+        assert.deepStrictEqual(events.slice(-2), [
+          { _tag: "setupFailed", exitCode: 5 },
+          { _tag: "finished", exitCode: 5 },
         ]);
       }),
     ),

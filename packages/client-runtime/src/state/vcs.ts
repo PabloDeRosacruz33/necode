@@ -43,6 +43,10 @@ const OFFLINE_BRANCH_LIST_LIMIT = 100;
 const MERGE_CHECK_LOG_LIMIT = 200_000;
 
 export interface MergeTaskCheckState {
+  /** The task's setup script, when it ran first because the task's lockfiles changed. */
+  readonly setup: { readonly name: string; readonly command: string } | null;
+  /** True when that setup failed; the check did not run. */
+  readonly setupFailed: boolean;
   readonly command: string | null;
   readonly output: string;
   readonly exitCode: number | null;
@@ -325,6 +329,10 @@ export function createVcsEnvironmentAtoms<R, E>(
       concurrency: vcsCommandConcurrency,
       onSettled: invalidateRefs,
     }),
+    mergeTaskReview: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:merge-task-review",
+      tag: WS_METHODS.vcsMergeTaskReview,
+    }),
     mergeTaskPublish: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:vcs:merge-task-publish",
       tag: WS_METHODS.vcsMergeTaskPublish,
@@ -369,17 +377,28 @@ export function createVcsEnvironmentAtoms<R, E>(
       subscribe: (input: { readonly cwd: string; readonly runId: string }) =>
         subscribe(WS_METHODS.vcsMergeTaskCheck, { cwd: input.cwd }).pipe(
           Stream.mapAccum(
-            (): MergeTaskCheckState => ({ command: null, output: "", exitCode: null, done: false }),
+            (): MergeTaskCheckState => ({
+              setup: null,
+              setupFailed: false,
+              command: null,
+              output: "",
+              exitCode: null,
+              done: false,
+            }),
             (state, event: VcsMergeTaskCheckEvent) => {
               const next: MergeTaskCheckState =
-                event._tag === "started"
-                  ? { ...state, command: event.command }
-                  : event._tag === "output"
-                    ? {
-                        ...state,
-                        output: (state.output + event.text).slice(-MERGE_CHECK_LOG_LIMIT),
-                      }
-                    : { ...state, exitCode: event.exitCode, done: true };
+                event._tag === "setup"
+                  ? { ...state, setup: { name: event.name, command: event.command } }
+                  : event._tag === "setupFailed"
+                    ? { ...state, setupFailed: true }
+                    : event._tag === "started"
+                      ? { ...state, command: event.command }
+                      : event._tag === "output"
+                        ? {
+                            ...state,
+                            output: (state.output + event.text).slice(-MERGE_CHECK_LOG_LIMIT),
+                          }
+                        : { ...state, exitCode: event.exitCode, done: true };
               return [next, [next]] as const;
             },
           ),

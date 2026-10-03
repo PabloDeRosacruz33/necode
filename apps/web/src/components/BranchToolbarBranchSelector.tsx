@@ -101,6 +101,7 @@ import {
   ComboboxTrigger,
 } from "./ui/combobox";
 import { stackedThreadToast, toastManager } from "./ui/toast";
+import { describeWorktreeSetup } from "./git/worktreeSetupNotice";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
 
@@ -704,7 +705,7 @@ export function BranchToolbarBranchSelector({
         }
         return;
       }
-      const { status, refName, mergedRef, conflictedFiles, stashConflict } = result.value;
+      const { status, refName, mergedRef, conflictedFiles, stashConflict, setup } = result.value;
       if (status === "conflicted") {
         offerConflictResolution({
           title: `${mergedRef} choca con ${refName}`,
@@ -714,19 +715,23 @@ export function BranchToolbarBranchSelector({
         });
         return;
       }
+      const setupNotice = describeWorktreeSetup(setup);
+      const description = [
+        stashConflict
+          ? "Tus cambios sin commit chocaban con la actualización. Git guardó una copia en el stash."
+          : null,
+        setupNotice?.text ?? null,
+      ]
+        .filter((line) => line !== null)
+        .join("\n");
       toastManager.add(
         stackedThreadToast({
-          type: stashConflict ? "warning" : "success",
+          type: setupNotice?.failed ? "error" : stashConflict ? "warning" : "success",
           title:
             status === "up_to_date"
               ? `Ya estaba al día con ${mergedRef}`
               : `${refName} incluye ya ${mergedRef}`,
-          ...(stashConflict
-            ? {
-                description:
-                  "Tus cambios sin commit chocaban con la actualización. Git guardó una copia en el stash.",
-              }
-            : {}),
+          ...(description ? { description } : {}),
         }),
       );
     });
