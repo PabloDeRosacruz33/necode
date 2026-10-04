@@ -15,6 +15,7 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as T3ProjectFileLoader from "../project/T3ProjectFileLoader.ts";
+import { resolveIosSimulatorPlan } from "./iosSimulatorPlan.ts";
 import * as ProcessRunner from "../processRunner.ts";
 
 /** Enough of the end of the log to find the `.app` path the build printed last. */
@@ -61,11 +62,12 @@ export const runMacAppBuild = (cwd: string, target: "mac" | "ios-simulator" = "m
       const loader = yield* T3ProjectFileLoader.T3ProjectFileLoader;
       const path = yield* Path.Path;
       const file = Option.getOrNull(yield* loader.load(cwd));
-      const config = target === "ios-simulator" ? file?.iosSimulator : file?.macApp;
+      const config =
+        target === "ios-simulator" ? yield* resolveIosSimulatorPlan(cwd) : file?.macApp;
       if (!config) {
         return yield* fail(
           target === "ios-simulator"
-            ? "This project's t3.json has no iosSimulator.build command."
+            ? "No iOS app found in this project. Add iosSimulator.build to its t3.json."
             : "This project's t3.json has no macApp.build command.",
         );
       }

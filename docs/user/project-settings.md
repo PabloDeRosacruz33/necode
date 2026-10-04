@@ -113,14 +113,17 @@ runs on that same Mac.
 
 ## Try the iOS app in a simulator
 
-If the project has an iOS app, add a command that builds a self-contained simulator app (its
-JavaScript bundled in) to `t3.json`:
+When the project has an iOS app (Expo, React Native, or an Xcode project, including XcodeGen's
+`project.yml`) and its environment is a Mac with Xcode, a thread's header shows **Simular**. Necode
+finds the app and builds it for the simulator itself, JavaScript bundled in. If your app needs its
+own build steps (for example, building shared packages first), put a command in `t3.json` that
+builds the simulator app and prints its path; it replaces the automatic build:
 
 ```json
 { "iosSimulator": { "build": "npm run build:mobile:simulator", "appPath": "path/to/App.app" } }
 ```
 
-A thread's header then shows **Simular** with two choices:
+**Simular** offers two choices:
 
 - **En este Mac**: the environment builds the app, the desktop app downloads it and runs it in this
   Mac's own simulator, starting one when none is running. Nothing crosses the network while you

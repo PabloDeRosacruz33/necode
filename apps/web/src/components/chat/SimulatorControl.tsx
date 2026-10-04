@@ -1,6 +1,6 @@
 /**
- * "Simular" for projects whose t3.json declares `iosSimulator.build`, with the two ways to try
- * the iOS app:
+ * "Simular" for projects with an iOS app (found by the environment, or declared in t3.json's
+ * `iosSimulator`), with the two ways to try it:
  * - On this Mac: the environment builds a self-contained simulator app, this Mac downloads it and
  *   runs it in its own simulator. Nothing crosses the network while testing; seeing a change
  *   means simulating again.
@@ -45,7 +45,7 @@ function failureMessage(result: { readonly cause: Cause.Cause<unknown> }): strin
 
 const livePrompt = (environmentLabel: string) =>
   [
-    `Arranca la app de iOS de este proyecto en un simulador de ${environmentLabel} (device_open con hostId "local"), con el servidor de desarrollo (Metro) en marcha para que los cambios se vean al guardar.`,
+    `Arranca la app de iOS de este proyecto en un simulador de ${environmentLabel} (device_open con hostId "local"). Si usa un servidor de desarrollo (Metro, Expo), déjalo en marcha para que los cambios se vean al guardar.`,
     "Ábrela en el panel Device y dime cuándo está lista.",
   ].join(" ");
 
@@ -65,6 +65,11 @@ export function SimulatorControl({
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [logOpen, setLogOpen] = useState(false);
   const download = useAtomCommand(vcsEnvironment.macAppDownload, { reportFailure: false });
+  const plan = useEnvironmentQuery(
+    vcsEnvironment.iosSimulatorPlan({ environmentId, input: { cwd } }),
+  );
+  // Environments from before the plan request only know t3.json's.
+  const buildCommand = plan.data?.build ?? projectFile.file?.iosSimulator?.build ?? null;
   const build = useEnvironmentQuery(
     phase.kind === "building"
       ? vcsEnvironment.macAppBuild({
@@ -130,7 +135,7 @@ export function SimulatorControl({
         kind: "failed",
         message:
           buildState.exitCode === 0
-            ? "La compilación terminó pero no encuentro la app. Añade iosSimulator.appPath en t3.json."
+            ? "La compilación terminó pero no encuentro la app. Indica dónde queda con iosSimulator en t3.json."
             : "La compilación ha fallado.",
       });
       setLogOpen(true);
@@ -143,7 +148,7 @@ export function SimulatorControl({
     }
   }, [build.error, phase.kind]);
 
-  if (projectFile.file?.iosSimulator === undefined) return null;
+  if (buildCommand === null) return null;
 
   const busy = phase.kind === "building" || phase.kind === "installing";
   const runHere = () => {
@@ -178,7 +183,9 @@ export function SimulatorControl({
         <DialogHeader>
           <DialogTitle>Simulador</DialogTitle>
           <DialogDescription>
-            {buildState?.command ?? projectFile.file.iosSimulator.build}
+            <span className="font-mono text-xs whitespace-pre-wrap">
+              {buildState?.command ?? buildCommand}
+            </span>
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>

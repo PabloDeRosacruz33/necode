@@ -168,6 +168,7 @@ import {
   worktreeDependenciesStale,
 } from "./project/worktreeDependencies.ts";
 import { archiveMacApp, openMacApp, quitMacApp, runMacAppBuild } from "./macApp/macApp.ts";
+import { resolveIosSimulatorPlan } from "./macApp/iosSimulatorPlan.ts";
 import { resolveTaskWorktree, slugifyTaskName } from "./vcs/taskBranch.ts";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { expandHomePath } from "./os-jank.ts";
@@ -3762,6 +3763,14 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.macAppQuit, quitMacApp(input.bundleId), {
             "rpc.aggregate": "mac-app",
           }),
+        [WS_METHODS.macAppIosSimulatorPlan]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.macAppIosSimulatorPlan,
+            resolveIosSimulatorPlan(input.cwd).pipe(
+              Effect.map((plan) => (plan ? { build: plan.build } : null)),
+            ),
+            { "rpc.aggregate": "mac-app" },
+          ),
         [WS_METHODS.vcsMergeTaskCheck]: (input) =>
           observeRpcStream(
             WS_METHODS.vcsMergeTaskCheck,

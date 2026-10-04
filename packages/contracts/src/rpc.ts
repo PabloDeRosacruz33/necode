@@ -128,6 +128,8 @@ import {
   MacAppBuildEvent,
   MacAppBuildInput,
   MacAppError,
+  MacAppIosSimulatorPlan,
+  MacAppIosSimulatorPlanInput,
   MacAppOpenInput,
   MacAppQuitInput,
 } from "./macApp.ts";
@@ -398,6 +400,7 @@ export const WS_METHODS = {
   macAppArchive: "macApp.archive",
   macAppOpen: "macApp.open",
   macAppQuit: "macApp.quit",
+  macAppIosSimulatorPlan: "macApp.iosSimulatorPlan",
   vcsCommitDetails: "vcs.commitDetails",
   vcsInit: "vcs.init",
 
@@ -1300,6 +1303,12 @@ const WsMacAppQuitRpc = Rpc.make(WS_METHODS.macAppQuit, {
   error: Schema.Union([MacAppError, EnvironmentAuthorizationError]),
 });
 
+const WsMacAppIosSimulatorPlanRpc = Rpc.make(WS_METHODS.macAppIosSimulatorPlan, {
+  payload: MacAppIosSimulatorPlanInput,
+  success: MacAppIosSimulatorPlan,
+  error: Schema.Union([MacAppError, EnvironmentAuthorizationError]),
+});
+
 const WsVcsLogRpc = Rpc.make(WS_METHODS.vcsLog, {
   payload: VcsLogInput,
   success: VcsLogResult,
@@ -1794,6 +1803,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsMacAppArchiveRpc,
   WsMacAppOpenRpc,
   WsMacAppQuitRpc,
+  WsMacAppIosSimulatorPlanRpc,
   WsVcsMergeTaskPrepareRpc,
   WsVcsMergeTaskReviewRpc,
   WsVcsMergeTaskCheckRpc,

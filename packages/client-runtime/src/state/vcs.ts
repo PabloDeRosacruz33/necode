@@ -459,6 +459,13 @@ export function createVcsEnvironmentAtoms<R, E>(
       label: "environment-data:mac-app:quit",
       tag: WS_METHODS.macAppQuit,
     }),
+    // Whether "Simular" can build an iOS app in a folder; it changes only with the project.
+    iosSimulatorPlan: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:mac-app:ios-simulator-plan",
+      tag: WS_METHODS.macAppIosSimulatorPlan,
+      staleTimeMs: 5 * 60_000,
+      idleTtlMs: 5 * 60_000,
+    }),
     status: createEnvironmentSubscriptionAtomFamily(runtime, {
       label: "environment-data:vcs:status",
       idleTtlMs: VCS_STATUS_IDLE_TTL_MS,

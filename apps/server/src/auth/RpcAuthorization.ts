@@ -140,6 +140,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.macAppArchive]: AuthOrchestrationOperateScope,
   [WS_METHODS.macAppOpen]: AuthOrchestrationOperateScope,
   [WS_METHODS.macAppQuit]: AuthOrchestrationOperateScope,
+  [WS_METHODS.macAppIosSimulatorPlan]: AuthOrchestrationReadScope,
   [WS_METHODS.vcsMergeTaskPrepare]: AuthOrchestrationOperateScope,
   [WS_METHODS.vcsMergeTaskReview]: AuthOrchestrationOperateScope,
   [WS_METHODS.openUrlConnect]: AuthOrchestrationReadScope,

@@ -9,7 +9,7 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
  */
 export const MacAppBuildInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
-  /** `ios-simulator` builds t3.json's `iosSimulator` instead of its `macApp`. */
+  /** `ios-simulator` builds the project's iOS app for the simulator instead of its `macApp`. */
   target: Schema.optional(Schema.Literals(["mac", "ios-simulator"])),
 });
 export type MacAppBuildInput = typeof MacAppBuildInput.Type;
@@ -32,6 +32,15 @@ export const MacAppBuildEvent = Schema.Union([
   }),
 ]);
 export type MacAppBuildEvent = typeof MacAppBuildEvent.Type;
+
+/** Whether "Simular" can build the iOS app in `cwd`: t3.json's `iosSimulator`, or one found there. */
+export const MacAppIosSimulatorPlanInput = Schema.Struct({ cwd: TrimmedNonEmptyString });
+export type MacAppIosSimulatorPlanInput = typeof MacAppIosSimulatorPlanInput.Type;
+
+export const MacAppIosSimulatorPlan = Schema.NullOr(
+  Schema.Struct({ build: TrimmedNonEmptyString }),
+);
+export type MacAppIosSimulatorPlan = typeof MacAppIosSimulatorPlan.Type;
 
 export const MacAppArchiveInput = Schema.Struct({ appPath: TrimmedNonEmptyString });
 export type MacAppArchiveInput = typeof MacAppArchiveInput.Type;
