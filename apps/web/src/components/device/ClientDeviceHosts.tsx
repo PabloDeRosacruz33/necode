@@ -87,14 +87,24 @@ function ClientDeviceHost({ environmentId }: { readonly environmentId: Environme
       const result = appAtomRegistry.get(access);
       return AsyncResult.isSuccess(result) ? result.value : null;
     };
+    // The first request can arrive before the ticket does; wait for it rather than drop it.
+    const awaitAccess = () =>
+      new Promise<NonNullable<ReturnType<typeof currentAccess>>>((resolve) => {
+        const ready = currentAccess();
+        if (ready) return resolve(ready);
+        const stop = appAtomRegistry.subscribe(access, (result) => {
+          if (!AsyncResult.isSuccess(result)) return;
+          stop();
+          resolve(result.value);
+        });
+      });
     const handle = async (request: ClientDeviceHostRequest) => {
-      if (request._tag === "tunnel") {
-        const ticket = currentAccess();
-        if (!ticket) return;
+      if (request._tag === "link") {
+        // The link authenticates once, when it opens; a refreshed ticket is for the next one.
+        const ticket = await awaitAccess();
         const query = new URLSearchParams(ticket.query).toString();
-        await bridge.openTunnel({
-          url: `${ticket.wsBase}/tunnel/${request.tunnelId}${query ? `?${query}` : ""}`,
-          port: request.port,
+        await bridge.openLink({
+          url: `${ticket.wsBase}/link/${request.linkId}${query ? `?${query}` : ""}`,
         });
         return;
       }
@@ -107,8 +117,7 @@ function ClientDeviceHost({ environmentId }: { readonly environmentId: Environme
               ...(request.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
             })
           : await (async () => {
-              const ticket = currentAccess();
-              if (!ticket) return { stdout: "", stderr: "Not connected yet.", code: 1 };
+              const ticket = await awaitAccess();
               return bridge.installTools({
                 toolsUrl: `${ticket.httpBase}/tools`,
                 query: ticket.query,
@@ -123,7 +132,8 @@ function ClientDeviceHost({ environmentId }: { readonly environmentId: Environme
       (result) => {
         if (!AsyncResult.isSuccess(result)) return;
         const request = result.value;
-        const id = request._tag === "tunnel" ? request.tunnelId : request.requestId;
+        const id =
+          request._tag === "link" ? `link:${request.linkId}:${Date.now()}` : request.requestId;
         if (handled.has(id)) return;
         handled.add(id);
         void handle(request);

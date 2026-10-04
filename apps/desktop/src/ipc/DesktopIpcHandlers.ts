@@ -143,7 +143,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(PortForwardIpc.syncPortForwards);
   yield* ipc.handle(ClientDeviceHostIpc.deviceHostExec);
   yield* ipc.handle(ClientDeviceHostIpc.deviceHostInstallTools);
-  yield* ipc.handle(ClientDeviceHostIpc.deviceHostOpenTunnel);
+  yield* ipc.handle(ClientDeviceHostIpc.deviceHostOpenLink);
   yield* ipc.handle(receiveProviderAuthCallback);
   yield* ipc.handle(cancelProviderAuthCallback);
   yield* ipc.handle(openSystemSettings);

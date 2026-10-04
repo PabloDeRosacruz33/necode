@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off -- Tunnels accept raw TCP connections on loopback.
+// @effect-diagnostics nodeBuiltinImport:off -- Forwards accept raw TCP connections on loopback.
 /**
  * Desktop apps that offer their own Mac's simulators to this environment, so people working
  * remotely test on a Simulator window on their screen while builds, agents and Metro run here.
@@ -7,8 +7,9 @@
  *
  * The app is the transport (see RemoteDeviceHost.ts): it runs the device script and simulator
  * commands on its Mac, receives the device tools from this server instead of needing npm, and
- * for every connection to a forwarded port opens a WebSocket back to
- * `/api/client-device-host/tunnel/<tunnelId>`, which carries that connection's bytes.
+ * keeps one WebSocket open to `/api/client-device-host/link/<linkId>` that carries every
+ * connection to the forwarded ports (`@t3tools/shared/streamMux`). One link instead of a
+ * handshake per connection keeps the host usable over slow links.
  */
 import type { ClientDeviceHostRequest, ClientDeviceHostResponse } from "@t3tools/contracts";
 import * as NodeCrypto from "node:crypto";
@@ -24,7 +25,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as Socket from "effect/unstable/socket/Socket";
-import * as NodeSocket from "@effect/platform-node/NodeSocket";
+import { decodeMuxFrame, encodeMuxFrame } from "@t3tools/shared/streamMux";
 
 import * as DeviceService from "./DeviceService.ts";
 import type * as DeviceHost from "./DeviceHost.ts";
@@ -33,12 +34,21 @@ import type { RemoteDeviceTransport } from "./RemoteDeviceHost.ts";
 import { remoteDeviceEnvironment } from "./sshDeviceScript.ts";
 
 export const CLIENT_DEVICE_HOST_ROUTE = "/api/client-device-host";
-const TUNNEL_OPEN_TIMEOUT = "15 seconds";
+const LINK_OPEN_TIMEOUT = "30 seconds";
+
+/** The open link of a registration: frames waiting to go out, and the connections it carries. */
+interface Link {
+  readonly outbox: Queue.Queue<Uint8Array>;
+  readonly streams: Map<number, NodeNet.Socket>;
+}
 
 interface Registration {
   readonly hostId: string;
+  readonly linkId: string;
   readonly queue: Queue.Queue<ClientDeviceHostRequest, Cause.Done>;
   readonly closed: Deferred.Deferred<void>;
+  link: Link | null;
+  linkReady: Deferred.Deferred<void>;
 }
 
 class ClientDeviceHostError extends Schema.TaggedError<ClientDeviceHostError>()(
@@ -56,35 +66,23 @@ export class ClientDeviceHosts extends Context.Service<
     }) => Stream.Stream<ClientDeviceHostRequest>;
     readonly respond: (response: ClientDeviceHostResponse) => Effect.Effect<void>;
     /**
-     * Carries the tunnel `tunnelId` over the app's WebSocket until either side closes. False
-     * when no connection is waiting for that tunnel.
+     * Carries a registration's forwarded connections over the app's link WebSocket until it
+     * closes. False for an unknown link.
      */
-    readonly acceptTunnel: (tunnelId: string, socket: Socket.Socket) => Effect.Effect<boolean>;
+    readonly acceptLink: (linkId: string, socket: Socket.Socket) => Effect.Effect<boolean>;
     /** The host of a person's desktop app while it is connected. */
     readonly hostIdForMember: (memberId: string) => string | null;
   }
 >()("t3/device/ClientDeviceHosts") {}
 
-const pump = (source: Socket.Socket, sink: Socket.Writer) =>
-  Effect.gen(function* () {
-    const { pull } = yield* source.reader;
-    while (true) {
-      yield* sink.writeAll(yield* pull);
-    }
-  });
-
 export const make = Effect.gen(function* () {
   const devices = yield* DeviceService.DeviceService;
-  const runFork = Effect.runForkWith(yield* Effect.context<never>());
   const registrations = new Map<string, Registration>();
   const pending = new Map<
     string,
     Deferred.Deferred<ClientDeviceHostResponse, ClientDeviceHostError>
   >();
-  const tunnels = new Map<
-    string,
-    { readonly opened: Deferred.Deferred<Socket.Socket>; readonly done: Deferred.Deferred<void> }
-  >();
+  let nextStream = 0;
 
   /** Sends a request to the app and waits for its answer, or fails when the app goes away. */
   const ask = (
@@ -118,33 +116,26 @@ export const make = Effect.gen(function* () {
     }).pipe(Effect.ensuring(Effect.sync(() => pending.delete(requestId))));
   };
 
-  const tunnelConnection = (registration: Registration, socket: NodeNet.Socket, port: number) => {
-    const tunnelId = NodeCrypto.randomUUID();
-    return Effect.gen(function* () {
-      const opened = yield* Deferred.make<Socket.Socket>();
-      const done = yield* Deferred.make<void>();
-      tunnels.set(tunnelId, { opened, done });
-      return yield* Effect.gen(function* () {
-        yield* Queue.offer(registration.queue, { _tag: "tunnel", tunnelId, port });
-        const remote = yield* Deferred.await(opened).pipe(Effect.timeout(TUNNEL_OPEN_TIMEOUT));
-        const local = yield* NodeSocket.fromDuplex(Effect.succeed(socket));
-        return yield* Effect.scoped(
-          Effect.gen(function* () {
-            const toRemote = yield* remote.writer;
-            const toLocal = yield* local.writer;
-            return yield* Effect.raceFirst(pump(remote, toLocal), pump(local, toRemote));
-          }),
-        );
-      }).pipe(Effect.ensuring(Deferred.succeed(done, undefined)));
-    }).pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          tunnels.delete(tunnelId);
-          socket.destroy();
-        }),
-      ),
-      Effect.ignoreCause,
-    );
+  /** A connection to a forwarded port, carried as one stream of the app's link. */
+  const carry = (registration: Registration, socket: NodeNet.Socket, port: number) => {
+    const link = registration.link;
+    if (!link) {
+      socket.destroy();
+      return;
+    }
+    const stream = (nextStream = (nextStream + 1) % 0xffffffff);
+    link.streams.set(stream, socket);
+    Queue.offerUnsafe(link.outbox, encodeMuxFrame({ kind: "open", stream, port }));
+    socket.on("data", (chunk: Buffer) => {
+      Queue.offerUnsafe(link.outbox, encodeMuxFrame({ kind: "data", stream, bytes: chunk }));
+    });
+    const close = () => {
+      if (link.streams.delete(stream)) {
+        Queue.offerUnsafe(link.outbox, encodeMuxFrame({ kind: "close", stream }));
+      }
+    };
+    socket.on("close", close);
+    socket.on("error", close);
   };
 
   const transportFor = (registration: Registration): RemoteDeviceTransport => {
@@ -173,6 +164,7 @@ export const make = Effect.gen(function* () {
     return {
       unreachableReason: "Open Necode on that Mac to use its simulators.",
       bringsTools: true,
+      slowLink: true,
       bootstrap: (script, mode) =>
         Effect.gen(function* () {
           if (mode === "start" || mode === "agent-start") {
@@ -213,6 +205,15 @@ export const make = Effect.gen(function* () {
       run,
       forward: (ports, scope) =>
         Effect.gen(function* () {
+          yield* Deferred.await(registration.linkReady).pipe(
+            Effect.timeoutOrElse({
+              duration: LINK_OPEN_TIMEOUT,
+              orElse: () =>
+                Effect.fail(
+                  new ClientDeviceHostError({ message: "The desktop app did not open its link." }),
+                ),
+            }),
+          );
           const localPorts: Array<number> = [];
           for (const port of ports) {
             const server = yield* Effect.acquireRelease(
@@ -225,9 +226,7 @@ export const make = Effect.gen(function* () {
               ),
               (listener) => Effect.sync(() => listener.close()),
             ).pipe(Effect.provideService(Scope.Scope, scope));
-            server.on("connection", (socket) => {
-              runFork(tunnelConnection(registration, socket, port));
-            });
+            server.on("connection", (socket) => carry(registration, socket, port));
             const address = server.address();
             localPorts.push(typeof address === "object" && address ? address.port : 0);
           }
@@ -247,13 +246,17 @@ export const make = Effect.gen(function* () {
           const hostId = `client-${input.memberId ?? input.connectionId}`;
           const registration: Registration = {
             hostId,
+            linkId: NodeCrypto.randomUUID(),
             queue: yield* Queue.unbounded<ClientDeviceHostRequest, Cause.Done>(),
             closed: yield* Deferred.make<void>(),
+            link: null,
+            linkReady: yield* Deferred.make<void>(),
           };
           // The newest app of a person takes over their host.
           const previous = registrations.get(hostId);
           if (previous) yield* Deferred.succeed(previous.closed, undefined);
           registrations.set(hostId, registration);
+          yield* Queue.offer(registration.queue, { _tag: "link", linkId: registration.linkId });
           yield* devices.attachRemoteHost({
             id: hostId,
             label: input.label,
@@ -279,19 +282,48 @@ export const make = Effect.gen(function* () {
       return answer ? Deferred.succeed(answer, response).pipe(Effect.asVoid) : Effect.void;
     });
 
-  const acceptTunnel: ClientDeviceHosts["Service"]["acceptTunnel"] = (tunnelId, socket) =>
-    Effect.gen(function* () {
-      const tunnel = tunnels.get(tunnelId);
-      if (!tunnel) return false;
-      yield* Deferred.succeed(tunnel.opened, socket);
-      yield* Deferred.await(tunnel.done);
-      return true;
-    });
+  const acceptLink: ClientDeviceHosts["Service"]["acceptLink"] = (linkId, socket) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registration = [...registrations.values()].find((entry) => entry.linkId === linkId);
+        if (!registration) return false;
+        const link: Link = { outbox: yield* Queue.unbounded<Uint8Array>(), streams: new Map() };
+        registration.link = link;
+        yield* Deferred.succeed(registration.linkReady, undefined);
+        const write = yield* socket.writer;
+        const send = Effect.forever(
+          Queue.take(link.outbox).pipe(Effect.flatMap((frame) => write.writeAll([frame]))),
+        );
+        const receive = Effect.gen(function* () {
+          const { pull } = yield* socket.reader;
+          while (true) {
+            for (const message of yield* pull) {
+              if (typeof message === "string") continue;
+              const frame = decodeMuxFrame(message);
+              if (frame?.kind === "data") link.streams.get(frame.stream)?.write(frame.bytes);
+              else if (frame?.kind === "close") {
+                link.streams.get(frame.stream)?.destroy();
+                link.streams.delete(frame.stream);
+              }
+            }
+          }
+        });
+        yield* Effect.raceFirst(send, receive).pipe(Effect.ignoreCause);
+        for (const stream of link.streams.values()) stream.destroy();
+        if (registration.link === link) {
+          registration.link = null;
+          registration.linkReady = yield* Deferred.make<void>();
+          // A dropped link is reopened while the app stays connected.
+          yield* Queue.offer(registration.queue, { _tag: "link", linkId });
+        }
+        return true;
+      }),
+    );
 
   return ClientDeviceHosts.of({
     connect,
     respond,
-    acceptTunnel,
+    acceptLink,
     hostIdForMember: (memberId) =>
       registrations.has(`client-${memberId}`) ? `client-${memberId}` : null,
   });

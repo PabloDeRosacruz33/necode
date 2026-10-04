@@ -57,12 +57,12 @@ export const deviceHostInstallTools = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const deviceHostOpenTunnel = DesktopIpc.makeIpcMethod({
-  channel: IpcChannels.DEVICE_HOST_OPEN_TUNNEL_CHANNEL,
-  payload: Schema.Struct({ url: Schema.String, port: Schema.Int }),
+export const deviceHostOpenLink = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.DEVICE_HOST_OPEN_LINK_CHANNEL,
+  payload: Schema.Struct({ url: Schema.String }),
   result: Schema.Void,
-  handler: Effect.fn("desktop.ipc.clientDeviceHost.openTunnel")(function* (input, event) {
+  handler: Effect.fn("desktop.ipc.clientDeviceHost.openLink")(function* (input, event) {
     yield* ensureMainWindowSender(event);
-    ClientDeviceHost.openTunnel(input);
+    ClientDeviceHost.openLink(input);
   }),
 });

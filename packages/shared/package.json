@@ -331,6 +331,10 @@
       "types": "./src/nodeSqliteClient.ts",
       "import": "./src/nodeSqliteClient.ts"
     },
+    "./streamMux": {
+      "types": "./src/streamMux.ts",
+      "import": "./src/streamMux.ts"
+    },
     "./hostClassification": {
       "types": "./src/hostClassification.ts",
       "import": "./src/hostClassification.ts"

@@ -1,9 +1,17 @@
+// @effect-diagnostics nodeBuiltinImport:off -- A fake Mac service and the link socket are plain Node.
 import { assert, it } from "@effect/vitest";
+import * as NodeSocket from "@effect/platform-node/NodeSocket";
+import { serveMuxLink } from "@t3tools/shared/streamMux";
+import * as NodeNet from "node:net";
 import type { ClientDeviceHostRequest } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as Socket from "effect/unstable/socket/Socket";
 
 import * as ClientDeviceHosts from "./ClientDeviceHosts.ts";
 import * as DeviceService from "./DeviceService.ts";
@@ -64,4 +72,81 @@ it.effect("a desktop app is a device host while connected and answers commands o
     const after = yield* host!.transport.run("xcrun", ["simctl", "list"]);
     assert.equal(after.code, 127);
   }).pipe(Effect.provide(devices.layer));
+});
+
+const listen = <T extends NodeNet.Server | InstanceType<typeof NodeSocket.NodeWS.WebSocketServer>>(
+  make: () => T,
+  port: (server: T) => number,
+) =>
+  Effect.acquireRelease(
+    Effect.promise(
+      () =>
+        new Promise<{ server: T; port: number }>((resolve) => {
+          const server = make();
+          server.once("listening", () => resolve({ server, port: port(server) }));
+        }),
+    ),
+    ({ server }) => Effect.sync(() => server.close()),
+  );
+
+it.effect("carries connections to the Mac's ports over the app's one link", () => {
+  const devices = recordingDevices();
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const hosts = yield* ClientDeviceHosts.make;
+      const linkSockets =
+        yield* Queue.unbounded<InstanceType<typeof NodeSocket.NodeWS.WebSocket>>();
+      const replies = yield* Queue.unbounded<string>();
+      // A service on the person's Mac, and the link route of this server.
+      const mac = yield* listen(
+        () => NodeNet.createServer((socket) => socket.pipe(socket)).listen(0, "127.0.0.1"),
+        (server) => (server.address() as NodeNet.AddressInfo).port,
+      );
+      let linkId = "";
+      const route = yield* listen(
+        () => new NodeSocket.NodeWS.WebSocketServer({ port: 0, host: "127.0.0.1" }),
+        (server) => (server.address() as NodeNet.AddressInfo).port,
+      );
+      route.server.on("connection", (ws) => Queue.offerUnsafe(linkSockets, ws));
+      // The link route: serves each link the app opens.
+      yield* Queue.take(linkSockets).pipe(
+        Effect.flatMap((ws) => Socket.fromWebSocket(Effect.succeed(ws))),
+        Effect.flatMap((socket) => hosts.acceptLink(linkId, socket)),
+        Effect.forever,
+        Effect.forkScoped,
+      );
+      // The desktop app: opens its link when asked.
+      yield* hosts
+        .connect({ connectionId: "connection-1", memberId: "roi-mac", label: "Simuladores de Roi" })
+        .pipe(
+          Stream.runForEach((request) =>
+            Effect.sync(() => {
+              if (request._tag !== "link") return;
+              linkId = request.linkId;
+              serveMuxLink(
+                new NodeSocket.NodeWS.WebSocket(
+                  `ws://127.0.0.1:${route.port}`,
+                ) as unknown as WebSocket,
+                (port) => NodeNet.createConnection({ host: "127.0.0.1", port }),
+              );
+            }),
+          ),
+          Effect.forkScoped,
+        );
+      while (!devices.attached.has("client-roi-mac")) yield* Effect.yieldNow;
+      const host = devices.attached.get("client-roi-mac")!;
+      const linkScope = yield* Scope.make();
+      const forwarded = yield* host.transport.forward([mac.port], linkScope);
+
+      const client = NodeNet.createConnection({
+        host: "127.0.0.1",
+        port: forwarded.localPorts[0]!,
+      });
+      client.on("connect", () => client.write("hola"));
+      client.on("data", (chunk) => Queue.offerUnsafe(replies, chunk.toString()));
+      assert.equal(yield* Queue.take(replies), "hola");
+      client.destroy();
+      yield* Scope.close(linkScope, Exit.void);
+    }),
+  ).pipe(Effect.provide(devices.layer));
 });

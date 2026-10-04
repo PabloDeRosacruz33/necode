@@ -199,7 +199,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     exec: (input) => ipcRenderer.invoke(IpcChannels.DEVICE_HOST_EXEC_CHANNEL, input),
     installTools: (input) =>
       ipcRenderer.invoke(IpcChannels.DEVICE_HOST_INSTALL_TOOLS_CHANNEL, input),
-    openTunnel: (input) => ipcRenderer.invoke(IpcChannels.DEVICE_HOST_OPEN_TUNNEL_CHANNEL, input),
+    openLink: (input) => ipcRenderer.invoke(IpcChannels.DEVICE_HOST_OPEN_LINK_CHANNEL, input),
   },
   checkSystemPermission: (pane: string) =>
     ipcRenderer.invoke(IpcChannels.CHECK_SYSTEM_PERMISSION_CHANNEL, pane),

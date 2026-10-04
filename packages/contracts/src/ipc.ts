@@ -1183,7 +1183,7 @@ export interface DesktopBridge {
       query: Readonly<Record<string, string>>;
       tools: ReadonlyArray<{ name: string; version: string }>;
     }) => Promise<{ stdout: string; stderr: string; code: number }>;
-    openTunnel: (input: { url: string; port: number }) => Promise<void>;
+    openLink: (input: { url: string }) => Promise<void>;
   };
   requestSnapShotPermissions?: (includeAccessibility: boolean) => Promise<void>;
   getSnapShotState?: () => Promise<DesktopSnapShotState>;

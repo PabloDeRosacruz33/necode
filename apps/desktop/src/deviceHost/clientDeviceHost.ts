@@ -17,6 +17,8 @@ import * as NodeStream from "node:stream";
 import type * as NodeStreamWeb from "node:stream/web";
 import * as NodeStreamPromises from "node:stream/promises";
 
+import { serveMuxLink } from "@t3tools/shared/streamMux";
+
 const OUTPUT_LIMIT = 4 * 1024 * 1024;
 const TOOLS_DIR = NodePath.join(NodeOS.homedir(), ".t3", "device", "tools");
 
@@ -110,30 +112,12 @@ export async function installTools(input: {
   }
 }
 
-/** Carries one connection between the environment's tunnel WebSocket and a port on this Mac. */
-export function openTunnel(input: { readonly url: string; readonly port: number }): void {
-  const ws = new WebSocket(input.url);
-  ws.binaryType = "arraybuffer";
-  const socket = NodeNet.createConnection({ host: "127.0.0.1", port: input.port });
-  const early: Array<Uint8Array<ArrayBuffer>> = [];
-  const close = () => {
-    socket.destroy();
-    if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) ws.close();
-  };
-  socket.on("data", (chunk: Buffer) => {
-    const bytes = new Uint8Array(chunk);
-    if (ws.readyState === WebSocket.OPEN) ws.send(bytes);
-    else early.push(bytes);
-  });
-  socket.on("close", close);
-  socket.on("error", close);
-  ws.addEventListener("open", () => {
-    for (const chunk of early) ws.send(chunk);
-    early.length = 0;
-  });
-  ws.addEventListener("message", (event) => {
-    if (event.data instanceof ArrayBuffer) socket.write(Buffer.from(event.data));
-  });
-  ws.addEventListener("close", close);
-  ws.addEventListener("error", close);
+/**
+ * Keeps the environment's link open: every connection the environment makes to a forwarded port
+ * arrives as a stream of this one WebSocket and is connected to that port on this Mac.
+ */
+export function openLink(input: { readonly url: string }): void {
+  serveMuxLink(new WebSocket(input.url), (port) =>
+    NodeNet.createConnection({ host: "127.0.0.1", port }),
+  );
 }

@@ -1,6 +1,6 @@
 /**
- * The two HTTP routes behind ClientDeviceHosts: the tunnel a desktop app opens for one connection
- * to a forwarded port, and the device tools it downloads so its Mac needs no npm. Both take the
+ * The two HTTP routes behind ClientDeviceHosts: the link a desktop app keeps open to carry the
+ * connections to its forwarded ports, and the device tools it downloads so its Mac needs no npm. Both take the
  * same ticket or cookie as `/ws` and need operate scope.
  */
 import * as Effect from "effect/Effect";
@@ -28,19 +28,19 @@ const routeParam = (prefix: string) =>
     ),
   );
 
-const tunnelPrefix = `${ClientDeviceHosts.CLIENT_DEVICE_HOST_ROUTE}/tunnel/`;
+const linkPrefix = `${ClientDeviceHosts.CLIENT_DEVICE_HOST_ROUTE}/link/`;
 const toolsPrefix = `${ClientDeviceHosts.CLIENT_DEVICE_HOST_ROUTE}/tools/`;
 
-const tunnel = Effect.gen(function* () {
+const link = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
-  const tunnelId = yield* routeParam(tunnelPrefix);
-  if (Option.isNone(tunnelId) || request.headers.upgrade?.toLowerCase() !== "websocket") {
+  const linkId = yield* routeParam(linkPrefix);
+  if (Option.isNone(linkId) || request.headers.upgrade?.toLowerCase() !== "websocket") {
     return HttpServerResponse.text("Bad Request", { status: 400 });
   }
   yield* authenticateOperate;
   const hosts = yield* ClientDeviceHosts.ClientDeviceHosts;
   const socket = yield* request.upgrade;
-  yield* hosts.acceptTunnel(tunnelId.value, socket);
+  yield* hosts.acceptLink(linkId.value, socket);
   return HttpServerResponse.empty();
 });
 
@@ -81,5 +81,5 @@ const tools = Effect.gen(function* () {
   ),
 );
 
-export const clientDeviceHostTunnelRouteLayer = HttpRouter.add("GET", `${tunnelPrefix}*`, tunnel);
+export const clientDeviceHostLinkRouteLayer = HttpRouter.add("GET", `${linkPrefix}*`, link);
 export const clientDeviceHostToolsRouteLayer = HttpRouter.add("GET", `${toolsPrefix}*`, tools);

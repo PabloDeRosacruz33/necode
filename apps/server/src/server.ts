@@ -83,7 +83,7 @@ import { openUrlRouteLayer } from "./openUrl/openUrlRoute.ts";
 import * as ClientDeviceHosts from "./device/ClientDeviceHosts.ts";
 import {
   clientDeviceHostToolsRouteLayer,
-  clientDeviceHostTunnelRouteLayer,
+  clientDeviceHostLinkRouteLayer,
 } from "./device/clientDeviceHostRoutes.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
@@ -629,7 +629,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     deviceHubProxyRouteLayer,
     portForwardRouteLayer,
     openUrlRouteLayer,
-    clientDeviceHostTunnelRouteLayer,
+    clientDeviceHostLinkRouteLayer,
     clientDeviceHostToolsRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,

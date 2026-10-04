@@ -2,8 +2,8 @@ import * as Schema from "effect/Schema";
 
 /**
  * A desktop app offering its own Mac's simulators to a remote environment. The environment asks
- * it to run simulator commands, to receive the device tools, and to open a tunnel to one of its
- * loopback ports (opened as `/api/client-device-host/tunnel/<tunnelId>`).
+ * it to run simulator commands, to receive the device tools, and to keep a link open that carries
+ * the connections to its loopback ports.
  */
 export const ClientDeviceHostRequest = Schema.Union([
   Schema.TaggedStruct("exec", {
@@ -18,7 +18,8 @@ export const ClientDeviceHostRequest = Schema.Union([
     requestId: Schema.String,
     tools: Schema.Array(Schema.Struct({ name: Schema.String, version: Schema.String })),
   }),
-  Schema.TaggedStruct("tunnel", { tunnelId: Schema.String, port: Schema.Int }),
+  /** Open (or reopen) the link WebSocket `/api/client-device-host/link/<linkId>`. */
+  Schema.TaggedStruct("link", { linkId: Schema.String }),
 ]);
 export type ClientDeviceHostRequest = typeof ClientDeviceHostRequest.Type;
 

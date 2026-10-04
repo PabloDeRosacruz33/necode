@@ -72,6 +72,8 @@ export interface RemoteDeviceTransport {
   readonly unreachableReason: string;
   /** The transport installs the tools itself before starting, so the host needs no npm. */
   readonly bringsTools?: boolean;
+  /** Round trips are slow (a person's Mac on any network): wait longer for its endpoints. */
+  readonly slowLink?: boolean;
 }
 
 export interface RemoteDeviceHostOptions {
@@ -216,7 +218,8 @@ export const make = Effect.fn("RemoteDeviceHost.make")(function* (
       yield* waitForHttpReady({
         baseUrl: baseUrl!,
         path: route!,
-        timeoutMs: 15000,
+        timeoutMs: transport.slowLink ? 60_000 : 15_000,
+        ...(transport.slowLink ? { probeTimeoutMs: 10_000, intervalMs: 500 } : {}),
         makeError: () =>
           new DeviceHost.DeviceHostError({
             hostId: id,
