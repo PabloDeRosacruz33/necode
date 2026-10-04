@@ -1170,6 +1170,21 @@ export interface DesktopBridge {
   syncPortForwards?: (input: {
     forwards: ReadonlyArray<{ port: number; url: string }>;
   }) => Promise<ReadonlyArray<{ port: number; forwarding: boolean }>>;
+  /** This Mac as a device host of remote environments, so their simulators run here. */
+  deviceHost?: {
+    exec: (input: {
+      command: string;
+      args: ReadonlyArray<string>;
+      stdin?: string;
+      timeoutMs?: number;
+    }) => Promise<{ stdout: string; stderr: string; code: number }>;
+    installTools: (input: {
+      toolsUrl: string;
+      query: Readonly<Record<string, string>>;
+      tools: ReadonlyArray<{ name: string; version: string }>;
+    }) => Promise<{ stdout: string; stderr: string; code: number }>;
+    openTunnel: (input: { url: string; port: number }) => Promise<void>;
+  };
   requestSnapShotPermissions?: (includeAccessibility: boolean) => Promise<void>;
   getSnapShotState?: () => Promise<DesktopSnapShotState>;
   setupSnapShot?: (action: DesktopSnapShotSetupAction) => Promise<void>;

@@ -86,6 +86,16 @@ local network, Tailscale, and Necode Connect. Live video needs a secure page
 (HTTPS or localhost); on a plain-HTTP remote origin iOS falls back to a slower
 still-image stream and Android cannot show video.
 
+## Your own Mac's simulators
+
+When the Necode desktop app on a Mac with Xcode is connected to a remote environment, that Mac's
+simulators join the environment's devices as **Simuladores de <name>**. Agents working for you test
+there by default: they build on the environment, install the app on your Mac, and the device opens
+in the Simulator window on your screen, with no lag and normal typing. Dev servers on the
+environment's localhost, Metro included, answer on your Mac's localhost, so a debug build loads
+from them. Your Mac needs no Node or npm: the desktop app runs the device tools and receives them
+from the environment the first time. Close the desktop app and those simulators leave the list.
+
 ## SSH device hosts
 
 In Settings → Integrations → Devices, choose the environments that should use

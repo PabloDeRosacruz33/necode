@@ -144,6 +144,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.vcsMergeTaskReview]: AuthOrchestrationOperateScope,
   [WS_METHODS.openUrlConnect]: AuthOrchestrationReadScope,
   [WS_METHODS.openUrlAck]: AuthOrchestrationReadScope,
+  [WS_METHODS.clientDeviceHostConnect]: AuthOrchestrationOperateScope,
+  [WS_METHODS.clientDeviceHostRespond]: AuthOrchestrationOperateScope,
   [WS_METHODS.vcsMergeTaskCheck]: AuthOrchestrationOperateScope,
   [WS_METHODS.vcsMergeTaskPublish]: AuthOrchestrationOperateScope,
   [WS_METHODS.vcsMergeAbort]: AuthOrchestrationOperateScope,

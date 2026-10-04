@@ -154,8 +154,9 @@ When you work on a remote environment, what it opens shows up where you are:
 - In the desktop app, every dev server the environment runs answers on your own
   `localhost:<port>`, so its links, previews and sign-in callbacks work as if it ran on your
   computer. A port already in use on your computer is left alone.
-- Simulators an agent opens appear in the thread on your device, and **Compilar y abrir** opens
-  the Mac app on your Mac.
+- With the desktop app on a Mac with Xcode, agents test on that Mac's own simulators, in the
+  Simulator window on your screen (see [Devices](./devices.md#your-own-macs-simulators)), and
+  **Compilar y abrir** opens the Mac app on your Mac.
 
 ## Manage or revoke access
 

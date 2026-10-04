@@ -4,14 +4,11 @@
  * goes to a device of that thread's person. 204 means a device opened it; anything else tells
  * the stand-in to open it on this machine instead.
  */
-import { ThreadId } from "@t3tools/contracts";
-
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import * as ServerConfig from "../config.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { latestAuthorMemberId } from "../team/threadAuthor.ts";
 import * as OpenUrlBroker from "./OpenUrlBroker.ts";
 import { OPEN_URL_ROUTE, verifyOpenUrlToken } from "./openUrlEnvironment.ts";
 
@@ -32,13 +29,7 @@ const handler = Effect.gen(function* () {
   if (!/^https?:\/\//i.test(url)) {
     return HttpServerResponse.text("Only web pages are sent to devices", { status: 400 });
   }
-  const projection = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
-  const thread = yield* projection
-    .getThreadDetailById(ThreadId.make(threadId), { activityKinds: [] })
-    .pipe(Effect.orElseSucceed(() => Option.none()));
-  const authorMemberId =
-    Option.getOrUndefined(thread)?.messages.findLast((message) => message.role === "user")
-      ?.authorMemberId ?? null;
+  const authorMemberId = yield* latestAuthorMemberId(threadId);
   const broker = yield* OpenUrlBroker.OpenUrlBroker;
   const opened = yield* broker.open({ url, threadId, authorMemberId });
   return opened

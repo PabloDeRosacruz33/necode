@@ -80,6 +80,11 @@ import { deviceHubProxyRouteLayer } from "./device/DeviceHubProxy.ts";
 import { portForwardRouteLayer } from "./preview/PortForwardProxy.ts";
 import * as OpenUrlBroker from "./openUrl/OpenUrlBroker.ts";
 import { openUrlRouteLayer } from "./openUrl/openUrlRoute.ts";
+import * as ClientDeviceHosts from "./device/ClientDeviceHosts.ts";
+import {
+  clientDeviceHostToolsRouteLayer,
+  clientDeviceHostTunnelRouteLayer,
+} from "./device/clientDeviceHostRoutes.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as ProcessRunner from "./processRunner.ts";
@@ -533,6 +538,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(VcsLayerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),
+  Layer.provideMerge(ClientDeviceHosts.layer),
   Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, PreviewLayerLive, DeviceLayerLive)),
   Layer.provideMerge(PersistenceLayerLive),
   // Both read a user-owned file out of the state directory and stream changes
@@ -623,6 +629,8 @@ export const makeRoutesLayer = Layer.mergeAll(
     deviceHubProxyRouteLayer,
     portForwardRouteLayer,
     openUrlRouteLayer,
+    clientDeviceHostTunnelRouteLayer,
+    clientDeviceHostToolsRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
   ),

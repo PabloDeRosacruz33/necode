@@ -89,7 +89,7 @@ export type DeviceToolVersions = typeof DeviceToolVersions.Type;
 
 export const DeviceHostSummary = Schema.Struct({
   id: DeviceHostId,
-  kind: Schema.Literals(["local", "ssh"]),
+  kind: Schema.Literals(["local", "ssh", "client"]),
   label: TrimmedNonEmptyString,
   platforms: Schema.Array(DevicePlatformAvailability),
   tools: Schema.optional(DeviceToolVersions),

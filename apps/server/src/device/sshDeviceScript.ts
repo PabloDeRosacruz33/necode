@@ -22,10 +22,13 @@ if [ -n "$JAVA_HOME" ]; then export PATH="$JAVA_HOME/bin:$PATH"; fi
 export const remoteDeviceScript = (
   owner: string,
   mode: "probe" | "start" | "agent-start" | "stop-agent" | "stop",
+  /** True when the tools arrive another way (from the server) and npm is not needed. */
+  bringsTools = false,
 ) =>
   `
 const owner = ${JSON.stringify(owner)};
 const mode = ${JSON.stringify(mode)};
+const bringsTools = ${JSON.stringify(bringsTools)};
 const hubVersion = ${JSON.stringify(DEVICE_HUB_VERSION)};
 const agentVersion = ${JSON.stringify(AGENT_DEVICE_VERSION)};
 ` +
@@ -141,7 +144,7 @@ async function install(name, version, entry) {
   ];
   if (mode === 'probe') {
     if (Number(process.versions.node.split('.')[0]) < 22) throw Error('Node 22 or newer is required on the device host.');
-    if (run('npm', ['--version']).status !== 0) throw Error('npm is missing from the non-interactive SSH PATH.');
+    if (!bringsTools && run('npm', ['--version']).status !== 0) throw Error('npm is missing from the non-interactive SSH PATH.');
     console.log(JSON.stringify({ nodePath: process.execPath, platforms, tools: versions() })); return;
   }
   fs.mkdirSync(state, { recursive: true, mode: 0o700 });

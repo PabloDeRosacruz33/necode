@@ -8,13 +8,17 @@ import {
   LOCAL_DEVICE_HOST_ID,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { ServerConfig } from "../../../config.ts";
 import { ensureAgentDeviceShim } from "../../../device/AgentDeviceShim.ts";
 import { nodeRuntimeUnavailableMessage } from "@t3tools/shared/nodeRuntime";
 
+import * as ClientDeviceHosts from "../../../device/ClientDeviceHosts.ts";
 import * as DeviceService from "../../../device/DeviceService.ts";
+import * as ProjectionSnapshotQuery from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { latestAuthorMemberId } from "../../../team/threadAuthor.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { DeviceScreenshotToolkit, DeviceStandardToolkit, DeviceToolkit } from "./tools.ts";
 
@@ -35,6 +39,8 @@ export function agentDeviceQuickStart(
   device: DeviceSummary,
   targetArgs = agentDeviceTargetArgs(device),
   command = "agent-device",
+  /** Set when the device runs on the Mac of the person working, offered by their desktop app. */
+  personHostLabel: string | null = null,
 ): string {
   const executable = /^[a-zA-Z0-9_./:-]+$/.test(command)
     ? command
@@ -48,8 +54,19 @@ export function agentDeviceQuickStart(
     device.platform === "ios"
       ? "First use builds an XCTest runner and can take a couple of minutes; later commands are fast."
       : "The Android snapshot helper installs itself on first use.";
+  const hostNotes = personHostLabel
+    ? [
+        `${device.name} runs on the user's own Mac (${personHostLabel}), in the Simulator window on their screen, not on this machine.`,
+        "Build here for the simulator (for example `npx expo run:ios --no-install`, or xcodebuild with `-sdk iphonesimulator`), then install the .app with the install command above: it uploads the build to their Mac.",
+        "Dev servers on this machine's localhost (Metro on 8081 and the like) answer on that Mac's localhost too, so a debug build that loads from localhost reaches them.",
+      ]
+    : [
+        "For remote hosts, arrange builds, app installation, and any Metro reverse forwarding yourself. Necode provides discovery, streaming, and control only.",
+      ];
   return [
-    `The user is watching ${device.name} (${device.version}) in the Device panel.`,
+    personHostLabel
+      ? `The user tests on ${device.name} (${device.version}) on their own Mac.`
+      : `The user is watching ${device.name} (${device.version}) in the Device panel.`,
     `Drive it with ${executable}. Use this exact executable path; login shells may reset PATH. Always pass ${target}.`,
     "Typical loop:",
     `  ${executable} open <bundle-or-package-id> ${target}     # or: open <app> <deep-link-url>`,
@@ -60,7 +77,7 @@ export function agentDeviceQuickStart(
     `  ${executable} install <app> <path-to-.app-or-.apk> ${target}`,
     `Prefer snapshot refs over coordinates. Run ${executable} help for workflow guides and ${executable} <command> --help for flags.`,
     "Prefer agent-device for driving this device. simctl, adb, and xcrun remain available for anything it does not cover.",
-    "For remote hosts, arrange builds, app installation, and any Metro reverse forwarding yourself. Necode provides discovery, streaming, and control only.",
+    ...hostNotes,
     "Keep the returned --config and --session flags on every command. Other hosts can be used concurrently; opening one does not switch these commands.",
     platformNotes,
   ].join("\n");
@@ -118,6 +135,21 @@ const pickDevice = (
 
 const toolError = (error: DeviceError | DeviceToolUnavailableError) => error;
 
+/** The connected desktop app's host of whoever sent the thread's latest message, if it has devices. */
+const personHostId = (threadId: string, devices: ReadonlyArray<DeviceSummary>) =>
+  Effect.gen(function* () {
+    const clientHosts = yield* Effect.serviceOption(ClientDeviceHosts.ClientDeviceHosts);
+    const projection = yield* Effect.serviceOption(ProjectionSnapshotQuery.ProjectionSnapshotQuery);
+    if (Option.isNone(clientHosts) || Option.isNone(projection)) return undefined;
+    const author = yield* latestAuthorMemberId(threadId).pipe(
+      Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, projection.value),
+    );
+    const hostId = author === null ? null : clientHosts.value.hostIdForMember(author);
+    return hostId !== null && devices.some((device) => device.hostId === hostId)
+      ? hostId
+      : undefined;
+  });
+
 const handlers = {
   device_list: (input) =>
     Effect.gen(function* () {
@@ -156,7 +188,11 @@ const handlers = {
             "Device support is off. Ask the user to enable it in the Device panel before installing or starting device tools.",
         });
       }
-      const target = yield* pickDevice(state.devices, input);
+      // Unless told otherwise, test on the Mac of the person the thread is working for.
+      const target = yield* pickDevice(state.devices, {
+        ...input,
+        hostId: input.hostId ?? (yield* personHostId(scope.threadId, state.devices)),
+      });
       // Resolve consent and agent connectivity before booting or registering a session.
       const agentArgs = yield* devices.agentTarget({
         threadId: scope.threadId,
@@ -197,10 +233,16 @@ const handlers = {
         shimDir,
         platform === "win32" ? "agent-device.cmd" : "agent-device",
       );
+      const host = after.hosts.find((candidate) => candidate.id === device.hostId);
       return {
         device,
         agentDevice: { command, targetArgs },
-        quickStart: agentDeviceQuickStart(device, targetArgs, command),
+        quickStart: agentDeviceQuickStart(
+          device,
+          targetArgs,
+          command,
+          host?.kind === "client" ? host.label : null,
+        ),
       };
     }).pipe(Effect.mapError(toolError)),
   device_screenshot: (input) =>

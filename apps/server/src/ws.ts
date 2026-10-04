@@ -134,6 +134,7 @@ import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as OpenUrlBroker from "./openUrl/OpenUrlBroker.ts";
+import * as ClientDeviceHosts from "./device/ClientDeviceHosts.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
@@ -529,6 +530,7 @@ const makeWsRpcLayer = (
   clientAnalyticsProps: Readonly<Record<string, unknown>>,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
   openUrlBroker: OpenUrlBroker.OpenUrlBroker["Service"],
+  clientDeviceHosts: ClientDeviceHosts.ClientDeviceHosts["Service"],
 ) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
@@ -4240,6 +4242,29 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.openUrlAck, openUrlBroker.ack(input.requestId), {
             "rpc.aggregate": "open-url",
           }),
+        // A desktop app offering its own Mac's simulators to this environment.
+        [WS_METHODS.clientDeviceHostConnect]: (_input) =>
+          observeRpcStreamEffect(
+            WS_METHODS.clientDeviceHostConnect,
+            Effect.gen(function* () {
+              const member =
+                memberId === null
+                  ? undefined
+                  : (yield* team.listMembers.pipe(Effect.orElseSucceed(() => []))).find(
+                      (entry) => entry.memberId === memberId,
+                    );
+              return clientDeviceHosts.connect({
+                connectionId,
+                memberId,
+                label: `Simuladores de ${member?.name ?? "este Mac"}`,
+              });
+            }),
+            { "rpc.aggregate": "client-device-host" },
+          ),
+        [WS_METHODS.clientDeviceHostRespond]: (input) =>
+          observeRpcEffect(WS_METHODS.clientDeviceHostRespond, clientDeviceHosts.respond(input), {
+            "rpc.aggregate": "client-device-host",
+          }),
         [WS_METHODS.subscribePreviewEvents]: (_input) =>
           observeRpcStream(WS_METHODS.subscribePreviewEvents, previewManager.events, {
             "rpc.aggregate": "preview",
@@ -4545,6 +4570,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const openUrlBroker = yield* OpenUrlBroker.OpenUrlBroker;
+    const clientDeviceHosts = yield* ClientDeviceHosts.ClientDeviceHosts;
     const baseServerSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const config = yield* ServerConfig.ServerConfig;
     const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
@@ -4615,6 +4641,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               clientAnalyticsProps,
               previewAutomationBroker,
               openUrlBroker,
+              clientDeviceHosts,
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),

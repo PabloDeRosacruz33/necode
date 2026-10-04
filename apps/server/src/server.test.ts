@@ -112,6 +112,7 @@ import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as ServerConfig from "./config.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import * as OpenUrlBroker from "./openUrl/OpenUrlBroker.ts";
+import * as ClientDeviceHosts from "./device/ClientDeviceHosts.ts";
 import { HTTP_ROUTER_CONFIG, makeRoutesLayer } from "./server.ts";
 import {
   isThreadDetailEvent,
@@ -859,6 +860,7 @@ const buildAppUnderTest = (options?: {
             ...options?.layers?.providerSessionDirectory,
           }),
           OpenUrlBroker.layer,
+          Layer.mock(ClientDeviceHosts.ClientDeviceHosts)({ hostIdForMember: () => null }),
           Layer.mock(DeviceService.DeviceService)({
             state: Effect.succeed(EMPTY_DEVICE_STATE),
             currentReadiness: () => Effect.succeed(null),

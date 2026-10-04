@@ -273,6 +273,11 @@ import {
 } from "./previewAutomation.ts";
 import { OpenUrlAckInput, OpenUrlConnectInput, OpenUrlRequest } from "./openUrl.ts";
 import {
+  ClientDeviceHostConnectInput,
+  ClientDeviceHostRequest,
+  ClientDeviceHostResponse,
+} from "./clientDeviceHost.ts";
+import {
   ServerConfigStreamEvent,
   DesktopUpdateCommitInput,
   ServerConfig,
@@ -426,6 +431,8 @@ export const WS_METHODS = {
   previewAutomationFocusHost: "previewAutomation.focusHost",
   openUrlConnect: "openUrl.connect",
   openUrlAck: "openUrl.ack",
+  clientDeviceHostConnect: "clientDeviceHost.connect",
+  clientDeviceHostRespond: "clientDeviceHost.respond",
 
   // Device methods
   deviceConfigure: "device.configure",
@@ -1422,6 +1429,18 @@ const WsOpenUrlConnectRpc = Rpc.make(WS_METHODS.openUrlConnect, {
   stream: true,
 });
 
+const WsClientDeviceHostConnectRpc = Rpc.make(WS_METHODS.clientDeviceHostConnect, {
+  payload: ClientDeviceHostConnectInput,
+  success: ClientDeviceHostRequest,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+const WsClientDeviceHostRespondRpc = Rpc.make(WS_METHODS.clientDeviceHostRespond, {
+  payload: ClientDeviceHostResponse,
+  error: EnvironmentAuthorizationError,
+});
+
 const WsOpenUrlAckRpc = Rpc.make(WS_METHODS.openUrlAck, {
   payload: OpenUrlAckInput,
   error: EnvironmentAuthorizationError,
@@ -1801,6 +1820,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewAutomationFocusHostRpc,
   WsOpenUrlConnectRpc,
   WsOpenUrlAckRpc,
+  WsClientDeviceHostConnectRpc,
+  WsClientDeviceHostRespondRpc,
   WsSubscribePreviewEventsRpc,
   WsSubscribeDiscoveredLocalServersRpc,
   WsDeviceConfigureRpc,

@@ -71,6 +71,11 @@ export const COMMON_DEV_PORTS: ReadonlyArray<number> = Object.freeze([
 ]);
 
 const POLL_INTERVAL = Duration.seconds(3);
+/** Metro and Expo's dev server start at 8081 and move up when it is taken. */
+const isMetroPort = (url: string) => {
+  const port = Number(new URL(url).port);
+  return port >= 8081 && port <= 8099;
+};
 const LSOF_TIMEOUT_MS = 5_000;
 const WINDOWS_LISTENER_TIMEOUT_MS = 5_000;
 const WEB_PROBE_TIMEOUT = Duration.seconds(1);
@@ -327,7 +332,25 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
       }));
   });
 
+  // Metro serves no page at `/`, but simulators on a person's Mac load their app from it.
+  // Only its usual ports are asked, so other servers see no extra request.
+  const probeMetro = (url: string) =>
+    !isMetroPort(url)
+      ? Effect.succeed(null)
+      : httpClient.get(new URL("/status", url).toString()).pipe(
+          Effect.flatMap((response) => response.text),
+          Effect.map((body) => (body.includes("packager-status:running") ? url : null)),
+          Effect.scoped,
+          Effect.timeoutOption(WEB_PROBE_TIMEOUT),
+          Effect.map(Option.getOrNull),
+          Effect.orElseSucceed(() => null),
+        );
+
   const probeWebUrl = Effect.fn("PortDiscovery.probeWebUrl")((url: string) =>
+    probePage(url).pipe(Effect.flatMap((page) => (page ? Effect.succeed(page) : probeMetro(url)))),
+  );
+
+  const probePage = (url: string) =>
     httpClient.get(url).pipe(
       Effect.map((response) => {
         const location = response.headers.location?.trim();
@@ -345,8 +368,7 @@ export const make = Effect.gen(function* PortDiscoveryMake() {
       Effect.map(Option.getOrNull),
       Effect.orElseSucceed(() => null),
       Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-    ),
-  );
+    );
 
   const makeWebProbeGroups = (
     servers: ReadonlyArray<DiscoveredLocalServer>,

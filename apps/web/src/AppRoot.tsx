@@ -3,6 +3,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { ElectronBrowserHost } from "./browser/ElectronBrowserHost";
 import { OpenUrlHosts } from "./components/OpenUrlHosts";
 import { PortForwards } from "./components/preview/PortForwards";
+import { ClientDeviceHosts } from "./components/device/ClientDeviceHosts";
 import { PreviewAutomationHosts } from "./components/preview/PreviewAutomationHosts";
 import { QuitHoldOverlay } from "./components/QuitHoldOverlay";
 import { AppAtomRegistryProvider } from "./rpc/atomRegistry";
@@ -20,6 +21,7 @@ export function AppRoot({ router }: { readonly router: AppRouter }) {
       <PreviewAutomationHosts />
       <OpenUrlHosts />
       <PortForwards />
+      <ClientDeviceHosts />
       <ElectronBrowserHost />
       <QuitHoldOverlay />
     </AppAtomRegistryProvider>

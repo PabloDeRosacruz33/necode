@@ -44,7 +44,8 @@ const findLoopbackListener = (port: number) =>
     return null;
   });
 
-const authenticate = Effect.gen(function* () {
+/** Ticket- or cookie-authenticated request with operate scope, as `/ws` upgrades are. */
+export const authenticateOperate = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
   const session = yield* serverAuth.authenticateWebSocketUpgrade(request).pipe(
@@ -83,7 +84,7 @@ const handler = Effect.gen(function* () {
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     return HttpServerResponse.text("Not Found", { status: 404 });
   }
-  yield* authenticate;
+  yield* authenticateOperate;
   const host = yield* findLoopbackListener(port);
   if (host === null) {
     return HttpServerResponse.text("Nothing is listening on that port", { status: 502 });

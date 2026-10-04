@@ -65,6 +65,7 @@ import { readDeviceDetail, runDeviceAction } from "./DeviceActions.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as DeviceHost from "./DeviceHost.ts";
 import * as SshDeviceHost from "./SshDeviceHost.ts";
+import * as RemoteDeviceHost from "./RemoteDeviceHost.ts";
 import * as Exit from "effect/Exit";
 import * as LocalDeviceHost from "./LocalDeviceHost.ts";
 
@@ -111,6 +112,15 @@ export class DeviceService extends Context.Service<
   DeviceService,
   {
     readonly agentCli: Effect.Effect<string, DeviceError>;
+    /**
+     * Adds a host that lives as long as its owner (a person's desktop app offering its own
+     * Mac's simulators): its devices are listed while it stays attached.
+     */
+    readonly attachRemoteHost: (
+      options: RemoteDeviceHost.RemoteDeviceHostOptions,
+    ) => Effect.Effect<void>;
+    /** Removes an attached host and stops its helpers there. */
+    readonly detachHost: (hostId: DeviceHostId) => Effect.Effect<void>;
     readonly testHost: (
       config: SshDeviceHostConfig,
     ) => Effect.Effect<DeviceHostSummary, DeviceError>;
@@ -695,6 +705,12 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
         ),
       );
     }
+    if (device.platform === "ios" && (yield* host.summary).kind === "client") {
+      // A person's own Mac: show the device in the Simulator window on their screen.
+      yield* ready
+        .run("open", ["-a", "Simulator", "--args", "-CurrentDeviceUDID", device.id])
+        .pipe(Effect.ignore);
+    }
     if (hosts.get(host.id) !== host)
       return yield* new DeviceHostUnavailableError({
         hostId: host.id,
@@ -923,6 +939,9 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
           reason: "Agent CLI installation is unavailable in this device service.",
         }),
       ),
+      // Only the full service (`make`) can build hosts; this one keeps the hosts it was given.
+      attachRemoteHost: () => Effect.void,
+      detachHost: () => Effect.void,
       agentTarget: (input) =>
         Effect.gen(function* () {
           const host = yield* resolveHost(input.hostId);
@@ -1138,8 +1157,68 @@ export const make = Effect.gen(function* () {
       concurrency: 4,
     }),
   );
+  const attached = new Map<DeviceHostId, Scope.Closeable>();
+  const detachHost = (hostId: DeviceHostId) =>
+    Effect.gen(function* () {
+      const hostScope = attached.get(hostId);
+      if (!hostScope) return;
+      yield* service.withLifecycleLock(
+        Effect.gen(function* () {
+          attached.delete(hostId);
+          hosts.delete(hostId);
+          yield* service.refreshHosts;
+        }),
+      );
+      yield* Scope.close(hostScope, Exit.void);
+      yield* fs
+        .remove(agentDeviceConfigPath(config.stateDir, hostId, path), { force: true })
+        .pipe(Effect.ignore);
+    });
+  const attachRemoteHost = (options: RemoteDeviceHost.RemoteDeviceHostOptions) =>
+    Effect.gen(function* () {
+      yield* detachHost(options.id);
+      yield* service.withLifecycleLock(
+        Effect.gen(function* () {
+          const hostScope = yield* Scope.fork(scope);
+          const owner = yield* RemoteDeviceHost.ownerFor(options.id).pipe(
+            Effect.provide(hostContext),
+          );
+          const instance = yield* RemoteDeviceHost.make(
+            options,
+            owner,
+            (ready) =>
+              configureAgent(options.id, ready).pipe(
+                Effect.asVoid,
+                Effect.mapError(
+                  (error) =>
+                    new DeviceHost.DeviceHostError({
+                      hostId: options.id,
+                      step: "configuring agent access",
+                      cause: error,
+                    }),
+                ),
+              ),
+            (status, detail) =>
+              service
+                .setHostStatus(options.id, { status, ...(detail ? { detail } : {}) })
+                .pipe(Effect.asVoid),
+          ).pipe(Effect.provideService(Scope.Scope, hostScope), Effect.provide(hostContext));
+          hosts.set(options.id, instance);
+          attached.set(options.id, hostScope);
+          yield* service.refreshHosts;
+        }),
+      );
+    }).pipe(Effect.ignoreCause({ log: true }));
+  yield* Effect.addFinalizer(() =>
+    Effect.forEach(attached.values(), (hostScope) => Scope.close(hostScope, Exit.void), {
+      discard: true,
+      concurrency: 4,
+    }),
+  );
   return {
     ...service,
+    attachRemoteHost,
+    detachHost,
     agentCli: resolveNodeExecutable("Device automation").pipe(
       Effect.andThen(ensureAgentDevice(config.baseDir)),
       Effect.provideService(FileSystem.FileSystem, fs),
