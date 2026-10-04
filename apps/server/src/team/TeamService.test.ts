@@ -11,6 +11,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -157,6 +158,45 @@ it.layer(NodeServices.layer)("TeamService", (it) => {
         .subscribe(subject)
         .pipe(Stream.runHead, Effect.map(Option.getOrThrow));
       expect(after.presence.map((entry) => entry.memberId)).toEqual([TEAM_OWNER_MEMBER_ID]);
+    }).pipe(Effect.provide(TeamTestLayer)),
+  );
+
+  it.effect("signs a thread's commits as whoever sent its latest message", () =>
+    Effect.gen(function* () {
+      const team = yield* TeamService.TeamService;
+      const sql = yield* SqlClient.SqlClient;
+      const roi = (yield* team.invite({ name: "Roi Mac", role: "member" })).member;
+
+      const updated = yield* team.updateMember({
+        memberId: roi.memberId,
+        git: { name: "Roi", email: "roi@necora.pro" },
+      });
+      expect([updated.gitName, updated.gitEmail]).toEqual(["Roi", "roi@necora.pro"]);
+
+      const message = (id: string, thread: string, author: string, at: string) => sql`
+        INSERT INTO projection_thread_messages
+          (message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at, author_member_id)
+        VALUES (${id}, ${thread}, NULL, 'user', 'hola', 0, ${at}, ${at}, ${author})
+      `;
+      yield* message("m1", "thread-1", TEAM_OWNER_MEMBER_ID, "2026-10-04T10:00:00.000Z");
+      yield* message("m2", "thread-1", roi.memberId, "2026-10-04T11:00:00.000Z");
+      yield* message("m3", "thread-2", TEAM_OWNER_MEMBER_ID, "2026-10-04T12:00:00.000Z");
+
+      expect(yield* team.gitIdentityForThread("thread-1")).toEqual({
+        name: "Roi",
+        email: "roi@necora.pro",
+      });
+      // The owner set no identity: the machine's own signs.
+      expect(yield* team.gitIdentityForThread("thread-2")).toBeNull();
+      expect(TeamService.gitIdentityEnvironment({ name: "Roi", email: "roi@necora.pro" })).toEqual({
+        GIT_AUTHOR_NAME: "Roi",
+        GIT_AUTHOR_EMAIL: "roi@necora.pro",
+        GIT_COMMITTER_NAME: "Roi",
+        GIT_COMMITTER_EMAIL: "roi@necora.pro",
+      });
+
+      yield* team.updateMember({ memberId: roi.memberId, git: null });
+      expect(yield* team.gitIdentityForThread("thread-1")).toBeNull();
     }).pipe(Effect.provide(TeamTestLayer)),
   );
 });

@@ -409,8 +409,11 @@ export class GitVcsDriver extends Context.Service<
     readonly mergeTaskPrepare: (
       input: VcsMergeTaskPrepareInput,
     ) => Effect.Effect<VcsMergeTaskPrepareResult, GitCommandError>;
+    /** `author` signs the merge commit; the machine's own git identity when absent. */
     readonly mergeTaskPublish: (
-      input: VcsMergeTaskPublishInput,
+      input: VcsMergeTaskPublishInput & {
+        readonly author?: { readonly name: string; readonly email: string } | null;
+      },
     ) => Effect.Effect<VcsMergeTaskPublishResult, GitCommandError>;
     readonly mergeAbort: (input: VcsMergeAbortInput) => Effect.Effect<void, GitCommandError>;
     readonly closeTask: (

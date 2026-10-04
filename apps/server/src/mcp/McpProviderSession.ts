@@ -18,20 +18,20 @@ export interface McpProviderSessionConfig {
    */
   readonly agentDeviceEnvironment?: Readonly<Record<string, string>>;
   /**
-   * Sends web pages the agent opens to the person's device (see openUrlEnvironment.ts). Its
-   * `PATH` is a directory to put first.
+   * Per-thread variables: pages the agent opens go to the person's device (openUrlEnvironment.ts)
+   * and its commits are signed as the thread's person. Its `PATH` is a directory to put first.
    */
-  readonly openUrlEnvironment?: Readonly<Record<string, string>>;
+  readonly threadEnvironment?: Readonly<Record<string, string>>;
 }
 
-/** Provider env with the device and open-url variables applied over `base`. */
+/** Provider env with the device and per-thread variables applied over `base`. */
 export function withAgentDeviceEnvironment(
   base: NodeJS.ProcessEnv,
   config:
-    | Pick<McpProviderSessionConfig, "agentDeviceEnvironment" | "openUrlEnvironment">
+    | Pick<McpProviderSessionConfig, "agentDeviceEnvironment" | "threadEnvironment">
     | undefined,
 ): NodeJS.ProcessEnv {
-  return withDeviceVariables(withPathPrefix(base, config?.openUrlEnvironment), config);
+  return withDeviceVariables(withPathPrefix(base, config?.threadEnvironment), config);
 }
 
 function withDeviceVariables(

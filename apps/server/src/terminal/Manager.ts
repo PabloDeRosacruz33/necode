@@ -60,6 +60,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as ServerConfig from "../config.ts";
 import { openUrlEnvironment, withPathPrefix } from "../openUrl/openUrlEnvironment.ts";
+import * as TeamService from "../team/TeamService.ts";
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome.ts";
@@ -1423,6 +1424,7 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
   const path = yield* Path.Path;
   const fileSystem = yield* FileSystem.FileSystem;
   const hostPlatform = yield* HostProcessPlatform;
+  const team = yield* Effect.serviceOption(TeamService.TeamService);
   const resolveProviderInstanceEnvironment = Effect.fn(
     "terminal.resolveProviderInstanceEnvironment",
   )((rawProviderInstanceId: string, env: Record<string, string> | undefined) =>
@@ -1445,18 +1447,26 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
     unregisterTerminal: portDiscovery.unregisterTerminal,
     resolveProviderInstanceEnvironment,
     // Web pages opened from a terminal go to the device of the thread's person.
+    // Its commits are by the thread's person too.
     resolveThreadEnvironment: (threadId) =>
-      openUrlEnvironment({
-        stateDir: serverConfig.stateDir,
-        port: serverConfig.port,
-        host: serverConfig.host,
-        threadId,
-      }).pipe(
-        Effect.provideService(FileSystem.FileSystem, fileSystem),
-        Effect.provideService(Path.Path, path),
-        Effect.provideService(HostProcessPlatform, hostPlatform),
-        Effect.orElseSucceed(() => null),
-      ),
+      Effect.gen(function* () {
+        const openUrl = yield* openUrlEnvironment({
+          stateDir: serverConfig.stateDir,
+          port: serverConfig.port,
+          host: serverConfig.host,
+          threadId,
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+          Effect.provideService(HostProcessPlatform, hostPlatform),
+          Effect.orElseSucceed(() => null),
+        );
+        const gitIdentity = Option.isSome(team)
+          ? yield* team.value.gitIdentityForThread(threadId)
+          : null;
+        const environment = { ...openUrl, ...TeamService.gitIdentityEnvironment(gitIdentity) };
+        return Object.keys(environment).length > 0 ? environment : null;
+      }),
   });
 });
 

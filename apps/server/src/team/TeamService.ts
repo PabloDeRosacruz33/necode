@@ -40,7 +40,28 @@ interface MemberRow {
   readonly color: string;
   readonly role: TeamMemberRole;
   readonly createdAt: string;
+  readonly gitName: string | null;
+  readonly gitEmail: string | null;
 }
+
+/** Who a commit is by, as git's author and committer. */
+export interface GitIdentity {
+  readonly name: string;
+  readonly email: string;
+}
+
+/** The variables that make git sign commits as `identity`, or none for the machine's own. */
+export const gitIdentityEnvironment = (
+  identity: GitIdentity | null,
+): Readonly<Record<string, string>> =>
+  identity
+    ? {
+        GIT_AUTHOR_NAME: identity.name,
+        GIT_AUTHOR_EMAIL: identity.email,
+        GIT_COMMITTER_NAME: identity.name,
+        GIT_COMMITTER_EMAIL: identity.email,
+      }
+    : {};
 
 interface Connection {
   readonly memberId: string | null;
@@ -52,6 +73,9 @@ export interface TeamServiceShape {
   readonly invite: (input: TeamInviteInput) => Effect.Effect<TeamInviteResult, TeamError>;
   readonly revokeMember: (memberId: string) => Effect.Effect<boolean, TeamError>;
   readonly updateMember: (input: TeamUpdateMemberInput) => Effect.Effect<TeamMember, TeamError>;
+  /** The git identity of whoever sent a thread's latest message, when they set one. */
+  readonly gitIdentityForThread: (threadId: string) => Effect.Effect<GitIdentity | null>;
+  readonly gitIdentityForMember: (memberId: string) => Effect.Effect<GitIdentity | null>;
   /** Tracks a live WebSocket for presence until `disconnect`. */
   readonly connect: (input: {
     readonly connectionId: string;
@@ -80,6 +104,7 @@ const toMember = (row: MemberRow): TeamMember => ({
   color: row.color,
   role: row.role,
   createdAt: DateTime.makeUnsafe(row.createdAt),
+  ...(row.gitName && row.gitEmail ? { gitName: row.gitName, gitEmail: row.gitEmail } : {}),
 });
 
 /** First word of the OS account name, capitalised: "pabloderosacruz" becomes "Pabloderosacruz". */
@@ -95,16 +120,30 @@ export const make = Effect.gen(function* () {
   const changes = yield* PubSub.unbounded<void>();
   const notify = PubSub.publish(changes, undefined).pipe(Effect.asVoid);
 
+  // Created here rather than in a numbered migration so upstream migrations keep their numbers.
+  yield* sql`
+    CREATE TABLE IF NOT EXISTS team_member_git_identities (
+      member_id TEXT PRIMARY KEY,
+      git_name TEXT NOT NULL,
+      git_email TEXT NOT NULL
+    )
+  `.pipe(Effect.mapError(toTeamError("Could not prepare git identities")), Effect.orDie);
+
+  const memberColumns = sql`
+    m.member_id AS "memberId",
+    m.name,
+    m.color,
+    m.role,
+    m.created_at AS "createdAt",
+    g.git_name AS "gitName",
+    g.git_email AS "gitEmail"
+  `;
   const selectMembers = sql<MemberRow>`
-    SELECT
-      member_id AS "memberId",
-      name,
-      color,
-      role,
-      created_at AS "createdAt"
-    FROM team_members
-    WHERE revoked_at IS NULL
-    ORDER BY created_at ASC
+    SELECT ${memberColumns}
+    FROM team_members m
+    LEFT JOIN team_member_git_identities g ON g.member_id = m.member_id
+    WHERE m.revoked_at IS NULL
+    ORDER BY m.created_at ASC
   `;
 
   // The owner always exists so host-issued sessions have someone to attribute to.
@@ -142,7 +181,15 @@ export const make = Effect.gen(function* () {
       });
       yield* notify;
       return {
-        member: toMember({ memberId, name: input.name, color, role: input.role, createdAt: now }),
+        member: toMember({
+          memberId,
+          name: input.name,
+          color,
+          role: input.role,
+          createdAt: now,
+          gitName: null,
+          gitEmail: null,
+        }),
         credential: {
           id: issued.id,
           credential: issued.credential,
@@ -187,25 +234,34 @@ export const make = Effect.gen(function* () {
 
   const updateMember: TeamServiceShape["updateMember"] = (input) =>
     Effect.gen(function* () {
-      const rows = yield* sql<MemberRow>`
+      const updated = yield* sql<{ readonly memberId: string }>`
         UPDATE team_members
         SET
           name = COALESCE(${input.name ?? null}, name),
           color = COALESCE(${input.color ?? null}, color)
         WHERE member_id = ${input.memberId} AND revoked_at IS NULL
-        RETURNING
-          member_id AS "memberId",
-          name,
-          color,
-          role,
-          created_at AS "createdAt"
+        RETURNING member_id AS "memberId"
       `;
-      const row = rows[0];
-      if (!row) {
+      if (!updated[0]) {
         return yield* new TeamError({ message: "That member no longer exists." });
       }
+      if (input.git === null) {
+        yield* sql`DELETE FROM team_member_git_identities WHERE member_id = ${input.memberId}`;
+      } else if (input.git) {
+        yield* sql`
+          INSERT INTO team_member_git_identities (member_id, git_name, git_email)
+          VALUES (${input.memberId}, ${input.git.name}, ${input.git.email})
+          ON CONFLICT (member_id) DO UPDATE SET git_name = excluded.git_name, git_email = excluded.git_email
+        `;
+      }
+      const rows = yield* sql<MemberRow>`
+        SELECT ${memberColumns}
+        FROM team_members m
+        LEFT JOIN team_member_git_identities g ON g.member_id = m.member_id
+        WHERE m.member_id = ${input.memberId}
+      `;
       yield* notify;
-      return toMember(row);
+      return toMember(rows[0]!);
     }).pipe(
       Effect.mapError((error) =>
         isTeamError(error) ? error : toTeamError("Could not update the member")(error),
@@ -277,8 +333,35 @@ export const make = Effect.gen(function* () {
     );
   };
 
+  const gitIdentityForMember: TeamServiceShape["gitIdentityForMember"] = (memberId) =>
+    sql<GitIdentity>`
+      SELECT git_name AS "name", git_email AS "email"
+      FROM team_member_git_identities
+      WHERE member_id = ${memberId}
+    `.pipe(
+      Effect.map((rows) => rows[0] ?? null),
+      Effect.orElseSucceed(() => null),
+    );
+
+  const gitIdentityForThread: TeamServiceShape["gitIdentityForThread"] = (threadId) =>
+    sql<GitIdentity>`
+      SELECT git_name AS "name", git_email AS "email"
+      FROM team_member_git_identities
+      WHERE member_id = (
+        SELECT author_member_id FROM projection_thread_messages
+        WHERE thread_id = ${threadId} AND role = 'user'
+        ORDER BY created_at DESC
+        LIMIT 1
+      )
+    `.pipe(
+      Effect.map((rows) => rows[0] ?? null),
+      Effect.orElseSucceed(() => null),
+    );
+
   return TeamService.of({
     listMembers,
+    gitIdentityForThread,
+    gitIdentityForMember,
     invite,
     revokeMember,
     updateMember,

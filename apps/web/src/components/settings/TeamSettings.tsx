@@ -16,6 +16,7 @@ import { useState } from "react";
 import { teamEnvironment, useTeamSnapshot } from "~/state/team";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
 import { QRCodeSvg } from "../ui/qr-code";
 import { toastManager } from "../ui/toast";
@@ -87,6 +88,38 @@ export function TeamSettings(props: {
     isPublic: boolean;
   } | null>(null);
   const [editingOwnerName, setEditingOwnerName] = useState<string | null>(null);
+  const [editingGit, setEditingGit] = useState<{
+    readonly memberId: string;
+    readonly name: string;
+    readonly email: string;
+    readonly alsoSiblings: boolean;
+  } | null>(null);
+
+  /** A person's other devices: members whose name starts with the same word ("Roi Mac", "Roi Iphone"). */
+  const siblingsOf = (member: TeamMember) => {
+    const first = member.name.split(/\s+/)[0]?.toLowerCase() ?? "";
+    return team.members.filter(
+      (other) =>
+        other.memberId !== member.memberId && other.name.split(/\s+/)[0]?.toLowerCase() === first,
+    );
+  };
+
+  const saveGit = async (member: TeamMember, clear: boolean) => {
+    if (!editingGit) return;
+    const name = editingGit.name.trim();
+    const email = editingGit.email.trim();
+    if (!clear && (name.length === 0 || !email.includes("@"))) return;
+    const targets = [member, ...(editingGit.alsoSiblings ? siblingsOf(member) : [])];
+    setEditingGit(null);
+    for (const target of targets) {
+      const result = await updateMember({
+        environmentId,
+        input: { memberId: target.memberId, git: clear ? null : { name, email } },
+      });
+      if (result._tag === "Failure")
+        reportFailure(`Could not save ${target.name}'s git identity`, result);
+    }
+  };
 
   const submitInvite = async () => {
     const trimmed = name.trim();
@@ -156,29 +189,112 @@ export function TeamSettings(props: {
                 )}
               </span>
             }
-            description={`${ROLE_LABELS[member.role]} · ${online ? "Online" : "Offline"}`}
+            description={`${ROLE_LABELS[member.role]} · ${online ? "Online" : "Offline"}${
+              member.gitEmail ? ` · Git: ${member.gitName} <${member.gitEmail}>` : ""
+            }`}
             control={
-              member.role === "owner" ? (
-                isSelf && editingOwnerName === null ? (
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    onClick={() => setEditingOwnerName(member.name)}
-                  >
-                    Rename
-                  </Button>
-                ) : null
-              ) : (
+              <span className="flex items-center gap-2">
                 <Button
                   size="xs"
-                  variant="destructive-outline"
-                  onClick={() => void removeMember(member)}
+                  variant="outline"
+                  onClick={() =>
+                    setEditingGit(
+                      editingGit?.memberId === member.memberId
+                        ? null
+                        : {
+                            memberId: member.memberId,
+                            name: member.gitName ?? "",
+                            email: member.gitEmail ?? "",
+                            alsoSiblings: siblingsOf(member).length > 0,
+                          },
+                    )
+                  }
                 >
-                  Remove
+                  Git
                 </Button>
-              )
+                {member.role === "owner" ? (
+                  isSelf && editingOwnerName === null ? (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => setEditingOwnerName(member.name)}
+                    >
+                      Rename
+                    </Button>
+                  ) : null
+                ) : (
+                  <Button
+                    size="xs"
+                    variant="destructive-outline"
+                    onClick={() => void removeMember(member)}
+                  >
+                    Remove
+                  </Button>
+                )}
+              </span>
             }
-          />
+          >
+            {editingGit?.memberId === member.memberId ? (
+              <form
+                className="flex flex-col gap-2 pt-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void saveGit(member, false);
+                }}
+              >
+                <p className="text-xs text-muted-foreground">
+                  Commits made while {member.name} works on a thread (its agent, terminals and
+                  merges) are signed with this name and email. Use an email of their GitHub account
+                  so GitHub links the commits to it.
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    size="sm"
+                    className="w-40"
+                    placeholder="Name"
+                    aria-label="Git name"
+                    value={editingGit.name}
+                    onChange={(event) =>
+                      setEditingGit({ ...editingGit, name: event.currentTarget.value })
+                    }
+                  />
+                  <Input
+                    size="sm"
+                    className="w-56"
+                    type="email"
+                    placeholder="Email"
+                    aria-label="Git email"
+                    value={editingGit.email}
+                    onChange={(event) =>
+                      setEditingGit({ ...editingGit, email: event.currentTarget.value })
+                    }
+                  />
+                  <Button size="xs" type="submit">
+                    Save
+                  </Button>
+                  {member.gitEmail ? (
+                    <Button size="xs" variant="outline" onClick={() => void saveGit(member, true)}>
+                      Clear
+                    </Button>
+                  ) : null}
+                </div>
+                {siblingsOf(member).length > 0 ? (
+                  <label className="flex items-center gap-2 text-xs">
+                    <Checkbox
+                      checked={editingGit.alsoSiblings}
+                      onCheckedChange={(checked) =>
+                        setEditingGit({ ...editingGit, alsoSiblings: checked === true })
+                      }
+                    />
+                    Also for{" "}
+                    {siblingsOf(member)
+                      .map((other) => other.name)
+                      .join(", ")}
+                  </label>
+                ) : null}
+              </form>
+            ) : null}
+          </SettingsRow>
         );
       })}
       <SettingsRow

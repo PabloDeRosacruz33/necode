@@ -131,7 +131,9 @@ export class GitWorkflowService extends Context.Service<
       input: VcsMergeTaskPrepareInput,
     ) => Effect.Effect<VcsMergeTaskPrepareResult, GitCommandError>;
     readonly mergeTaskPublish: (
-      input: VcsMergeTaskPublishInput,
+      input: VcsMergeTaskPublishInput & {
+        readonly author?: { readonly name: string; readonly email: string } | null;
+      },
     ) => Effect.Effect<VcsMergeTaskPublishResult, GitCommandError>;
     readonly mergeAbort: (input: VcsMergeAbortInput) => Effect.Effect<void, GitCommandError>;
     readonly closeTask: (

@@ -61,6 +61,12 @@ export const TeamMember = Schema.Struct({
   color: TrimmedNonEmptyString,
   role: TeamMemberRole,
   createdAt: Schema.DateTimeUtc,
+  /**
+   * Who commits made while this member works on a thread are by (its agent, terminals and
+   * merges). Unset: the environment machine's own git identity.
+   */
+  gitName: Schema.optional(TrimmedNonEmptyString),
+  gitEmail: Schema.optional(TrimmedNonEmptyString),
 });
 export type TeamMember = typeof TeamMember.Type;
 
@@ -100,6 +106,15 @@ export const TeamUpdateMemberInput = Schema.Struct({
   memberId: TeamMemberId,
   name: Schema.optionalKey(TrimmedNonEmptyString.check(Schema.isMaxLength(40))),
   color: Schema.optionalKey(TrimmedNonEmptyString),
+  /** Both together; null clears the member's git identity. */
+  git: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Struct({
+        name: TrimmedNonEmptyString.check(Schema.isMaxLength(80)),
+        email: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
+      }),
+    ),
+  ),
 });
 export type TeamUpdateMemberInput = typeof TeamUpdateMemberInput.Type;
 

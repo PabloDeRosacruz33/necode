@@ -59,6 +59,7 @@ import * as ServerConfig from "../../config.ts";
 import * as DeviceService from "../../device/DeviceService.ts";
 import { ensureAgentDeviceShim } from "../../device/AgentDeviceShim.ts";
 import { openUrlEnvironment } from "../../openUrl/openUrlEnvironment.ts";
+import * as TeamService from "../../team/TeamService.ts";
 import type * as McpInvocationContext from "../../mcp/McpInvocationContext.ts";
 import {
   increment,
@@ -942,6 +943,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
   /** Install only the local CLI here. device_open supplies a separate config for each host. */
   const hostPlatform = yield* HostProcessPlatform;
+  const team = yield* Effect.serviceOption(TeamService.TeamService);
   const agentDeviceEnvironment = Effect.gen(function* () {
     const devices = yield* Effect.serviceOption(DeviceService.DeviceService);
     if (Option.isNone(devices)) return undefined;
@@ -987,11 +989,19 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           Effect.tapError((cause) => Effect.logWarning("Open-url shim unavailable", { cause })),
           Effect.orElseSucceed(() => null),
         );
+        // Commits the agent makes are by the person the thread is working for.
+        const gitIdentity = Option.isSome(team)
+          ? yield* team.value.gitIdentityForThread(threadId)
+          : null;
+        const threadEnvironment = {
+          ...openUrl,
+          ...TeamService.gitIdentityEnvironment(gitIdentity),
+        };
         yield* Effect.sync(() =>
           McpProviderSession.setMcpProviderSession({
             ...credential.config,
             ...(deviceEnvironment ? { agentDeviceEnvironment: deviceEnvironment } : {}),
-            ...(openUrl ? { openUrlEnvironment: openUrl } : {}),
+            ...(Object.keys(threadEnvironment).length > 0 ? { threadEnvironment } : {}),
           }),
         );
       }

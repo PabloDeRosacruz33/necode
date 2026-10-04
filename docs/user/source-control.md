@@ -141,6 +141,15 @@ choose **Stash and switch**: the edits are saved for that branch and come back w
 it again. In that shared checkout, **Fusionar en …** checks the integration branch out, merges and
 pushes, so commit first.
 
+## Who commits are by
+
+When several people work on one environment, give each of them a Git name and email in
+**Settings → Team → Git** (use an email of their GitHub account so GitHub links the commits to it;
+**Also for** copies it to the person's other devices). Commits a thread's agent, terminals and
+**Fusionar en …** make are then signed by whoever sent the thread's latest message, and the tasks
+they start are named after them (`roi/…`). Without one, commits use the machine's own Git identity.
+An agent already running keeps the identity it started with until its session restarts.
+
 ## Git history
 
 Open **Git** from the right panel (shortcut `G`) to see the project's history as a branch graph:

@@ -573,6 +573,13 @@ const makeWsRpcLayer = (
           hasClientOrigin ? { origin: attributedOrigin } : undefined,
         );
       const team = yield* TeamService.TeamService;
+      // Tasks someone starts are named after them (`roi/…`), from their git identity.
+      const memberBranchPrefix =
+        memberId === null
+          ? Effect.succeed(undefined)
+          : team
+              .gitIdentityForMember(memberId)
+              .pipe(Effect.map((identity) => identity?.name.split(/\s+/)[0]));
       const voiceTranscription = yield* VoiceTranscription.VoiceTranscription;
       const recordClientCommandAnalytics = (command: OrchestrationCommand) => {
         switch (command.type) {
@@ -1605,7 +1612,7 @@ const makeWsRpcLayer = (
                     projectCwd: prepareWorktree.projectCwd,
                     worktreesDir: config.worktreesDir,
                     taskName,
-                    branchPrefix: prepareWorktree.branchPrefix,
+                    branchPrefix: prepareWorktree.branchPrefix ?? (yield* memberBranchPrefix),
                   }).pipe(
                     Effect.provide(ProcessRunner.layer),
                     Effect.provideContext(normalizerContext),
@@ -2028,7 +2035,7 @@ const makeWsRpcLayer = (
             projectCwd: input.projectCwd,
             worktreesDir: config.worktreesDir,
             taskName: input.taskName,
-            branchPrefix: input.branchPrefix,
+            branchPrefix: input.branchPrefix ?? (yield* memberBranchPrefix),
           }).pipe(
             Effect.provide(ProcessRunner.layer),
             Effect.provideContext(normalizerContext),
@@ -3801,31 +3808,34 @@ const makeWsRpcLayer = (
         [WS_METHODS.vcsMergeTaskPublish]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsMergeTaskPublish,
-            gitWorkflow.mergeTaskPublish(input).pipe(
-              Effect.tap(() => refreshGitStatus(input.cwd)),
-              Effect.tap((result) =>
-                result._tag === "merged" && input.threadId
-                  ? Effect.gen(function* () {
-                      const createdAt = DateTime.formatIso(yield* DateTime.now);
-                      yield* orchestrationEngine.dispatch({
-                        type: "thread.activity.append",
-                        commandId: yield* serverCommandId("task-merged"),
-                        threadId: input.threadId!,
-                        activity: {
-                          id: yield* serverEventId,
-                          tone: "info",
-                          kind: "task.merged",
-                          summary: `Fusionada en ${result.targetRef} · ${result.commit.slice(0, 7)}`,
-                          payload: { commit: result.commit, targetRef: result.targetRef },
-                          turnId: null,
+            // The merge commit is by the person the task's thread is working for.
+            (input.threadId ? team.gitIdentityForThread(input.threadId) : Effect.succeed(null))
+              .pipe(Effect.flatMap((author) => gitWorkflow.mergeTaskPublish({ ...input, author })))
+              .pipe(
+                Effect.tap(() => refreshGitStatus(input.cwd)),
+                Effect.tap((result) =>
+                  result._tag === "merged" && input.threadId
+                    ? Effect.gen(function* () {
+                        const createdAt = DateTime.formatIso(yield* DateTime.now);
+                        yield* orchestrationEngine.dispatch({
+                          type: "thread.activity.append",
+                          commandId: yield* serverCommandId("task-merged"),
+                          threadId: input.threadId!,
+                          activity: {
+                            id: yield* serverEventId,
+                            tone: "info",
+                            kind: "task.merged",
+                            summary: `Fusionada en ${result.targetRef} · ${result.commit.slice(0, 7)}`,
+                            payload: { commit: result.commit, targetRef: result.targetRef },
+                            turnId: null,
+                            createdAt,
+                          },
                           createdAt,
-                        },
-                        createdAt,
-                      });
-                    }).pipe(Effect.ignoreCause({ log: true }))
-                  : Effect.void,
+                        });
+                      }).pipe(Effect.ignoreCause({ log: true }))
+                    : Effect.void,
+                ),
               ),
-            ),
             { "rpc.aggregate": "vcs" },
           ),
         [WS_METHODS.vcsMergeAbort]: (input) =>

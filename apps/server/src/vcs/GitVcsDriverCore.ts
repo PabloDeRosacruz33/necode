@@ -4011,7 +4011,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
   const mergeTaskPublish: GitVcsDriver.GitVcsDriver["Service"]["mergeTaskPublish"] = Effect.fn(
     "mergeTaskPublish",
-  )(function* ({ cwd, targetRef, headSha, message }) {
+  )(function* ({ cwd, targetRef, headSha, message, author }) {
     const fail = (detail: string) =>
       new GitCommandError({
         ...gitCommandContext({ operation: "GitVcsDriver.mergeTaskPublish", cwd, args: [] }),
@@ -4065,6 +4065,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           return { _tag: "stale", reason: "target-moved" } satisfies VcsMergeTaskPublishResult;
         }
         const commit = (yield* runGitStdout("GitVcsDriver.mergeTaskPublish.commitTree", cwd, [
+          ...(author ? ["-c", `user.name=${author.name}`, "-c", `user.email=${author.email}`] : []),
           "commit-tree",
           tree.stdout.split("\n")[0]!.trim(),
           "-p",
