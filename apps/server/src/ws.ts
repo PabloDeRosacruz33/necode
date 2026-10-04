@@ -133,6 +133,7 @@ import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
+import * as OpenUrlBroker from "./openUrl/OpenUrlBroker.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
@@ -527,6 +528,7 @@ const makeWsRpcLayer = (
   clientOrigin: OrchestrationClientOrigin,
   clientAnalyticsProps: Readonly<Record<string, unknown>>,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
+  openUrlBroker: OpenUrlBroker.OpenUrlBroker["Service"],
 ) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
@@ -4223,6 +4225,21 @@ const makeWsRpcLayer = (
             previewAutomationBroker.focusHost(input),
             { "rpc.aggregate": "preview-automation" },
           ),
+        // Desktop apps and phones take the web pages opened for their person's work.
+        [WS_METHODS.openUrlConnect]: (_input) =>
+          observeRpcStream(
+            WS_METHODS.openUrlConnect,
+            openUrlBroker.connect({
+              connectionId,
+              memberId,
+              desktop: clientOrigin.surface === "desktop",
+            }),
+            { "rpc.aggregate": "open-url" },
+          ),
+        [WS_METHODS.openUrlAck]: (input) =>
+          observeRpcEffect(WS_METHODS.openUrlAck, openUrlBroker.ack(input.requestId), {
+            "rpc.aggregate": "open-url",
+          }),
         [WS_METHODS.subscribePreviewEvents]: (_input) =>
           observeRpcStream(WS_METHODS.subscribePreviewEvents, previewManager.events, {
             "rpc.aggregate": "preview",
@@ -4474,7 +4491,12 @@ const makeWsRpcLayer = (
         [WS_METHODS.teamSetViewing]: (input) =>
           observeRpcEffect(
             WS_METHODS.teamSetViewing,
-            team.setViewing(connectionId, input.threadId).pipe(Effect.as({})),
+            team
+              .setViewing(connectionId, input.threadId)
+              .pipe(
+                Effect.andThen(openUrlBroker.noteViewing(connectionId, input.threadId ?? null)),
+                Effect.as({}),
+              ),
             { "rpc.aggregate": "team" },
           ),
         [WS_METHODS.teamInvite]: (input) =>
@@ -4522,6 +4544,7 @@ const makeWsRpcLayer = (
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+    const openUrlBroker = yield* OpenUrlBroker.OpenUrlBroker;
     const baseServerSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const config = yield* ServerConfig.ServerConfig;
     const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
@@ -4591,6 +4614,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               clientOrigin,
               clientAnalyticsProps,
               previewAutomationBroker,
+              openUrlBroker,
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),

@@ -10,6 +10,7 @@ export const QUIT_MAC_APP_CHANNEL = "desktop:quit-mac-app";
 export const BEGIN_MAC_APP_INSTALL_CHANNEL = "desktop:begin-mac-app-install";
 export const APPEND_MAC_APP_INSTALL_CHANNEL = "desktop:append-mac-app-install";
 export const FINISH_MAC_APP_INSTALL_CHANNEL = "desktop:finish-mac-app-install";
+export const SYNC_PORT_FORWARDS_CHANNEL = "desktop:sync-port-forwards";
 export const OPEN_SYSTEM_SETTINGS_CHANNEL = "desktop:open-system-settings";
 export const PROBE_REMOTE_EDITORS_CHANNEL = "desktop:probe-remote-editors";
 export const MENU_ACTION_CHANNEL = "desktop:menu-action";

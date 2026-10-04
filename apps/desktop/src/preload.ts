@@ -194,6 +194,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.invoke(IpcChannels.APPEND_MAC_APP_INSTALL_CHANNEL, input),
   finishMacAppInstall: (input) =>
     ipcRenderer.invoke(IpcChannels.FINISH_MAC_APP_INSTALL_CHANNEL, input),
+  syncPortForwards: (input) => ipcRenderer.invoke(IpcChannels.SYNC_PORT_FORWARDS_CHANNEL, input),
   checkSystemPermission: (pane: string) =>
     ipcRenderer.invoke(IpcChannels.CHECK_SYSTEM_PERMISSION_CHANNEL, pane),
   openSystemSettings: (pane: string) =>

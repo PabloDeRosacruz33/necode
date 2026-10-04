@@ -70,6 +70,7 @@ import {
 } from "./methods/snapShot.ts";
 import * as PreviewIpc from "./methods/preview.ts";
 import * as MacAppIpc from "./methods/macApp.ts";
+import * as PortForwardIpc from "./methods/portForward.ts";
 import * as AppActivationIpc from "./methods/appActivation.ts";
 import { getWslState, setWslBackendEnabled, setWslDistro, setWslOnly } from "./methods/wsl.ts";
 
@@ -138,6 +139,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(MacAppIpc.beginMacAppInstall);
   yield* ipc.handle(MacAppIpc.appendMacAppInstall);
   yield* ipc.handle(MacAppIpc.finishMacAppInstall);
+  yield* ipc.handle(PortForwardIpc.syncPortForwards);
   yield* ipc.handle(receiveProviderAuthCallback);
   yield* ipc.handle(cancelProviderAuthCallback);
   yield* ipc.handle(openSystemSettings);

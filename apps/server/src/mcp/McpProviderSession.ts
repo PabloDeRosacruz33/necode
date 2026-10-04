@@ -1,5 +1,7 @@
 import type { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 
+import { withPathPrefix } from "../openUrl/openUrlEnvironment.ts";
+
 export interface McpProviderSessionConfig {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
@@ -15,10 +17,24 @@ export interface McpProviderSessionConfig {
    * already pointed at the server's daemon; the agent never handles a token.
    */
   readonly agentDeviceEnvironment?: Readonly<Record<string, string>>;
+  /**
+   * Sends web pages the agent opens to the person's device (see openUrlEnvironment.ts). Its
+   * `PATH` is a directory to put first.
+   */
+  readonly openUrlEnvironment?: Readonly<Record<string, string>>;
 }
 
-/** Provider env with the device variables applied over `base`, or `base` untouched. */
+/** Provider env with the device and open-url variables applied over `base`. */
 export function withAgentDeviceEnvironment(
+  base: NodeJS.ProcessEnv,
+  config:
+    | Pick<McpProviderSessionConfig, "agentDeviceEnvironment" | "openUrlEnvironment">
+    | undefined,
+): NodeJS.ProcessEnv {
+  return withDeviceVariables(withPathPrefix(base, config?.openUrlEnvironment), config);
+}
+
+function withDeviceVariables(
   base: NodeJS.ProcessEnv,
   config: Pick<McpProviderSessionConfig, "agentDeviceEnvironment"> | undefined,
 ): NodeJS.ProcessEnv {

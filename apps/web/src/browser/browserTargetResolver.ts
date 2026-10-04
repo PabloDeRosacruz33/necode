@@ -7,6 +7,7 @@ import { isLoopbackHost, normalizePreviewUrl } from "@t3tools/shared/preview";
 import { isLocalLoopbackHost, isPrivateNetworkHost } from "@t3tools/shared/hostClassification";
 
 import { readPreparedConnection } from "~/state/session";
+import { isPortForwarded } from "./portForwardState";
 
 export {
   normalizeHostname,
@@ -28,7 +29,9 @@ const resolveEnvironmentPortTarget = (
   requestedUrl?: string,
   sourceUrl?: URL,
 ): PreviewUrlResolution => {
-  if (!isPrivateNetworkHost(environmentUrl.hostname)) {
+  // The desktop app answers this port on this Mac's own localhost, whatever the connection.
+  const forwarded = isPortForwarded(environmentId, target.port);
+  if (!forwarded && !isPrivateNetworkHost(environmentUrl.hostname)) {
     throw new Error(
       "This environment port needs the planned authenticated preview gateway; its server address is not directly private-network reachable.",
     );
@@ -38,11 +41,12 @@ const resolveEnvironmentPortTarget = (
   const normalizedEnvironmentHost = environmentUrl.hostname.replace(/^\[|\]$/g, "");
   // Local loopback environments should advertise `localhost` so Chromium
   // dual-stack lookup can reach a Vite server bound only to ::1 or 127.0.0.1.
-  const resolvedHost = isLocalLoopbackHost(normalizedEnvironmentHost)
-    ? "localhost"
-    : normalizedEnvironmentHost.includes(":")
-      ? `[${normalizedEnvironmentHost}]`
-      : normalizedEnvironmentHost;
+  const resolvedHost =
+    forwarded || isLocalLoopbackHost(normalizedEnvironmentHost)
+      ? "localhost"
+      : normalizedEnvironmentHost.includes(":")
+        ? `[${normalizedEnvironmentHost}]`
+        : normalizedEnvironmentHost;
   const resolved = sourceUrl
     ? new URL(sourceUrl)
     : new URL(path, `${protocol}://${resolvedHost}:${target.port}`);
@@ -53,9 +57,10 @@ const resolveEnvironmentPortTarget = (
   return {
     requestedUrl: requestedUrl ?? `${protocol}://localhost:${target.port}${path}`,
     resolvedUrl: resolved.toString(),
-    resolutionKind: isLocalLoopbackHost(normalizedEnvironmentHost)
-      ? "direct"
-      : "direct-private-network",
+    resolutionKind:
+      forwarded || isLocalLoopbackHost(normalizedEnvironmentHost)
+        ? "direct"
+        : "direct-private-network",
     environmentId,
   };
 };

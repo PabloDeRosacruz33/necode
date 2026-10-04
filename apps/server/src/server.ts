@@ -77,6 +77,9 @@ import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import { deviceHubProxyRouteLayer } from "./device/DeviceHubProxy.ts";
+import { portForwardRouteLayer } from "./preview/PortForwardProxy.ts";
+import * as OpenUrlBroker from "./openUrl/OpenUrlBroker.ts";
+import { openUrlRouteLayer } from "./openUrl/openUrlRoute.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as ProcessRunner from "./processRunner.ts";
@@ -591,6 +594,7 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provideMerge(AnalyticsService.layer),
   Layer.provideMerge(ExternalLauncher.layer),
   Layer.provideMerge(RemoteOpenTargets.layer),
+  Layer.provideMerge(OpenUrlBroker.layer),
   Layer.provideMerge(ServerLifecycleEvents.layer),
   Layer.provide(NetService.layer),
 );
@@ -617,6 +621,8 @@ export const makeRoutesLayer = Layer.mergeAll(
     assetRouteLayer,
     attachmentUploadRouteLayer,
     deviceHubProxyRouteLayer,
+    portForwardRouteLayer,
+    openUrlRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
   ),

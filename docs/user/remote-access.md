@@ -143,6 +143,20 @@ running is left alone.
 For Antigravity's Google callback on a remote host, see
 [remote sign-in](./providers-antigravity.md#sign-in-from-a-remote-device).
 
+## Working from another device
+
+When you work on a remote environment, what it opens shows up where you are:
+
+- Web pages an agent, terminal or script opens there (sign-ins, docs, the app being built) open in
+  the browser of the device you are working from: the one viewing that thread, otherwise a device
+  of whoever sent its latest message, the desktop app before the phone. The phone only takes them
+  while Necode is in front. If no device takes a page, it opens on the environment's machine.
+- In the desktop app, every dev server the environment runs answers on your own
+  `localhost:<port>`, so its links, previews and sign-in callbacks work as if it ran on your
+  computer. A port already in use on your computer is left alone.
+- Simulators an agent opens appear in the thread on your device, and **Compilar y abrir** opens
+  the Mac app on your Mac.
+
 ## Manage or revoke access
 
 On the host, **Settings → Connections** lets authorized administrators create

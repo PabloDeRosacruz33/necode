@@ -59,6 +59,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as ServerConfig from "../config.ts";
+import { openUrlEnvironment, withPathPrefix } from "../openUrl/openUrlEnvironment.ts";
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome.ts";
@@ -1366,6 +1367,8 @@ interface TerminalManagerOptions {
     Record<string, string>,
     TerminalProviderInstanceNotFoundError | TerminalProviderEnvironmentError
   >;
+  /** Variables for every terminal of a thread; a `PATH` entry is put before the inherited one. */
+  resolveThreadEnvironment?: (threadId: string) => Effect.Effect<Record<string, string> | null>;
 }
 
 export const resolveProviderInstanceTerminalEnvironment = Effect.fn(
@@ -1411,12 +1414,15 @@ export const resolveProviderInstanceTerminalEnvironment = Effect.fn(
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.fn("TerminalManager.make")(function* () {
-  const { terminalLogsDir } = yield* ServerConfig.ServerConfig;
+  const serverConfig = yield* ServerConfig.ServerConfig;
+  const { terminalLogsDir } = serverConfig;
   const ptyAdapter = yield* PtyAdapter.PtyAdapter;
   const portDiscovery = yield* PortScanner.PortDiscovery;
   const nativeTelemetry = yield* NativeTelemetryClient.NativeTelemetryClient;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const path = yield* Path.Path;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const hostPlatform = yield* HostProcessPlatform;
   const resolveProviderInstanceEnvironment = Effect.fn(
     "terminal.resolveProviderInstanceEnvironment",
   )((rawProviderInstanceId: string, env: Record<string, string> | undefined) =>
@@ -1438,6 +1444,19 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
     registerTerminalProcesses: portDiscovery.registerTerminalProcesses,
     unregisterTerminal: portDiscovery.unregisterTerminal,
     resolveProviderInstanceEnvironment,
+    // Web pages opened from a terminal go to the device of the thread's person.
+    resolveThreadEnvironment: (threadId) =>
+      openUrlEnvironment({
+        stateDir: serverConfig.stateDir,
+        port: serverConfig.port,
+        host: serverConfig.host,
+        threadId,
+      }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+        Effect.provideService(HostProcessPlatform, hostPlatform),
+        Effect.orElseSucceed(() => null),
+      ),
   });
 });
 
@@ -2237,7 +2256,13 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         Effect.andThen(
           Effect.gen(function* () {
             const shellCandidates = resolveShellCandidates(shellResolver, platform, baseEnv);
-            const terminalEnv = createTerminalSpawnEnv(baseEnv, session.runtimeEnv);
+            const threadEnv = options.resolveThreadEnvironment
+              ? yield* options.resolveThreadEnvironment(session.threadId)
+              : null;
+            const terminalEnv = withPathPrefix(
+              createTerminalSpawnEnv(baseEnv, session.runtimeEnv),
+              threadEnv,
+            );
             const spawnResult = yield* trySpawn(shellCandidates, terminalEnv, session);
             ptyProcess = spawnResult.process;
             startedShell = spawnResult.shellLabel;

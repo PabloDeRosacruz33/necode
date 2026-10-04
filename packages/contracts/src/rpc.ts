@@ -271,6 +271,7 @@ import {
   PreviewAutomationResponse,
   PreviewAutomationStreamEvent,
 } from "./previewAutomation.ts";
+import { OpenUrlAckInput, OpenUrlConnectInput, OpenUrlRequest } from "./openUrl.ts";
 import {
   ServerConfigStreamEvent,
   DesktopUpdateCommitInput,
@@ -423,6 +424,8 @@ export const WS_METHODS = {
   previewAutomationConnect: "previewAutomation.connect",
   previewAutomationRespond: "previewAutomation.respond",
   previewAutomationFocusHost: "previewAutomation.focusHost",
+  openUrlConnect: "openUrl.connect",
+  openUrlAck: "openUrl.ack",
 
   // Device methods
   deviceConfigure: "device.configure",
@@ -1412,6 +1415,18 @@ const WsPreviewAutomationRespondRpc = Rpc.make(WS_METHODS.previewAutomationRespo
   error: Schema.Union([PreviewAutomationError, EnvironmentAuthorizationError]),
 });
 
+const WsOpenUrlConnectRpc = Rpc.make(WS_METHODS.openUrlConnect, {
+  payload: OpenUrlConnectInput,
+  success: OpenUrlRequest,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+const WsOpenUrlAckRpc = Rpc.make(WS_METHODS.openUrlAck, {
+  payload: OpenUrlAckInput,
+  error: EnvironmentAuthorizationError,
+});
+
 const WsPreviewAutomationFocusHostRpc = Rpc.make(WS_METHODS.previewAutomationFocusHost, {
   payload: PreviewAutomationHostFocus,
   error: EnvironmentAuthorizationError,
@@ -1784,6 +1799,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewAutomationConnectRpc,
   WsPreviewAutomationRespondRpc,
   WsPreviewAutomationFocusHostRpc,
+  WsOpenUrlConnectRpc,
+  WsOpenUrlAckRpc,
   WsSubscribePreviewEventsRpc,
   WsSubscribeDiscoveredLocalServersRpc,
   WsDeviceConfigureRpc,

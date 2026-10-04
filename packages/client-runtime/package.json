@@ -163,6 +163,10 @@
       "types": "./src/state/deviceHubAccess.ts",
       "default": "./src/state/deviceHubAccess.ts"
     },
+    "./state/open-url": {
+      "types": "./src/state/openUrl.ts",
+      "default": "./src/state/openUrl.ts"
+    },
     "./state/preview": {
       "types": "./src/state/preview.ts",
       "default": "./src/state/preview.ts"

@@ -1163,6 +1163,13 @@ export interface DesktopBridge {
     name: string;
     bundleId: string | null;
   }) => Promise<string>;
+  /**
+   * Makes the given ports of a remote environment answer on this Mac's localhost, each through
+   * its `/api/port-forward/<port>` WebSocket URL. Ports missing from `forwards` stop.
+   */
+  syncPortForwards?: (input: {
+    forwards: ReadonlyArray<{ port: number; url: string }>;
+  }) => Promise<ReadonlyArray<{ port: number; forwarding: boolean }>>;
   requestSnapShotPermissions?: (includeAccessibility: boolean) => Promise<void>;
   getSnapShotState?: () => Promise<DesktopSnapShotState>;
   setupSnapShot?: (action: DesktopSnapShotSetupAction) => Promise<void>;

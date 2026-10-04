@@ -2,6 +2,7 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import { TextGeneration } from "./textGeneration/TextGeneration.ts";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeNet from "node:net";
 import * as NodeCrypto from "node:crypto";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
@@ -110,6 +111,7 @@ const encodeTestJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unk
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as ServerConfig from "./config.ts";
 import * as DeviceService from "./device/DeviceService.ts";
+import * as OpenUrlBroker from "./openUrl/OpenUrlBroker.ts";
 import { HTTP_ROUTER_CONFIG, makeRoutesLayer } from "./server.ts";
 import {
   isThreadDetailEvent,
@@ -856,6 +858,7 @@ const buildAppUnderTest = (options?: {
             listBindings: () => Effect.succeed([]),
             ...options?.layers?.providerSessionDirectory,
           }),
+          OpenUrlBroker.layer,
           Layer.mock(DeviceService.DeviceService)({
             state: Effect.succeed(EMPTY_DEVICE_STATE),
             currentReadiness: () => Effect.succeed(null),
@@ -4561,6 +4564,52 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.isTrue(wsTicketBody.ticket.length > 0);
       assert.equal(typeof wsTicketBody.expiresAt, "string");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("carries a connection to a local port over an authenticated WebSocket", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const echo = yield* Effect.acquireRelease(
+        Effect.promise(
+          () =>
+            new Promise<NodeNet.Server>((resolve) => {
+              const server = NodeNet.createServer((socket) => socket.pipe(socket));
+              server.listen(0, "127.0.0.1", () => resolve(server));
+            }),
+        ),
+        (server) => Effect.sync(() => server.close()),
+      );
+      const port = (echo.address() as NodeNet.AddressInfo).port;
+      const bearerToken = yield* getAuthenticatedBearerSessionToken();
+      const ticketResponse = yield* fetchEffect(
+        yield* getHttpServerUrl("/api/auth/websocket-ticket"),
+        { method: "POST", headers: { authorization: `Bearer ${bearerToken}` } },
+      );
+      const { ticket } = yield* responseJsonEffect<{ readonly ticket: string }>(ticketResponse);
+      const base = yield* getWsServerUrl(`/api/port-forward/${port}`, { authenticated: false });
+
+      const reply = yield* Effect.callback<string, Error>((resume) => {
+        const socket = new NodeSocket.NodeWS.WebSocket(`${base}?wsTicket=${ticket}`);
+        socket.on("open", () => socket.send(Buffer.from("hola")));
+        socket.on("message", (data) => {
+          resume(Effect.succeed(String(data)));
+          socket.close();
+        });
+        socket.on("error", (error) => resume(Effect.fail(error)));
+      });
+      assert.equal(reply, "hola");
+
+      const rejected = yield* Effect.callback<boolean>((resume) => {
+        const socket = new NodeSocket.NodeWS.WebSocket(base);
+        socket.on("open", () => {
+          resume(Effect.succeed(false));
+          socket.close();
+        });
+        socket.on("unexpected-response", () => resume(Effect.succeed(true)));
+        socket.on("error", () => resume(Effect.succeed(true)));
+      });
+      assert.isTrue(rejected);
+    }).pipe(Effect.scoped, Effect.provide(NodeHttpServerTestWithWsDeflate)),
   );
 
   it.effect("does not allow management-only access tokens to operate the environment", () =>

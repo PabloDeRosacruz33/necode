@@ -58,6 +58,7 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
 import * as DeviceService from "../../device/DeviceService.ts";
 import { ensureAgentDeviceShim } from "../../device/AgentDeviceShim.ts";
+import { openUrlEnvironment } from "../../openUrl/openUrlEnvironment.ts";
 import type * as McpInvocationContext from "../../mcp/McpInvocationContext.ts";
 import {
   increment,
@@ -974,10 +975,23 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const deviceEnvironment = capabilities.has("device")
           ? yield* agentDeviceEnvironment
           : undefined;
+        const openUrl = yield* openUrlEnvironment({
+          stateDir: serverConfig.stateDir,
+          port: serverConfig.port,
+          host: serverConfig.host,
+          threadId,
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, pathService),
+          Effect.provideService(HostProcessPlatform, hostPlatform),
+          Effect.tapError((cause) => Effect.logWarning("Open-url shim unavailable", { cause })),
+          Effect.orElseSucceed(() => null),
+        );
         yield* Effect.sync(() =>
           McpProviderSession.setMcpProviderSession({
             ...credential.config,
             ...(deviceEnvironment ? { agentDeviceEnvironment: deviceEnvironment } : {}),
+            ...(openUrl ? { openUrlEnvironment: openUrl } : {}),
           }),
         );
       }
