@@ -61,6 +61,7 @@ import {
 import { BitbucketCredentialsSettings } from "./BitbucketCredentialsSettings";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
+import { GitIdentitySettingsSection } from "./GitIdentitySettings";
 import {
   PolicyTooltip,
   SettingResetButton,
@@ -622,6 +623,7 @@ export function SourceControlSettingsPanel() {
 
       <SourceControlWritingSettingsSection />
       <TaskSettingsSection />
+      <GitIdentitySettingsSection />
     </SettingsPageContainer>
   );
 }

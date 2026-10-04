@@ -118,6 +118,22 @@ export const TeamUpdateMemberInput = Schema.Struct({
 });
 export type TeamUpdateMemberInput = typeof TeamUpdateMemberInput.Type;
 
+/**
+ * The caller sets their own git identity (null clears it), so each person manages theirs from
+ * their own device. `alsoForMyDevices` applies it to the members named with the same first word
+ * ("Roi Mac", "Roi Iphone"): Necode has one member per device.
+ */
+export const TeamSetGitIdentityInput = Schema.Struct({
+  git: Schema.NullOr(
+    Schema.Struct({
+      name: TrimmedNonEmptyString.check(Schema.isMaxLength(80)),
+      email: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
+    }),
+  ),
+  alsoForMyDevices: Schema.Boolean,
+});
+export type TeamSetGitIdentityInput = typeof TeamSetGitIdentityInput.Type;
+
 export const TeamSetViewingInput = Schema.Struct({
   threadId: Schema.NullOr(ThreadId),
 });

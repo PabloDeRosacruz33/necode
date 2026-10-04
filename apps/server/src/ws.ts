@@ -27,6 +27,7 @@ import {
   DEFAULT_RUNTIME_MODE,
   AuthAccessStreamError,
   GitCommandError,
+  TeamError,
   type AuthAccessStreamEvent,
   type AuthEnvironmentScope,
   AuthSessionId,
@@ -4542,6 +4543,14 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.teamRevokeMember,
             team.revokeMember(input.memberId).pipe(Effect.map((revoked) => ({ revoked }))),
+            { "rpc.aggregate": "team" },
+          ),
+        [WS_METHODS.teamSetGitIdentity]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.teamSetGitIdentity,
+            memberId === null
+              ? Effect.fail(new TeamError({ message: "This device is not a team member." }))
+              : team.setOwnGitIdentity(memberId, input),
             { "rpc.aggregate": "team" },
           ),
         [WS_METHODS.teamUpdateMember]: (input) =>

@@ -14,6 +14,7 @@ import {
   type TeamPresence,
   type TeamSnapshot,
   type TeamUpdateMemberInput,
+  type TeamSetGitIdentityInput,
   type ThreadId,
   teamMemberIdFromSubject,
   teamMemberSubject,
@@ -76,6 +77,11 @@ export interface TeamServiceShape {
   /** The git identity of whoever sent a thread's latest message, when they set one. */
   readonly gitIdentityForThread: (threadId: string) => Effect.Effect<GitIdentity | null>;
   readonly gitIdentityForMember: (memberId: string) => Effect.Effect<GitIdentity | null>;
+  /** Sets `memberId`'s own git identity, and their other devices' when asked. */
+  readonly setOwnGitIdentity: (
+    memberId: string,
+    input: TeamSetGitIdentityInput,
+  ) => Effect.Effect<void, TeamError>;
   /** Tracks a live WebSocket for presence until `disconnect`. */
   readonly connect: (input: {
     readonly connectionId: string;
@@ -358,8 +364,36 @@ export const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => null),
     );
 
+  const setOwnGitIdentity: TeamServiceShape["setOwnGitIdentity"] = (memberId, input) =>
+    Effect.gen(function* () {
+      const members = yield* listMembers;
+      const self = members.find((member) => member.memberId === memberId);
+      if (!self) return yield* new TeamError({ message: "This device is not a team member." });
+      const firstWord = (name: string) => name.split(/\s+/)[0]?.toLowerCase() ?? "";
+      const targets = input.alsoForMyDevices
+        ? members.filter((member) => firstWord(member.name) === firstWord(self.name))
+        : [self];
+      for (const target of targets) {
+        if (input.git === null) {
+          yield* sql`DELETE FROM team_member_git_identities WHERE member_id = ${target.memberId}`;
+        } else {
+          yield* sql`
+            INSERT INTO team_member_git_identities (member_id, git_name, git_email)
+            VALUES (${target.memberId}, ${input.git.name}, ${input.git.email})
+            ON CONFLICT (member_id) DO UPDATE SET git_name = excluded.git_name, git_email = excluded.git_email
+          `;
+        }
+      }
+      yield* notify;
+    }).pipe(
+      Effect.mapError((error) =>
+        isTeamError(error) ? error : toTeamError("Could not save the git identity")(error),
+      ),
+    );
+
   return TeamService.of({
     listMembers,
+    setOwnGitIdentity,
     gitIdentityForThread,
     gitIdentityForMember,
     invite,

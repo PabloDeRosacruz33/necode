@@ -199,4 +199,33 @@ it.layer(NodeServices.layer)("TeamService", (it) => {
       expect(yield* team.gitIdentityForThread("thread-1")).toBeNull();
     }).pipe(Effect.provide(TeamTestLayer)),
   );
+
+  it.effect("lets a person set their own git identity on all their devices", () =>
+    Effect.gen(function* () {
+      const team = yield* TeamService.TeamService;
+      const roiMac = (yield* team.invite({ name: "Roi Mac", role: "member" })).member;
+      const roiPhone = (yield* team.invite({ name: "Roi Iphone", role: "member" })).member;
+      const pablo = (yield* team.invite({ name: "Pablo Mac", role: "member" })).member;
+
+      yield* team.setOwnGitIdentity(roiMac.memberId, {
+        git: { name: "Roi", email: "roi@necora.pro" },
+        alsoForMyDevices: true,
+      });
+      const identities = () =>
+        team.listMembers.pipe(
+          Effect.map((members) =>
+            Object.fromEntries(members.map((member) => [member.memberId, member.gitEmail ?? null])),
+          ),
+        );
+      const afterAll = yield* identities();
+      expect(afterAll[roiMac.memberId]).toBe("roi@necora.pro");
+      expect(afterAll[roiPhone.memberId]).toBe("roi@necora.pro");
+      expect(afterAll[pablo.memberId]).toBeNull();
+
+      yield* team.setOwnGitIdentity(roiPhone.memberId, { git: null, alsoForMyDevices: false });
+      const afterClear = yield* identities();
+      expect(afterClear[roiMac.memberId]).toBe("roi@necora.pro");
+      expect(afterClear[roiPhone.memberId]).toBeNull();
+    }).pipe(Effect.provide(TeamTestLayer)),
+  );
 });

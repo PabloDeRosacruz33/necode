@@ -18,6 +18,7 @@ import {
   TeamSetViewingInput,
   TeamSnapshot,
   TeamUpdateMemberInput,
+  TeamSetGitIdentityInput,
 } from "./team.ts";
 import { VoiceTranscribeError, VoiceTranscribeInput, VoiceTranscribeResult } from "./voice.ts";
 import {
@@ -533,6 +534,7 @@ export const WS_METHODS = {
   teamInvite: "team.invite",
   teamRevokeMember: "team.revokeMember",
   teamUpdateMember: "team.updateMember",
+  teamSetGitIdentity: "team.setGitIdentity",
 
   // Dictation
   voiceTranscribe: "voice.transcribe",
@@ -1650,6 +1652,11 @@ const WsTeamRevokeMemberRpc = Rpc.make(WS_METHODS.teamRevokeMember, {
   error: Schema.Union([TeamError, EnvironmentAuthorizationError]),
 });
 
+const WsTeamSetGitIdentityRpc = Rpc.make(WS_METHODS.teamSetGitIdentity, {
+  payload: TeamSetGitIdentityInput,
+  error: Schema.Union([TeamError, EnvironmentAuthorizationError]),
+});
+
 const WsTeamUpdateMemberRpc = Rpc.make(WS_METHODS.teamUpdateMember, {
   payload: TeamUpdateMemberInput,
   success: TeamMember,
@@ -1841,6 +1848,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsTeamInviteRpc,
   WsTeamRevokeMemberRpc,
   WsTeamUpdateMemberRpc,
+  WsTeamSetGitIdentityRpc,
   WsVoiceTranscribeRpc,
   WsSubscribeBackgroundPolicyRpc,
   WsSubscribeResourceTelemetryRpc,

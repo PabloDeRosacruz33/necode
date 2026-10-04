@@ -143,9 +143,11 @@ pushes, so commit first.
 
 ## Who commits are by
 
-When several people work on one environment, give each of them a Git name and email in
-**Settings → Team → Git** (use an email of their GitHub account so GitHub links the commits to it;
-**Also for** copies it to the person's other devices). Commits a thread's agent, terminals and
+When several people work on one environment, each of them sets their Git name and email from their
+own device in **Settings → Source Control → Quién firma tus commits**, one row per connected
+environment (use an email of their GitHub account so GitHub links the commits to it; **También para
+mis otros aparatos** copies it to the person's other devices there). The environment's owner can also
+set anyone's from **Settings → Connections → Team → Git**. Commits a thread's agent, terminals and
 **Fusionar en …** make are then signed by whoever sent the thread's latest message, and the tasks
 they start are named after them (`roi/…`). Without one, commits use the machine's own Git identity.
 An agent already running keeps the identity it started with until its session restarts.

@@ -202,6 +202,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.teamInvite]: AuthAccessWriteScope,
   [WS_METHODS.teamRevokeMember]: AuthAccessWriteScope,
   [WS_METHODS.teamUpdateMember]: AuthAccessWriteScope,
+  // Only the caller's own identity: anyone who can work here can set who they sign as.
+  [WS_METHODS.teamSetGitIdentity]: AuthOrchestrationOperateScope,
   // Dictation spends the host's speech-to-text quota, so it needs operate access.
   [WS_METHODS.voiceTranscribe]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribeBackgroundPolicy]: AuthOrchestrationReadScope,

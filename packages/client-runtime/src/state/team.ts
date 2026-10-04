@@ -38,6 +38,10 @@ export function createTeamEnvironmentAtoms<R, E>(
       label: "team:update-member",
       tag: WS_METHODS.teamUpdateMember,
     }),
+    setGitIdentity: createEnvironmentRpcCommand(runtime, {
+      label: "team:set-git-identity",
+      tag: WS_METHODS.teamSetGitIdentity,
+    }),
   };
 }
 
