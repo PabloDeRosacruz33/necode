@@ -8,6 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { createModelSelection } from "./model.ts";
 import {
   clearProjectSettingsOverrides,
+  configuredIntegrationBranch,
   hasProjectSettingsOverrides,
   resolveProjectFileBackedSetting,
   resolveProjectSettings,
@@ -364,5 +365,29 @@ describe("resolveWorktreeCleanup", () => {
       resolveWorktreeCleanup(applyServerSettingsPatch(edited, { worktreeCleanup: null }), null)
         .worktreeAfterDays,
     ).toBe(8);
+  });
+});
+
+describe("configuredIntegrationBranch", () => {
+  it("prefers the repository's t3.json over the project setting", () => {
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      projectSettingsOverrides: withProjectSettingsOverrides(DEFAULT_SERVER_SETTINGS, projectId, {
+        integrationBranch: "develop",
+      }),
+    };
+    expect(configuredIntegrationBranch(settings, projectId, { integrationBranch: "necode" })).toBe(
+      "necode",
+    );
+    expect(configuredIntegrationBranch(settings, projectId, {})).toBe("develop");
+  });
+
+  it("reads the t3.json even when no setting is configured", () => {
+    expect(
+      configuredIntegrationBranch(DEFAULT_SERVER_SETTINGS, projectId, {
+        integrationBranch: "necode",
+      }),
+    ).toBe("necode");
+    expect(configuredIntegrationBranch(DEFAULT_SERVER_SETTINGS, projectId, null)).toBeNull();
   });
 });

@@ -91,7 +91,10 @@ import {
   teamMemberIdFromSubject,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import {
+  configuredIntegrationBranch,
+  resolveProjectSettings,
+} from "@t3tools/shared/projectSettings";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
@@ -2052,10 +2055,7 @@ const makeWsRpcLayer = (
             Effect.orElseSucceed(() => null),
           );
           const settings = yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null));
-          const configured = settings
-            ? resolveProjectSettings(settings, projectId, undefined, projectFile).settings
-                .integrationBranch
-            : projectFile?.integrationBranch;
+          const configured = configuredIntegrationBranch(settings, projectId, projectFile);
           if (configured) return configured;
           const hasStaging = yield* gitWorkflow
             .remoteBranchExists({ cwd: projectCwd, remoteName: "origin", refName: "staging" })

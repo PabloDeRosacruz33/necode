@@ -229,3 +229,23 @@ export function resolveWorktreeCleanup(
     settings.storageCleanup;
   return { worktreeAfterDays, worktreeOnMerge, worktreeOnDelete, worktreeUnchanged };
 }
+
+/**
+ * The branch a project's tasks start from and merge into, when one is configured: the
+ * repository's t3.json `integrationBranch` first, then the project or environment setting.
+ * Null leaves the caller to fall back to `staging` or the remote's default branch. The branch
+ * menu and the server both resolve it here so they never disagree.
+ */
+export function configuredIntegrationBranch(
+  settings: ServerSettings | null,
+  projectId: ProjectId | null,
+  projectFile: T3ProjectFile | null,
+  project?: LegacyProjectSettingsFields | null,
+): string | null {
+  return (
+    projectFile?.integrationBranch ??
+    (settings
+      ? resolveProjectSettings(settings, projectId, project).settings.integrationBranch
+      : null)
+  );
+}

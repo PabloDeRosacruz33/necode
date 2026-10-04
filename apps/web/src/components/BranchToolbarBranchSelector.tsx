@@ -53,7 +53,7 @@ import { useProject, useThreadShell, useThreadShellsForProjectRefs } from "../st
 import { useT3ProjectFileState } from "../hooks/useT3ProjectFileScripts";
 import { useEnvironmentSettings } from "../hooks/useSettings";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { configuredIntegrationBranch as resolveConfiguredIntegrationBranch } from "@t3tools/shared/projectSettings";
 import { MergeTaskDialog } from "./git/MergeTaskDialog";
 import { NewTaskDialog } from "./git/NewTaskDialog";
 import { ContinueTaskDialog } from "./git/ContinueTaskDialog";
@@ -403,13 +403,12 @@ export function BranchToolbarBranchSelector({
   // t3.json first, then the project's setting; otherwise staging or the default branch.
   const projectFile = useT3ProjectFileState(environmentId, activeProjectCwd);
   const environmentSettings = useEnvironmentSettings(environmentId);
-  const configuredIntegrationBranch =
-    projectFile.file?.integrationBranch ??
-    resolveProjectSettings(
-      environmentSettings,
-      activeProject?.id ?? null,
-      activeProject ?? undefined,
-    ).settings.integrationBranch;
+  const configuredIntegrationBranch = resolveConfiguredIntegrationBranch(
+    environmentSettings,
+    activeProject?.id ?? null,
+    projectFile.file,
+    activeProject ?? undefined,
+  );
   const integrationRefQuery = useEnvironmentQuery(
     isBranchMenuOpen && branchCwd !== null && !configuredIntegrationBranch
       ? vcsEnvironment.listRefs({
