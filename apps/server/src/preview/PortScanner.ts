@@ -295,395 +295,429 @@ const serversEqual = (
 };
 
 /** @public Service construction is part of the canonical Effect module API. */
-export const make = Effect.gen(function* PortDiscoveryMake() {
-  const net = yield* Net.NetService;
-  const processRunner = yield* ProcessRunner.ProcessRunner;
-  const hostPlatform = yield* HostProcessPlatform;
-  const httpClient = (yield* HttpClient.HttpClient).pipe(HttpClient.withScope);
-  const stateRef = yield* Ref.make<ScannerState>({
-    listeners: new Map(),
-    terminalProcesses: new Map(),
-    retainCount: 0,
-  });
-  const webProbeCacheRef = yield* Ref.make<ReadonlyMap<string, WebProbeCacheEntry>>(new Map());
-  const scanSemaphore = yield* Semaphore.make(1);
+/**
+ * A listener is probed over HTTP only once it has been open this long. Dev servers stay up for
+ * hours; the throwaway servers of a running test suite are gone in seconds and must not receive
+ * requests nobody made (they assert on every request they get).
+ */
+const MINIMUM_LISTEN_AGE_MS = 10_000;
 
-  const probeCommonPorts = Effect.fn("PortDiscovery.probeCommonPorts")(function* () {
-    const results = yield* Effect.forEach(
-      COMMON_DEV_PORTS,
-      (port) =>
-        net.isPortAvailableOnLoopback(port).pipe(
-          Effect.map((available) => ({
-            port,
-            listening: !available,
-          })),
-        ),
-      { concurrency: "unbounded" },
-    );
-    return results
-      .filter((result) => result.listening)
-      .map<DiscoveredLocalServer>((result) => ({
-        host: "localhost",
-        port: result.port,
-        url: `http://localhost:${result.port}`,
-        processName: null,
-        pid: null,
-        terminal: null,
-      }));
-  });
+export const makeWith = (options: { readonly minimumListenAgeMs: number }) =>
+  Effect.gen(function* PortDiscoveryMake() {
+    const net = yield* Net.NetService;
+    const processRunner = yield* ProcessRunner.ProcessRunner;
+    const hostPlatform = yield* HostProcessPlatform;
+    const httpClient = (yield* HttpClient.HttpClient).pipe(HttpClient.withScope);
+    const stateRef = yield* Ref.make<ScannerState>({
+      listeners: new Map(),
+      terminalProcesses: new Map(),
+      retainCount: 0,
+    });
+    const webProbeCacheRef = yield* Ref.make<ReadonlyMap<string, WebProbeCacheEntry>>(new Map());
+    const scanSemaphore = yield* Semaphore.make(1);
 
-  // Metro serves no page at `/`, but simulators on a person's Mac load their app from it.
-  // Only its usual ports are asked, so other servers see no extra request.
-  const probeMetro = (url: string) =>
-    !isMetroPort(url)
-      ? Effect.succeed(null)
-      : httpClient.get(new URL("/status", url).toString()).pipe(
-          Effect.flatMap((response) => response.text),
-          Effect.map((body) => (body.includes("packager-status:running") ? url : null)),
-          Effect.scoped,
-          Effect.timeoutOption(WEB_PROBE_TIMEOUT),
-          Effect.map(Option.getOrNull),
-          Effect.orElseSucceed(() => null),
-        );
-
-  const probeWebUrl = Effect.fn("PortDiscovery.probeWebUrl")((url: string) =>
-    probePage(url).pipe(Effect.flatMap((page) => (page ? Effect.succeed(page) : probeMetro(url)))),
-  );
-
-  const probePage = (url: string) =>
-    httpClient.get(url).pipe(
-      Effect.map((response) => {
-        const location = response.headers.location?.trim();
-        if (NAVIGATION_REDIRECT_STATUSES.has(response.status) && location) return url;
-        if (response.status < 200 || response.status >= 300) return null;
-        if (response.status === 204 || response.status === 205) return null;
-        const contentType = response.headers["content-type"]
-          ?.split(";", 1)[0]
-          ?.trim()
-          .toLowerCase();
-        return contentType === "text/html" || contentType === "application/xhtml+xml" ? url : null;
-      }),
-      Effect.scoped,
-      Effect.timeoutOption(WEB_PROBE_TIMEOUT),
-      Effect.map(Option.getOrNull),
-      Effect.orElseSucceed(() => null),
-      Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-    );
-
-  const makeWebProbeGroups = (
-    servers: ReadonlyArray<DiscoveredLocalServer>,
-    configuredUrls: ReadonlyArray<string>,
-  ): ReadonlyArray<WebProbeGroup> => {
-    const serversByKey = new Map(
-      servers.map((server) => [localServerKey(server.host, server.port), server] as const),
-    );
-    const groups: WebProbeGroup[] = [];
-    const configuredResources = new Set<string>();
-
-    for (const raw of configuredUrls) {
-      const url = new URL(raw);
-      const port = urlPort(url);
-      const key = localServerKey(url.hostname, port);
-      const resourceKey = webProbeCacheKey(raw);
-      if (configuredResources.has(resourceKey)) continue;
-      configuredResources.add(resourceKey);
-      groups.push({
-        server: serversByKey.get(key) ?? {
-          host: url.hostname,
-          port,
-          url: raw,
+    const probeCommonPorts = Effect.fn("PortDiscovery.probeCommonPorts")(function* () {
+      const results = yield* Effect.forEach(
+        COMMON_DEV_PORTS,
+        (port) =>
+          net.isPortAvailableOnLoopback(port).pipe(
+            Effect.map((available) => ({
+              port,
+              listening: !available,
+            })),
+          ),
+        { concurrency: "unbounded" },
+      );
+      return results
+        .filter((result) => result.listening)
+        .map<DiscoveredLocalServer>((result) => ({
+          host: "localhost",
+          port: result.port,
+          url: `http://localhost:${result.port}`,
           processName: null,
           pid: null,
           terminal: null,
-        },
-        urls: [raw],
-        configuredKey: resourceKey,
-      });
-    }
+        }));
+    });
 
-    for (const server of servers) {
-      groups.push({
-        server,
-        urls: [`http://${server.host}:${server.port}`, `https://${server.host}:${server.port}`],
-        configuredKey: null,
-      });
-    }
+    // Metro serves no page at `/`, but simulators on a person's Mac load their app from it.
+    // Only its usual ports are asked, so other servers see no extra request.
+    const probeMetro = (url: string) =>
+      !isMetroPort(url)
+        ? Effect.succeed(null)
+        : httpClient.get(new URL("/status", url).toString()).pipe(
+            Effect.flatMap((response) => response.text),
+            Effect.map((body) => (body.includes("packager-status:running") ? url : null)),
+            Effect.scoped,
+            Effect.timeoutOption(WEB_PROBE_TIMEOUT),
+            Effect.map(Option.getOrNull),
+            Effect.orElseSucceed(() => null),
+          );
 
-    return groups;
-  };
+    const probeWebUrl = Effect.fn("PortDiscovery.probeWebUrl")((url: string) =>
+      probePage(url).pipe(
+        Effect.flatMap((page) => (page ? Effect.succeed(page) : probeMetro(url))),
+      ),
+    );
 
-  const probeWebServers = Effect.fn("PortDiscovery.probeWebServers")(function* (
-    servers: ReadonlyArray<DiscoveredLocalServer>,
-    configuredUrls: ReadonlyArray<string>,
-  ) {
-    const nowMillis = yield* Clock.currentTimeMillis;
-    const cached = yield* Ref.get(webProbeCacheRef);
-    const groups = makeWebProbeGroups(servers, configuredUrls);
-    const batchProbes = new Map<
-      string,
-      Effect.Effect<{ readonly probe: WebProbeCacheEntry; readonly fresh: boolean }>
-    >();
-    const batchProbeSemaphore = yield* Semaphore.make(1);
-    const getProbe = (url: string, pid: number | null) => {
-      const key = webProbeCacheKey(url);
-      const identity = `${key}\u0000${pid ?? ""}`;
-      return batchProbeSemaphore
-        .withPermits(1)(
-          Effect.gen(function* () {
-            const existing = batchProbes.get(identity);
-            if (existing) return [existing] as const;
-            const cachedProbe = cached.get(key);
-            const cachedIsCurrent =
-              cachedProbe?.pid === pid && cachedProbe.expiresAtMillis > nowMillis;
-            const memoized = yield* Effect.cached(
-              cachedIsCurrent
-                ? Effect.succeed({ probe: cachedProbe, fresh: false })
-                : probeWebUrl(url).pipe(
-                    Effect.map((result) => ({
-                      probe: { pid, isWeb: result !== null, expiresAtMillis: 0 },
-                      fresh: true,
-                    })),
-                  ),
-            );
-            batchProbes.set(identity, memoized);
-            return [memoized] as const;
-          }),
-        )
-        .pipe(Effect.flatMap(([probe]) => probe));
-    };
-    const probed = yield* Effect.forEach(
-      groups,
-      (group) =>
-        Effect.gen(function* () {
-          const probes: Array<readonly [string, WebProbeCacheEntry, boolean]> = [];
-          let visibleUrl: string | null = null;
-          for (const url of group.urls) {
-            const key = webProbeCacheKey(url);
-            const { probe, fresh } = yield* getProbe(url, group.server.pid);
-            probes.push([key, probe, fresh]);
-            if (probe.isWeb) {
-              visibleUrl = url;
-              break;
-            }
-          }
-          return { group, probes, visibleUrl };
+    const probePage = (url: string) =>
+      httpClient.get(url).pipe(
+        Effect.map((response) => {
+          const location = response.headers.location?.trim();
+          if (NAVIGATION_REDIRECT_STATUSES.has(response.status) && location) return url;
+          if (response.status < 200 || response.status >= 300) return null;
+          if (response.status === 204 || response.status === 205) return null;
+          const contentType = response.headers["content-type"]
+            ?.split(";", 1)[0]
+            ?.trim()
+            .toLowerCase();
+          return contentType === "text/html" || contentType === "application/xhtml+xml"
+            ? url
+            : null;
         }),
-      { concurrency: WEB_PROBE_CONCURRENCY },
-    );
-    const completedAtMillis = yield* Clock.currentTimeMillis;
-    const nextCache = new Map(
-      [...cached].filter(([, probe]) => probe.expiresAtMillis > completedAtMillis),
-    );
-    const discovered: DiscoveredLocalServer[] = [];
-    const configured = new Map<string, DiscoveredLocalServer>();
-    for (const { group, probes, visibleUrl } of probed) {
-      for (const [key, probe, fresh] of probes) {
-        nextCache.set(
-          key,
-          fresh ? { ...probe, expiresAtMillis: completedAtMillis + WEB_PROBE_CACHE_TTL_MS } : probe,
-        );
-      }
-      if (visibleUrl === null) continue;
-      const server = { ...group.server, url: visibleUrl };
-      if (group.configuredKey === null) discovered.push(server);
-      else configured.set(group.configuredKey, server);
-    }
-    yield* Ref.set(webProbeCacheRef, nextCache);
-    return { discovered, configured } satisfies WebProbeSnapshot;
-  });
+        Effect.scoped,
+        Effect.timeoutOption(WEB_PROBE_TIMEOUT),
+        Effect.map(Option.getOrNull),
+        Effect.orElseSucceed(() => null),
+        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+      );
 
-  const recoverProcessProbeFailure =
-    (probe: "lsof" | "windows-listeners") => (error: ProcessRunner.ProcessRunError) =>
-      Effect.logDebug("preview port process probe failed; falling back to common-port probes", {
-        cause: error,
-        probe,
-        platform: hostPlatform,
-      }).pipe(Effect.as(null));
+    const makeWebProbeGroups = (
+      servers: ReadonlyArray<DiscoveredLocalServer>,
+      configuredUrls: ReadonlyArray<string>,
+    ): ReadonlyArray<WebProbeGroup> => {
+      const serversByKey = new Map(
+        servers.map((server) => [localServerKey(server.host, server.port), server] as const),
+      );
+      const groups: WebProbeGroup[] = [];
+      const configuredResources = new Set<string>();
 
-  const scanUnlocked = Effect.fn("PortDiscovery.scanUnlocked")(function* (
-    configuredUrls: ReadonlyArray<string>,
-  ) {
-    const state = yield* Ref.get(stateRef);
-    const terminalByProcessId = new Map<number, TerminalProcessOwner>();
-    for (const registration of state.terminalProcesses.values()) {
-      for (const processId of registration.processIds) {
-        terminalByProcessId.set(processId, registration.owner);
+      for (const raw of configuredUrls) {
+        const url = new URL(raw);
+        const port = urlPort(url);
+        const key = localServerKey(url.hostname, port);
+        const resourceKey = webProbeCacheKey(raw);
+        if (configuredResources.has(resourceKey)) continue;
+        configuredResources.add(resourceKey);
+        groups.push({
+          server: serversByKey.get(key) ?? {
+            host: url.hostname,
+            port,
+            url: raw,
+            processName: null,
+            pid: null,
+            terminal: null,
+          },
+          urls: [raw],
+          configuredKey: resourceKey,
+        });
       }
-    }
-    if (hostPlatform === "win32") {
-      const recoverWindowsProbeFailure = recoverProcessProbeFailure("windows-listeners");
-      const command =
-        'Get-NetTCPConnection -State Listen -ErrorAction Stop | ForEach-Object { $processName = (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName; Write-Output "$($_.LocalAddress)|$($_.LocalPort)|$($_.OwningProcess)|$processName" }';
-      const listeners = yield* processRunner
+
+      for (const server of servers) {
+        groups.push({
+          server,
+          urls: [`http://${server.host}:${server.port}`, `https://${server.host}:${server.port}`],
+          configuredKey: null,
+        });
+      }
+
+      return groups;
+    };
+
+    const firstSeenMillis = new Map<string, number>();
+    const probeWebServers = Effect.fn("PortDiscovery.probeWebServers")(function* (
+      listeners: ReadonlyArray<DiscoveredLocalServer>,
+      configuredUrls: ReadonlyArray<string>,
+    ) {
+      const nowMillis = yield* Clock.currentTimeMillis;
+      const present = new Set<string>();
+      const servers = listeners.filter((server) => {
+        const key = `${localServerKey(server.host, server.port)}\u0000${server.pid ?? ""}`;
+        present.add(key);
+        const first = firstSeenMillis.get(key) ?? nowMillis;
+        firstSeenMillis.set(key, first);
+        return nowMillis - first >= options.minimumListenAgeMs;
+      });
+      for (const key of firstSeenMillis.keys()) {
+        if (!present.has(key)) firstSeenMillis.delete(key);
+      }
+      const cached = yield* Ref.get(webProbeCacheRef);
+      const groups = makeWebProbeGroups(servers, configuredUrls);
+      const batchProbes = new Map<
+        string,
+        Effect.Effect<{ readonly probe: WebProbeCacheEntry; readonly fresh: boolean }>
+      >();
+      const batchProbeSemaphore = yield* Semaphore.make(1);
+      const getProbe = (url: string, pid: number | null) => {
+        const key = webProbeCacheKey(url);
+        const identity = `${key}\u0000${pid ?? ""}`;
+        return batchProbeSemaphore
+          .withPermits(1)(
+            Effect.gen(function* () {
+              const existing = batchProbes.get(identity);
+              if (existing) return [existing] as const;
+              const cachedProbe = cached.get(key);
+              const cachedIsCurrent =
+                cachedProbe?.pid === pid && cachedProbe.expiresAtMillis > nowMillis;
+              const memoized = yield* Effect.cached(
+                cachedIsCurrent
+                  ? Effect.succeed({ probe: cachedProbe, fresh: false })
+                  : probeWebUrl(url).pipe(
+                      Effect.map((result) => ({
+                        probe: { pid, isWeb: result !== null, expiresAtMillis: 0 },
+                        fresh: true,
+                      })),
+                    ),
+              );
+              batchProbes.set(identity, memoized);
+              return [memoized] as const;
+            }),
+          )
+          .pipe(Effect.flatMap(([probe]) => probe));
+      };
+      const probed = yield* Effect.forEach(
+        groups,
+        (group) =>
+          Effect.gen(function* () {
+            const probes: Array<readonly [string, WebProbeCacheEntry, boolean]> = [];
+            let visibleUrl: string | null = null;
+            for (const url of group.urls) {
+              const key = webProbeCacheKey(url);
+              const { probe, fresh } = yield* getProbe(url, group.server.pid);
+              probes.push([key, probe, fresh]);
+              if (probe.isWeb) {
+                visibleUrl = url;
+                break;
+              }
+            }
+            return { group, probes, visibleUrl };
+          }),
+        { concurrency: WEB_PROBE_CONCURRENCY },
+      );
+      const completedAtMillis = yield* Clock.currentTimeMillis;
+      const nextCache = new Map(
+        [...cached].filter(([, probe]) => probe.expiresAtMillis > completedAtMillis),
+      );
+      const discovered: DiscoveredLocalServer[] = [];
+      const configured = new Map<string, DiscoveredLocalServer>();
+      for (const { group, probes, visibleUrl } of probed) {
+        for (const [key, probe, fresh] of probes) {
+          nextCache.set(
+            key,
+            fresh
+              ? { ...probe, expiresAtMillis: completedAtMillis + WEB_PROBE_CACHE_TTL_MS }
+              : probe,
+          );
+        }
+        if (visibleUrl === null) continue;
+        const server = { ...group.server, url: visibleUrl };
+        if (group.configuredKey === null) discovered.push(server);
+        else configured.set(group.configuredKey, server);
+      }
+      yield* Ref.set(webProbeCacheRef, nextCache);
+      return { discovered, configured } satisfies WebProbeSnapshot;
+    });
+
+    const recoverProcessProbeFailure =
+      (probe: "lsof" | "windows-listeners") => (error: ProcessRunner.ProcessRunError) =>
+        Effect.logDebug("preview port process probe failed; falling back to common-port probes", {
+          cause: error,
+          probe,
+          platform: hostPlatform,
+        }).pipe(Effect.as(null));
+
+    const scanUnlocked = Effect.fn("PortDiscovery.scanUnlocked")(function* (
+      configuredUrls: ReadonlyArray<string>,
+    ) {
+      const state = yield* Ref.get(stateRef);
+      const terminalByProcessId = new Map<number, TerminalProcessOwner>();
+      for (const registration of state.terminalProcesses.values()) {
+        for (const processId of registration.processIds) {
+          terminalByProcessId.set(processId, registration.owner);
+        }
+      }
+      if (hostPlatform === "win32") {
+        const recoverWindowsProbeFailure = recoverProcessProbeFailure("windows-listeners");
+        const command =
+          'Get-NetTCPConnection -State Listen -ErrorAction Stop | ForEach-Object { $processName = (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName; Write-Output "$($_.LocalAddress)|$($_.LocalPort)|$($_.OwningProcess)|$processName" }';
+        const listeners = yield* processRunner
+          .run({
+            command: "powershell.exe",
+            args: ["-NoProfile", "-NonInteractive", "-Command", command],
+            timeout: Duration.millis(WINDOWS_LISTENER_TIMEOUT_MS),
+            maxOutputBytes: 1024 * 1024,
+            outputMode: "truncate",
+          })
+          .pipe(
+            Effect.map((result) => parseWindowsListenerOutput(result.stdout, terminalByProcessId)),
+            Effect.catchTags({
+              ProcessSpawnError: recoverWindowsProbeFailure,
+              ProcessStdinError: recoverWindowsProbeFailure,
+              ProcessOutputLimitError: recoverWindowsProbeFailure,
+              ProcessReadError: recoverWindowsProbeFailure,
+              ProcessTimeoutError: recoverWindowsProbeFailure,
+            }),
+          );
+        if (listeners !== null) return yield* probeWebServers(listeners, configuredUrls);
+        return yield* probeWebServers(yield* probeCommonPorts(), configuredUrls);
+      }
+      const recoverLsofProbeFailure = recoverProcessProbeFailure("lsof");
+      const lsofResult = yield* processRunner
         .run({
-          command: "powershell.exe",
-          args: ["-NoProfile", "-NonInteractive", "-Command", command],
-          timeout: Duration.millis(WINDOWS_LISTENER_TIMEOUT_MS),
+          command: "lsof",
+          args: ["-iTCP", "-sTCP:LISTEN", "-P", "-n", "-F", "pcn"],
+          timeout: Duration.millis(LSOF_TIMEOUT_MS),
           maxOutputBytes: 1024 * 1024,
           outputMode: "truncate",
         })
         .pipe(
-          Effect.map((result) => parseWindowsListenerOutput(result.stdout, terminalByProcessId)),
+          Effect.map((result) => parseLsofOutput(result.stdout, terminalByProcessId)),
           Effect.catchTags({
-            ProcessSpawnError: recoverWindowsProbeFailure,
-            ProcessStdinError: recoverWindowsProbeFailure,
-            ProcessOutputLimitError: recoverWindowsProbeFailure,
-            ProcessReadError: recoverWindowsProbeFailure,
-            ProcessTimeoutError: recoverWindowsProbeFailure,
+            ProcessSpawnError: recoverLsofProbeFailure,
+            ProcessStdinError: recoverLsofProbeFailure,
+            ProcessOutputLimitError: recoverLsofProbeFailure,
+            ProcessReadError: recoverLsofProbeFailure,
+            ProcessTimeoutError: recoverLsofProbeFailure,
           }),
         );
-      if (listeners !== null) return yield* probeWebServers(listeners, configuredUrls);
+      if (lsofResult !== null) return yield* probeWebServers(lsofResult, configuredUrls);
       return yield* probeWebServers(yield* probeCommonPorts(), configuredUrls);
-    }
-    const recoverLsofProbeFailure = recoverProcessProbeFailure("lsof");
-    const lsofResult = yield* processRunner
-      .run({
-        command: "lsof",
-        args: ["-iTCP", "-sTCP:LISTEN", "-P", "-n", "-F", "pcn"],
-        timeout: Duration.millis(LSOF_TIMEOUT_MS),
-        maxOutputBytes: 1024 * 1024,
-        outputMode: "truncate",
-      })
-      .pipe(
-        Effect.map((result) => parseLsofOutput(result.stdout, terminalByProcessId)),
-        Effect.catchTags({
-          ProcessSpawnError: recoverLsofProbeFailure,
-          ProcessStdinError: recoverLsofProbeFailure,
-          ProcessOutputLimitError: recoverLsofProbeFailure,
-          ProcessReadError: recoverLsofProbeFailure,
-          ProcessTimeoutError: recoverLsofProbeFailure,
-        }),
-      );
-    if (lsofResult !== null) return yield* probeWebServers(lsofResult, configuredUrls);
-    return yield* probeWebServers(yield* probeCommonPorts(), configuredUrls);
-  });
+    });
 
-  const scanSnapshot = Effect.fn("PortDiscovery.scanSnapshot")(
-    (configuredUrls: ReadonlyArray<string>) =>
-      scanSemaphore.withPermits(1)(scanUnlocked(configuredUrls)),
-  );
-
-  const scanOnce: PortDiscovery["Service"]["scan"] = (configuredUrls = []) => {
-    const normalized = normalizeConfiguredUrls(configuredUrls);
-    return scanSnapshot(normalized).pipe(
-      Effect.map((snapshot) => projectWebProbeSnapshot(snapshot, normalized)),
+    const scanSnapshot = Effect.fn("PortDiscovery.scanSnapshot")(
+      (configuredUrls: ReadonlyArray<string>) =>
+        scanSemaphore.withPermits(1)(scanUnlocked(configuredUrls)),
     );
-  };
 
-  const pollTick = Effect.fn("PortDiscovery.pollTick")(
-    function* () {
-      const configuredUrls = [
-        ...new Set(
-          [...(yield* Ref.get(stateRef)).listeners.values()].flatMap(
-            (subscription) => subscription.configuredUrls,
+    const scanOnce: PortDiscovery["Service"]["scan"] = (configuredUrls = []) => {
+      const normalized = normalizeConfiguredUrls(configuredUrls);
+      return scanSnapshot(normalized).pipe(
+        Effect.map((snapshot) => projectWebProbeSnapshot(snapshot, normalized)),
+      );
+    };
+
+    const pollTick = Effect.fn("PortDiscovery.pollTick")(
+      function* () {
+        const configuredUrls = [
+          ...new Set(
+            [...(yield* Ref.get(stateRef)).listeners.values()].flatMap(
+              (subscription) => subscription.configuredUrls,
+            ),
           ),
-        ),
-      ];
-      const snapshot = yield* scanSnapshot(configuredUrls);
-      const notifications = yield* Ref.modify(stateRef, (state) => {
-        const listeners = new Map(state.listeners);
-        const changed: Array<readonly [Listener, ReadonlyArray<DiscoveredLocalServer>]> = [];
-        for (const [listener, subscription] of listeners) {
-          const next = projectWebProbeSnapshot(snapshot, subscription.configuredUrls);
-          if (serversEqual(subscription.lastSnapshot, next)) continue;
-          listeners.set(listener, { ...subscription, lastSnapshot: next });
-          changed.push([listener, next]);
-        }
-        return [changed, { ...state, listeners }];
-      });
-      yield* Effect.forEach(notifications, ([listener, servers]) => listener(servers), {
-        discard: true,
-      });
-    },
-    Effect.catchCause((cause: Cause.Cause<never>) =>
-      Effect.logWarning("preview port scan failed", Cause.pretty(cause)),
-    ),
-  );
-
-  // Single layer-scoped polling fiber. Ticks skip the scan and its span when no
-  // client is currently retained, so the cost is one Ref.get every POLL_INTERVAL.
-  const pollIfRetained = Ref.get(stateRef).pipe(
-    Effect.flatMap((state) => (state.retainCount > 0 ? pollTick() : Effect.void)),
-  );
-  yield* Effect.forkScoped(pollIfRetained.pipe(Effect.repeat(Schedule.spaced(POLL_INTERVAL))));
-
-  const acquireRetention = Effect.fn("PortDiscovery.retain")(function* () {
-    const wasIdle = yield* Ref.modify(stateRef, (state) => [
-      state.retainCount === 0,
-      { ...state, retainCount: state.retainCount + 1 },
-    ]);
-    if (wasIdle) {
-      // Run an immediate scan + broadcast so the new retainer doesn't have
-      // to wait up to POLL_INTERVAL for the first emission.
-      yield* pollTick();
-    }
-  });
-
-  const retain: PortDiscovery["Service"]["retain"] = Effect.acquireRelease(acquireRetention(), () =>
-    Ref.update(stateRef, (state) => ({
-      ...state,
-      retainCount: Math.max(0, state.retainCount - 1),
-    })),
-  );
-
-  const subscribe: PortDiscovery["Service"]["subscribe"] = Effect.fn("PortDiscovery.subscribe")(
-    (input, listener) =>
-      Effect.acquireRelease(
-        Ref.update(stateRef, (state) => {
+        ];
+        const snapshot = yield* scanSnapshot(configuredUrls);
+        const notifications = yield* Ref.modify(stateRef, (state) => {
           const listeners = new Map(state.listeners);
-          listeners.set(listener, {
-            configuredUrls: normalizeConfiguredUrls(input.configuredUrls),
-            lastSnapshot: input.initialSnapshot,
-          });
-          return { ...state, listeners };
-        }),
-        () =>
+          const changed: Array<readonly [Listener, ReadonlyArray<DiscoveredLocalServer>]> = [];
+          for (const [listener, subscription] of listeners) {
+            const next = projectWebProbeSnapshot(snapshot, subscription.configuredUrls);
+            if (serversEqual(subscription.lastSnapshot, next)) continue;
+            listeners.set(listener, { ...subscription, lastSnapshot: next });
+            changed.push([listener, next]);
+          }
+          return [changed, { ...state, listeners }];
+        });
+        yield* Effect.forEach(notifications, ([listener, servers]) => listener(servers), {
+          discard: true,
+        });
+      },
+      Effect.catchCause((cause: Cause.Cause<never>) =>
+        Effect.logWarning("preview port scan failed", Cause.pretty(cause)),
+      ),
+    );
+
+    // Single layer-scoped polling fiber. Ticks skip the scan and its span when no
+    // client is currently retained, so the cost is one Ref.get every POLL_INTERVAL.
+    const pollIfRetained = Ref.get(stateRef).pipe(
+      Effect.flatMap((state) => (state.retainCount > 0 ? pollTick() : Effect.void)),
+    );
+    yield* Effect.forkScoped(pollIfRetained.pipe(Effect.repeat(Schedule.spaced(POLL_INTERVAL))));
+
+    const acquireRetention = Effect.fn("PortDiscovery.retain")(function* () {
+      const wasIdle = yield* Ref.modify(stateRef, (state) => [
+        state.retainCount === 0,
+        { ...state, retainCount: state.retainCount + 1 },
+      ]);
+      if (wasIdle) {
+        // Run an immediate scan + broadcast so the new retainer doesn't have
+        // to wait up to POLL_INTERVAL for the first emission.
+        yield* pollTick();
+      }
+    });
+
+    const retain: PortDiscovery["Service"]["retain"] = Effect.acquireRelease(
+      acquireRetention(),
+      () =>
+        Ref.update(stateRef, (state) => ({
+          ...state,
+          retainCount: Math.max(0, state.retainCount - 1),
+        })),
+    );
+
+    const subscribe: PortDiscovery["Service"]["subscribe"] = Effect.fn("PortDiscovery.subscribe")(
+      (input, listener) =>
+        Effect.acquireRelease(
           Ref.update(stateRef, (state) => {
             const listeners = new Map(state.listeners);
-            listeners.delete(listener);
+            listeners.set(listener, {
+              configuredUrls: normalizeConfiguredUrls(input.configuredUrls),
+              lastSnapshot: input.initialSnapshot,
+            });
             return { ...state, listeners };
           }),
-      ),
-  );
+          () =>
+            Ref.update(stateRef, (state) => {
+              const listeners = new Map(state.listeners);
+              listeners.delete(listener);
+              return { ...state, listeners };
+            }),
+        ),
+    );
 
-  const registerTerminalProcesses: PortDiscovery["Service"]["registerTerminalProcesses"] =
-    Effect.fn("PortDiscovery.registerTerminalProcesses")(function* (input) {
-      const owner = {
-        threadId: ThreadId.make(input.threadId),
-        terminalId: input.terminalId,
-      };
-      const processIds = new Set(
-        input.processIds.filter((processId) => Number.isInteger(processId) && processId > 0),
-      );
+    const registerTerminalProcesses: PortDiscovery["Service"]["registerTerminalProcesses"] =
+      Effect.fn("PortDiscovery.registerTerminalProcesses")(function* (input) {
+        const owner = {
+          threadId: ThreadId.make(input.threadId),
+          terminalId: input.terminalId,
+        };
+        const processIds = new Set(
+          input.processIds.filter((processId) => Number.isInteger(processId) && processId > 0),
+        );
+        yield* Ref.update(stateRef, (state) => {
+          const terminalProcesses = new Map(state.terminalProcesses);
+          const key = terminalOwnerKey(owner);
+          if (processIds.size === 0) {
+            terminalProcesses.delete(key);
+          } else {
+            terminalProcesses.set(key, { owner, processIds });
+          }
+          return { ...state, terminalProcesses };
+        });
+      });
+
+    const unregisterTerminal: PortDiscovery["Service"]["unregisterTerminal"] = Effect.fn(
+      "PortDiscovery.unregisterTerminal",
+    )(function* (input) {
       yield* Ref.update(stateRef, (state) => {
         const terminalProcesses = new Map(state.terminalProcesses);
-        const key = terminalOwnerKey(owner);
-        if (processIds.size === 0) {
-          terminalProcesses.delete(key);
-        } else {
-          terminalProcesses.set(key, { owner, processIds });
-        }
+        terminalProcesses.delete(terminalOwnerKey(input));
         return { ...state, terminalProcesses };
       });
     });
 
-  const unregisterTerminal: PortDiscovery["Service"]["unregisterTerminal"] = Effect.fn(
-    "PortDiscovery.unregisterTerminal",
-  )(function* (input) {
-    yield* Ref.update(stateRef, (state) => {
-      const terminalProcesses = new Map(state.terminalProcesses);
-      terminalProcesses.delete(terminalOwnerKey(input));
-      return { ...state, terminalProcesses };
+    return PortDiscovery.of({
+      scan: scanOnce,
+      subscribe,
+      retain,
+      registerTerminalProcesses,
+      unregisterTerminal,
     });
-  });
+  }).pipe(Effect.withSpan("PortDiscovery.make"));
 
-  return PortDiscovery.of({
-    scan: scanOnce,
-    subscribe,
-    retain,
-    registerTerminalProcesses,
-    unregisterTerminal,
-  });
-}).pipe(Effect.withSpan("PortDiscovery.make"));
+export const make = makeWith({ minimumListenAgeMs: MINIMUM_LISTEN_AGE_MS });
 
 export const layer = Layer.effect(PortDiscovery, make);
+
+/** Discovery that probes listeners as soon as they appear, for tests that open and scan at once. */
+export const layerWith = (options: { readonly minimumListenAgeMs: number }) =>
+  Layer.effect(PortDiscovery, makeWith(options));

@@ -57,7 +57,7 @@ const makeProbeFailureLayer = (
   run: ProcessRunner.ProcessRunner["Service"]["run"],
   fetch: typeof globalThis.fetch = globalThis.fetch,
 ) =>
-  PortScanner.layer.pipe(
+  PortScanner.layerWith({ minimumListenAgeMs: 0 }).pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.succeed(ProcessRunner.ProcessRunner, { run }),
@@ -74,7 +74,7 @@ const makeProbeFailureLayer = (
     ),
   );
 
-const TestPortDiscoveryLive = PortScanner.layer.pipe(
+const TestPortDiscoveryLive = PortScanner.layerWith({ minimumListenAgeMs: 0 }).pipe(
   Layer.provide(
     Layer.mergeAll(
       TestProcessRunner,
@@ -91,7 +91,7 @@ const makeLsofScannerLayer = (input: {
   readonly pid: () => number;
   readonly fetch: typeof globalThis.fetch;
 }) =>
-  PortScanner.layer.pipe(
+  PortScanner.layerWith({ minimumListenAgeMs: 0 }).pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.succeed(ProcessRunner.ProcessRunner, {
