@@ -39,7 +39,7 @@ export const runMergeTaskCheck = (
 ) =>
   setup
     ? Stream.fromIterable<VcsMergeTaskCheckEvent>([
-        { _tag: "setup", name: setup.script.name, command: setup.script.command },
+        { _tag: "started", command: setup.script.command, setup: true },
       ]).pipe(
         Stream.concat(
           runWorktreeSetup(setup.worktree, setup.script).pipe(
@@ -52,8 +52,7 @@ export const runMergeTaskCheck = (
                 : event.exitCode === 0
                   ? runCheck(cwd)
                   : Stream.fromIterable<VcsMergeTaskCheckEvent>([
-                      { _tag: "setupFailed", exitCode: event.exitCode },
-                      { _tag: "finished", exitCode: event.exitCode },
+                      { _tag: "finished", exitCode: event.exitCode, setupFailed: true },
                     ]),
             ),
           ),

@@ -72,8 +72,9 @@ type Step =
   | { readonly kind: "merged"; readonly commit: string; readonly localTargetUpdated: boolean }
   | { readonly kind: "closed" }
   | { readonly kind: "upToDate" }
-  | { readonly kind: "continuing"; readonly commit: string; readonly next: string }
-  | { readonly kind: "continued"; readonly commit: string; readonly branch: string }
+  /** `commit` is null when the integration branch already had the whole task. */
+  | { readonly kind: "continuing"; readonly commit: string | null; readonly next: string }
+  | { readonly kind: "continued"; readonly commit: string | null; readonly branch: string }
   | { readonly kind: "error"; readonly message: string };
 
 function failureMessage(result: { readonly cause: Cause.Cause<unknown> }): string {
@@ -136,7 +137,7 @@ export function MergeTaskDialog({
       return;
     }
     const prepared: VcsMergeTaskPrepareResult = result.value;
-    if (prepared._tag === "upToDate") setStep({ kind: "upToDate" });
+    if (prepared._tag === "upToDate") await finishLanded(null);
     else if (prepared._tag === "dirty") setStep({ kind: "dirty", files: prepared.files });
     else if (prepared._tag === "conflicted") {
       setStep({
@@ -176,37 +177,7 @@ export function MergeTaskDialog({
       return;
     }
     if (result.value._tag === "merged") {
-      const merged = result.value;
-      const next = nextPermanentTaskName(branch);
-      if (next && threadId) {
-        // A permanent thread never stops: it carries straight on in its next version.
-        setStep({ kind: "continuing", commit: merged.commit, next });
-        const continued = await continueTask({
-          environmentId,
-          input: {
-            threadId,
-            projectCwd,
-            previous: { worktreePath: cwd, branch },
-            targetRef,
-            taskName: next,
-            ...(branchPrefix.trim() ? { branchPrefix: branchPrefix.trim() } : {}),
-          },
-        });
-        setStep(
-          continued._tag === "Success"
-            ? { kind: "continued", commit: merged.commit, branch: continued.value.branch }
-            : {
-                kind: "error",
-                message: `Fusionada en ${targetRef} · ${merged.commit.slice(0, 7)}, pero no se pudo crear ${next}: ${failureMessage(continued)}`,
-              },
-        );
-        return;
-      }
-      setStep({
-        kind: "merged",
-        commit: merged.commit,
-        localTargetUpdated: merged.localTargetUpdated,
-      });
+      await finishLanded(result.value);
       return;
     }
     // Someone merged in between: bring their work in and check again.
@@ -219,6 +190,46 @@ export function MergeTaskDialog({
       message: `${targetRef} ha cambiado ${MAX_ATTEMPTS} veces mientras fusionabas. Vuelve a intentarlo en un momento.`,
     });
   };
+
+  /**
+   * What follows once the task is in the integration branch, merged just now or already there
+   * (`landed` null): the same either way, so a task pushed by hand still closes or rotates.
+   */
+  const finishLanded = async (
+    landed: { readonly commit: string; readonly localTargetUpdated: boolean } | null,
+  ) => {
+    const next = nextPermanentTaskName(branch);
+    if (next && threadId) {
+      // A permanent thread never stops: it carries straight on in its next version.
+      setStep({ kind: "continuing", commit: landed?.commit ?? null, next });
+      const continued = await continueTask({
+        environmentId,
+        input: {
+          threadId,
+          projectCwd,
+          previous: { worktreePath: cwd, branch },
+          targetRef,
+          taskName: next,
+          ...(branchPrefix.trim() ? { branchPrefix: branchPrefix.trim() } : {}),
+        },
+      });
+      setStep(
+        continued._tag === "Success"
+          ? { kind: "continued", commit: landed?.commit ?? null, branch: continued.value.branch }
+          : {
+              kind: "error",
+              message: `${landedLabel(landed?.commit ?? null)}, pero no se pudo crear ${next}: ${failureMessage(continued)}`,
+            },
+      );
+      return;
+    }
+    setStep(landed ? { kind: "merged", ...landed } : { kind: "upToDate" });
+  };
+
+  const landedLabel = (commit: string | null) =>
+    commit
+      ? `Fusionada en ${targetRef} · ${commit.slice(0, 7)}`
+      : `${targetRef} ya tenía esta tarea`;
 
   // Starts when the dialog opens; a closed dialog keeps nothing.
   useEffect(() => {
@@ -241,6 +252,12 @@ export function MergeTaskDialog({
   useEffect(() => {
     checkLogRef.current?.scrollTo({ top: checkLogRef.current.scrollHeight });
   }, [checkState?.output]);
+  // A check stream that breaks (a dropped connection, a server it cannot understand) must not
+  // leave the dialog waiting forever.
+  useEffect(() => {
+    if (step.kind !== "checking" || !check.error) return;
+    setStep({ kind: "error", message: `La comprobación se ha cortado: ${check.error}` });
+  }, [check.error]);
   useEffect(() => {
     if (step.kind !== "checking" || !checkState?.done) return;
     if (checkState.exitCode === 0) void runPublish(step.headSha);
@@ -408,7 +425,7 @@ export function MergeTaskDialog({
                       ? "No se pudieron reinstalar las dependencias de esta tarea. No se ha comprobado ni subido nada."
                       : "La comprobación ha fallado."
                     : checkState?.setup && !checkState.command
-                      ? `Las dependencias han cambiado: reinstalando con «${checkState.setup.name}»…`
+                      ? `Las dependencias han cambiado: reinstalando (${checkState.setup.command})…`
                       : checkState?.command
                         ? `Comprobando: ${checkState.command}`
                         : "Comprobando…"}
@@ -445,21 +462,22 @@ export function MergeTaskDialog({
             ) : null}
             {step.kind === "upToDate" ? (
               <p className="text-muted-foreground">
-                No hay nada que fusionar: {targetRef} ya tiene todo lo de esta tarea.
+                No hay nada que fusionar: {targetRef} ya tiene todo lo de esta tarea. Puedes
+                cerrarla o seguir en una nueva.
               </p>
             ) : null}
             {step.kind === "continuing" ? (
               <p className="flex items-center gap-2 text-muted-foreground">
                 <Spinner className="size-4" />
-                Fusionada en {targetRef} · {step.commit.slice(0, 7)}. Preparando {step.next}…
+                {landedLabel(step.commit)}. Preparando {step.next}…
               </p>
             ) : null}
             {step.kind === "continued" ? (
               <p className="flex gap-2 text-success-foreground">
                 <CheckCircle2Icon className="mt-0.5 size-4 shrink-0" />
                 <span>
-                  Fusionada en {targetRef} · {step.commit.slice(0, 7)}. Este hilo sigue en{" "}
-                  {step.branch}, con toda la conversación.
+                  {landedLabel(step.commit)}. Este hilo sigue en {step.branch}, con toda la
+                  conversación.
                 </span>
               </p>
             ) : null}
@@ -578,7 +596,7 @@ export function MergeTaskDialog({
               Seguir trabajando
             </Button>
           ) : null}
-          {step.kind === "merged" ? (
+          {step.kind === "merged" || step.kind === "upToDate" ? (
             <>
               <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
                 Dejar la tarea abierta

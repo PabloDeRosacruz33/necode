@@ -83,12 +83,14 @@ it.layer(NodeServices.layer)("runMergeTaskCheck", (it) => {
         const events = yield* collect(cwd, "echo installing");
 
         assert.deepStrictEqual(events[0], {
-          _tag: "setup",
-          name: "Preparar worktree",
+          _tag: "started",
           command: "echo installing",
+          setup: true,
         });
-        const tags = events.map((event) => event._tag);
-        assert.isBelow(tags.indexOf("setup"), tags.indexOf("started"));
+        const checkStart = events.findIndex(
+          (event) => event._tag === "started" && event.command === "echo checking",
+        );
+        assert.isAbove(checkStart, 0);
         const output = events.flatMap((event) => (event._tag === "output" ? [event.text] : []));
         assert.include(output.join(""), "installing");
         assert.include(output.join(""), "checking");
@@ -104,14 +106,10 @@ it.layer(NodeServices.layer)("runMergeTaskCheck", (it) => {
 
         const events = yield* collect(cwd, "exit 5");
 
-        assert.notInclude(
-          events.map((event) => event._tag),
-          "started",
+        assert.isFalse(
+          events.some((event) => event._tag === "started" && event.command === "echo checking"),
         );
-        assert.deepStrictEqual(events.slice(-2), [
-          { _tag: "setupFailed", exitCode: 5 },
-          { _tag: "finished", exitCode: 5 },
-        ]);
+        assert.deepStrictEqual(events.at(-1), { _tag: "finished", exitCode: 5, setupFailed: true });
       }),
     ),
   );

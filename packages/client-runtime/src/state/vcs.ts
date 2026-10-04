@@ -44,7 +44,7 @@ const MERGE_CHECK_LOG_LIMIT = 200_000;
 
 export interface MergeTaskCheckState {
   /** The task's setup script, when it ran first because the task's lockfiles changed. */
-  readonly setup: { readonly name: string; readonly command: string } | null;
+  readonly setup: { readonly command: string } | null;
   /** True when that setup failed; the check did not run. */
   readonly setupFailed: boolean;
   readonly command: string | null;
@@ -387,18 +387,21 @@ export function createVcsEnvironmentAtoms<R, E>(
             }),
             (state, event: VcsMergeTaskCheckEvent) => {
               const next: MergeTaskCheckState =
-                event._tag === "setup"
-                  ? { ...state, setup: { name: event.name, command: event.command } }
-                  : event._tag === "setupFailed"
-                    ? { ...state, setupFailed: true }
-                    : event._tag === "started"
-                      ? { ...state, command: event.command }
-                      : event._tag === "output"
-                        ? {
-                            ...state,
-                            output: (state.output + event.text).slice(-MERGE_CHECK_LOG_LIMIT),
-                          }
-                        : { ...state, exitCode: event.exitCode, done: true };
+                event._tag === "started"
+                  ? event.setup === true && event.command !== null
+                    ? { ...state, setup: { command: event.command } }
+                    : { ...state, command: event.command }
+                  : event._tag === "output"
+                    ? {
+                        ...state,
+                        output: (state.output + event.text).slice(-MERGE_CHECK_LOG_LIMIT),
+                      }
+                    : {
+                        ...state,
+                        exitCode: event.exitCode,
+                        setupFailed: event.setupFailed === true,
+                        done: true,
+                      };
               return [next, [next]] as const;
             },
           ),

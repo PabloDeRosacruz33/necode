@@ -268,15 +268,25 @@ export type VcsMergeTaskPrepareResult = typeof VcsMergeTaskPrepareResult.Type;
 export const VcsMergeTaskCheckInput = Schema.Struct({ cwd: TrimmedNonEmptyStringSchema });
 export type VcsMergeTaskCheckInput = typeof VcsMergeTaskCheckInput.Type;
 
+/**
+ * New information rides on optional fields of these three events, never on new tags: a client
+ * older than the server must still decode every event, or its merge dialog stops listening.
+ */
 export const VcsMergeTaskCheckEvent = Schema.Union([
-  /** The task's setup script runs first because its lockfiles changed since it last ran. */
-  Schema.TaggedStruct("setup", { name: Schema.String, command: Schema.String }),
-  /** The setup script failed; nothing else runs and the merge must not go ahead. */
-  Schema.TaggedStruct("setupFailed", { exitCode: Schema.NullOr(Schema.Int) }),
-  /** `command` is null when the project declares no pre-merge check. */
-  Schema.TaggedStruct("started", { command: Schema.NullOr(Schema.String) }),
+  /**
+   * `command` is null when the project declares no pre-merge check. With `setup`, the command is
+   * the task's setup script, run first because its lockfiles changed; the check starts after it.
+   */
+  Schema.TaggedStruct("started", {
+    command: Schema.NullOr(Schema.String),
+    setup: Schema.optional(Schema.Boolean),
+  }),
   Schema.TaggedStruct("output", { text: Schema.String }),
-  Schema.TaggedStruct("finished", { exitCode: Schema.NullOr(Schema.Int) }),
+  /** `setupFailed`: the setup script failed, the check did not run and the merge must stop. */
+  Schema.TaggedStruct("finished", {
+    exitCode: Schema.NullOr(Schema.Int),
+    setupFailed: Schema.optional(Schema.Boolean),
+  }),
 ]);
 export type VcsMergeTaskCheckEvent = typeof VcsMergeTaskCheckEvent.Type;
 
