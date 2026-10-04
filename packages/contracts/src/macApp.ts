@@ -7,7 +7,11 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
  * The environment builds (it has the code); the client opens the result, downloading it first
  * when the environment is another machine, and always replaces the copy that was running.
  */
-export const MacAppBuildInput = Schema.Struct({ cwd: TrimmedNonEmptyString });
+export const MacAppBuildInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  /** `ios-simulator` builds t3.json's `iosSimulator` instead of its `macApp`. */
+  target: Schema.optional(Schema.Literals(["mac", "ios-simulator"])),
+});
 export type MacAppBuildInput = typeof MacAppBuildInput.Type;
 
 export const MacAppBuilt = Schema.Struct({

@@ -10,6 +10,7 @@ export const QUIT_MAC_APP_CHANNEL = "desktop:quit-mac-app";
 export const BEGIN_MAC_APP_INSTALL_CHANNEL = "desktop:begin-mac-app-install";
 export const APPEND_MAC_APP_INSTALL_CHANNEL = "desktop:append-mac-app-install";
 export const FINISH_MAC_APP_INSTALL_CHANNEL = "desktop:finish-mac-app-install";
+export const FINISH_SIMULATOR_APP_INSTALL_CHANNEL = "desktop:finish-simulator-app-install";
 export const SYNC_PORT_FORWARDS_CHANNEL = "desktop:sync-port-forwards";
 export const DEVICE_HOST_EXEC_CHANNEL = "desktop:device-host-exec";
 export const DEVICE_HOST_INSTALL_TOOLS_CHANNEL = "desktop:device-host-install-tools";

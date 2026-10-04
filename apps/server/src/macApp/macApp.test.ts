@@ -68,4 +68,33 @@ it.layer(NodeServices.layer)("runMacAppBuild", (it) => {
       }),
     ),
   );
+
+  it.effect("builds the iOS simulator app with its own command when asked", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "sim-app-" }));
+        const build = [
+          "mkdir -p out/Demo.app",
+          "/usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string pro.necora.mobile' out/Demo.app/Info.plist >/dev/null",
+        ].join(" && ");
+        yield* fs.writeFileString(
+          path.join(cwd, "t3.json"),
+          encodeJson({
+            macApp: { build: "exit 9" },
+            iosSimulator: { build, appPath: "out/Demo.app" },
+          }),
+        );
+
+        const events = yield* collect(runMacAppBuild(cwd, "ios-simulator"));
+
+        assert.deepStrictEqual(events.at(-1), {
+          _tag: "finished",
+          exitCode: 0,
+          app: { path: `${cwd}/out/Demo.app`, name: "Demo", bundleId: "pro.necora.mobile" },
+        });
+      }),
+    ),
+  );
 });

@@ -3739,7 +3739,7 @@ const makeWsRpcLayer = (
             { "rpc.aggregate": "vcs" },
           ),
         [WS_METHODS.macAppBuild]: (input) =>
-          observeRpcStream(WS_METHODS.macAppBuild, runMacAppBuild(input.cwd), {
+          observeRpcStream(WS_METHODS.macAppBuild, runMacAppBuild(input.cwd, input.target), {
             "rpc.aggregate": "mac-app",
           }),
         [WS_METHODS.macAppArchive]: (input) =>

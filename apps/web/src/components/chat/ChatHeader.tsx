@@ -35,6 +35,7 @@ import ProjectScriptsControl, {
 } from "../ProjectScriptsControl";
 import { OpenInPicker } from "./OpenInPicker";
 import { MacAppControl } from "./MacAppControl";
+import { SimulatorControl } from "./SimulatorControl";
 import { useRemoteOpenState, type RemoteOpenMode } from "../../remoteOpen";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useT3ProjectFileScripts } from "~/hooks/useT3ProjectFileScripts";
@@ -386,6 +387,14 @@ export const ChatHeader = memo(function ChatHeader({
       )}
       {activeProjectName && gitCwd && (
         <MacAppControl
+          environmentId={activeThreadEnvironmentId}
+          cwd={gitCwd}
+          presentation={actionsCollapsed ? "menu" : "toolbar"}
+          onAskAgent={(prompt) => setComposerPrompt(draftId ?? activeThreadRef, prompt)}
+        />
+      )}
+      {activeProjectName && gitCwd && (
+        <SimulatorControl
           environmentId={activeThreadEnvironmentId}
           cwd={gitCwd}
           presentation={actionsCollapsed ? "menu" : "toolbar"}

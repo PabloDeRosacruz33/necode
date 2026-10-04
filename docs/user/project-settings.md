@@ -111,6 +111,23 @@ build. **Cerrar app** quits it. When the project lives on another Mac, the deskt
 the build and opens it on the Mac you are using. In a browser the button only appears when Necode
 runs on that same Mac.
 
+## Try the iOS app in a simulator
+
+If the project has an iOS app, add a command that builds a self-contained simulator app (its
+JavaScript bundled in) to `t3.json`:
+
+```json
+{ "iosSimulator": { "build": "npm run build:mobile:simulator", "appPath": "path/to/App.app" } }
+```
+
+A thread's header then shows **Simular** with two choices:
+
+- **En este Mac**: the environment builds the app, the desktop app downloads it and runs it in this
+  Mac's own simulator, starting one when none is running. Nothing crosses the network while you
+  test; to see a change, simulate again.
+- **En <environment>, con cambios en directo**: the thread's agent starts the app with its dev
+  server on the environment's simulator, so saved changes appear at once in the Device panel.
+
 ## Project icons
 
 Select the project and open Project to choose an icon, emoji, monogram, or image. The choice applies to

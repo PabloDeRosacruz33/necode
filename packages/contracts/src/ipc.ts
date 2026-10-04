@@ -1163,6 +1163,12 @@ export interface DesktopBridge {
     name: string;
     bundleId: string | null;
   }) => Promise<string>;
+  /** Like `finishMacAppInstall`, for a simulator build: runs it in this Mac's iOS simulator. */
+  finishSimulatorAppInstall?: (input: {
+    id: string;
+    name: string;
+    bundleId: string | null;
+  }) => Promise<string>;
   /**
    * Makes the given ports of a remote environment answer on this Mac's localhost, each through
    * its `/api/port-forward/<port>` WebSocket URL. Ports missing from `forwards` stop.

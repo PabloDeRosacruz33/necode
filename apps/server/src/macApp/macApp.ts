@@ -39,7 +39,15 @@ const describeApp = Effect.fn("macApp.describe")(function* (appPath: string) {
   ) {
     return null;
   }
-  const bundle = yield* run(readBundleIdCommand(appPath));
+  const macBundle = yield* run(readBundleIdCommand(appPath));
+  // An iOS (simulator) app keeps its Info.plist at the bundle's root.
+  const bundle =
+    macBundle?.code === 0
+      ? macBundle
+      : yield* run({
+          command: "/usr/libexec/PlistBuddy",
+          args: ["-c", "Print :CFBundleIdentifier", path.join(appPath, "Info.plist")],
+        });
   return {
     path: appPath,
     name: path.basename(appPath, ".app"),
@@ -47,14 +55,19 @@ const describeApp = Effect.fn("macApp.describe")(function* (appPath: string) {
   } satisfies MacAppBuilt;
 });
 
-export const runMacAppBuild = (cwd: string) =>
+export const runMacAppBuild = (cwd: string, target: "mac" | "ios-simulator" = "mac") =>
   Stream.unwrap(
     Effect.gen(function* () {
       const loader = yield* T3ProjectFileLoader.T3ProjectFileLoader;
       const path = yield* Path.Path;
-      const config = Option.getOrNull(yield* loader.load(cwd))?.macApp;
+      const file = Option.getOrNull(yield* loader.load(cwd));
+      const config = target === "ios-simulator" ? file?.iosSimulator : file?.macApp;
       if (!config) {
-        return yield* fail("This project's t3.json has no macApp.build command.");
+        return yield* fail(
+          target === "ios-simulator"
+            ? "This project's t3.json has no iosSimulator.build command."
+            : "This project's t3.json has no macApp.build command.",
+        );
       }
       const runner = yield* ProcessRunner.ProcessRunner;
       const commonDir = yield* runner

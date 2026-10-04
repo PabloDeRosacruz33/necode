@@ -25,6 +25,13 @@ class MacAppIpcError extends Schema.TaggedError<MacAppIpcError>()("MacAppIpcErro
 }) {}
 
 const INSTALL_ROOT = NodePath.join(NodeOS.homedir(), "Library", "Caches", "Necode", "mac-apps");
+const SIMULATOR_APPS_ROOT = NodePath.join(
+  NodeOS.homedir(),
+  "Library",
+  "Caches",
+  "Necode",
+  "simulator-apps",
+);
 /** Zips being received, by install id. */
 const pendingInstalls = new Map<string, string>();
 
@@ -34,6 +41,42 @@ function exec(command: string, args: ReadonlyArray<string>): Promise<void> {
       error ? reject(error) : resolve(),
     );
   });
+}
+
+function execOutput(command: string, args: ReadonlyArray<string>): Promise<string> {
+  return new Promise((resolve, reject) => {
+    NodeChildProcess.execFile(
+      command,
+      [...args],
+      { timeout: 120_000, maxBuffer: 16 * 1024 * 1024 },
+      (error, stdout) => (error ? reject(error) : resolve(stdout)),
+    );
+  });
+}
+
+interface SimulatorDevice {
+  readonly udid: string;
+  readonly name: string;
+  readonly state: string;
+}
+
+/** The booted iPhone simulator, or the newest iOS runtime's first iPhone, booted now. */
+async function simulatorDevice(): Promise<SimulatorDevice> {
+  const listed = JSON.parse(
+    await execOutput("/usr/bin/xcrun", ["simctl", "list", "devices", "available", "-j"]),
+  ) as { devices: Record<string, ReadonlyArray<SimulatorDevice>> };
+  const runtimes = Object.entries(listed.devices)
+    .filter(([runtime]) => runtime.includes("iOS"))
+    .sort(([a], [b]) => b.localeCompare(a, undefined, { numeric: true }));
+  const devices = runtimes.flatMap(([, entries]) => entries);
+  const booted =
+    devices.find((device) => device.state === "Booted" && device.name.includes("iPhone")) ??
+    devices.find((device) => device.state === "Booted");
+  if (booted) return booted;
+  const pick = devices.find((device) => device.name.includes("iPhone")) ?? devices[0];
+  if (!pick) throw new Error("this Mac has no iOS simulator; install one in Xcode");
+  await exec("/usr/bin/xcrun", ["simctl", "boot", pick.udid]);
+  return pick;
 }
 
 const attempt = <A>(message: string, run: () => Promise<A>) =>
@@ -144,6 +187,67 @@ export const finishMacAppInstall = DesktopIpc.makeIpcMethod({
         const appPath = NodePath.join(target, app);
         await exec("/usr/bin/open", [appPath]);
         return appPath;
+      } finally {
+        await NodeFSP.rm(zipPath, { force: true });
+        await NodeFSP.rm(staging, { recursive: true, force: true });
+      }
+    });
+  }),
+});
+
+/**
+ * Unpacks a simulator build downloaded from the environment and runs it on this Mac's own
+ * simulator (booting one when none is), so the person tests with no network in between.
+ * Returns the simulator's name.
+ */
+export const finishSimulatorAppInstall = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.FINISH_SIMULATOR_APP_INSTALL_CHANNEL,
+  payload: Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    bundleId: Schema.NullOr(Schema.String),
+  }),
+  result: Schema.String,
+  handler: Effect.fn("desktop.ipc.macApp.finishSimulatorInstall")(function* (input, event) {
+    yield* ensureMainWindowSender(event);
+    const zipPath = pendingInstalls.get(input.id);
+    if (!zipPath) return yield* new MacAppIpcError({ message: "Unknown download." });
+    pendingInstalls.delete(input.id);
+    const slot = (input.bundleId ?? input.name).replace(/[^\w.-]+/g, "_");
+    const staging = NodePath.join(SIMULATOR_APPS_ROOT, `.${slot}-${input.id}`);
+    const target = NodePath.join(SIMULATOR_APPS_ROOT, slot);
+    return yield* attempt("Could not run the app in the simulator", async () => {
+      try {
+        await NodeFSP.mkdir(staging, { recursive: true });
+        await exec("/usr/bin/ditto", ["-x", "-k", zipPath, staging]);
+        const app = (await NodeFSP.readdir(staging)).find((entry) => entry.endsWith(".app"));
+        if (!app) throw new Error("the download has no app inside");
+        await NodeFSP.rm(target, { recursive: true, force: true });
+        await NodeFSP.rename(staging, target);
+        const appPath = NodePath.join(target, app);
+        const bundleId =
+          input.bundleId ??
+          (
+            await execOutput("/usr/libexec/PlistBuddy", [
+              "-c",
+              "Print CFBundleIdentifier",
+              NodePath.join(appPath, "Info.plist"),
+            ])
+          ).trim();
+        const device = await simulatorDevice();
+        await exec("/usr/bin/open", [
+          "-a",
+          "Simulator",
+          "--args",
+          "-CurrentDeviceUDID",
+          device.udid,
+        ]);
+        await exec("/usr/bin/xcrun", ["simctl", "terminate", device.udid, bundleId]).catch(
+          () => undefined,
+        );
+        await exec("/usr/bin/xcrun", ["simctl", "install", device.udid, appPath]);
+        await exec("/usr/bin/xcrun", ["simctl", "launch", device.udid, bundleId]);
+        return device.name;
       } finally {
         await NodeFSP.rm(zipPath, { force: true });
         await NodeFSP.rm(staging, { recursive: true, force: true });

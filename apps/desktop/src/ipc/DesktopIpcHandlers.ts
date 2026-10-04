@@ -140,6 +140,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(MacAppIpc.beginMacAppInstall);
   yield* ipc.handle(MacAppIpc.appendMacAppInstall);
   yield* ipc.handle(MacAppIpc.finishMacAppInstall);
+  yield* ipc.handle(MacAppIpc.finishSimulatorAppInstall);
   yield* ipc.handle(PortForwardIpc.syncPortForwards);
   yield* ipc.handle(ClientDeviceHostIpc.deviceHostExec);
   yield* ipc.handle(ClientDeviceHostIpc.deviceHostInstallTools);

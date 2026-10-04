@@ -411,8 +411,15 @@ export function createVcsEnvironmentAtoms<R, E>(
     macAppBuild: createEnvironmentSubscriptionAtomFamily(runtime, {
       label: "environment-data:mac-app:build",
       idleTtlMs: VCS_STATUS_IDLE_TTL_MS,
-      subscribe: (input: { readonly cwd: string; readonly runId: string }) =>
-        subscribe(WS_METHODS.macAppBuild, { cwd: input.cwd }).pipe(
+      subscribe: (input: {
+        readonly cwd: string;
+        readonly runId: string;
+        readonly target?: "mac" | "ios-simulator";
+      }) =>
+        subscribe(WS_METHODS.macAppBuild, {
+          cwd: input.cwd,
+          ...(input.target ? { target: input.target } : {}),
+        }).pipe(
           Stream.mapAccum(
             (): MacAppBuildState => ({
               command: null,

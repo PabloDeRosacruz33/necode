@@ -125,6 +125,22 @@ export const T3ProjectFile = Schema.Struct({
       ),
     }).annotate({ description: "The project's macOS app, built and opened from Necode." }),
   ),
+  iosSimulator: Schema.optionalKey(
+    Schema.Struct({
+      build: trimmedNonEmpty({
+        description:
+          "Shell command that builds a self-contained iOS simulator app (JavaScript bundled in, no dev server needed) in the thread's folder. Necode installs and opens it in the simulator of the Mac you are using.",
+      }),
+      appPath: Schema.optionalKey(
+        trimmedNonEmpty({
+          description:
+            "Path of the built simulator .app, relative to the thread's folder or absolute. When absent, Necode uses the last .app path the build printed.",
+        }),
+      ),
+    }).annotate({
+      description: "The project's iOS app as a simulator build, run on the user's own Mac.",
+    }),
+  ),
   scripts: Schema.optionalKey(
     Schema.Array(T3ProjectFileScript)
       .annotate({
