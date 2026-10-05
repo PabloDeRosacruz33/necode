@@ -582,6 +582,18 @@ const makeWsRpcLayer = (
           : team
               .gitIdentityForMember(memberId)
               .pipe(Effect.map((identity) => identity?.name.split(/\s+/)[0]));
+      /** Commits made by this client's git buttons are signed as the person pressing them. */
+      const asCaller = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        (memberId === null ? Effect.succeed(null) : team.gitIdentityForMember(memberId)).pipe(
+          Effect.flatMap((identity) =>
+            effect.pipe(
+              Effect.provideService(
+                GitVcsDriver.GitAuthorEnvironment,
+                TeamService.gitIdentityEnvironment(identity),
+              ),
+            ),
+          ),
+        );
       const voiceTranscription = yield* VoiceTranscription.VoiceTranscription;
       const recordClientCommandAnalytics = (command: OrchestrationCommand) => {
         switch (command.type) {
@@ -3612,7 +3624,7 @@ const makeWsRpcLayer = (
         [WS_METHODS.vcsPull]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsPull,
-            gitWorkflow.pullCurrentBranch(input.cwd).pipe(
+            asCaller(gitWorkflow.pullCurrentBranch(input.cwd)).pipe(
               Effect.flatMap((result) =>
                 result.status === "pulled"
                   ? refreshTaskDependencies(input.cwd).pipe(
@@ -3632,39 +3644,39 @@ const makeWsRpcLayer = (
           observeRpcStream(
             WS_METHODS.gitRunStackedAction,
             Stream.callback<GitActionProgressEvent, GitManagerServiceError>((queue) =>
-              gitWorkflow
-                .runStackedAction(input, {
+              asCaller(
+                gitWorkflow.runStackedAction(input, {
                   actionId: input.actionId,
                   progressReporter: {
                     publish: (event) => Queue.offer(queue, event).pipe(Effect.asVoid),
                   },
-                })
-                .pipe(
-                  Effect.matchCauseEffect({
-                    onFailure: (cause) => Queue.failCause(queue, cause),
-                    onSuccess: (result) =>
-                      (input.threadId === undefined
-                        ? Effect.void
-                        : linkCreatedPullRequest({
-                            threadId: input.threadId,
-                            result,
-                            commandId: serverCommandId("pr-created-link"),
-                          }).pipe(
-                            Effect.provideService(
-                              OrchestrationEngine.OrchestrationEngineService,
-                              orchestrationEngine,
-                            ),
-                            Effect.provideService(
-                              ProjectionSnapshotQuery.ProjectionSnapshotQuery,
-                              projectionSnapshotQuery,
-                            ),
-                          )
-                      ).pipe(
-                        Effect.andThen(refreshGitStatus(input.cwd)),
-                        Effect.andThen(Queue.end(queue).pipe(Effect.asVoid)),
-                      ),
-                  }),
-                ),
+                }),
+              ).pipe(
+                Effect.matchCauseEffect({
+                  onFailure: (cause) => Queue.failCause(queue, cause),
+                  onSuccess: (result) =>
+                    (input.threadId === undefined
+                      ? Effect.void
+                      : linkCreatedPullRequest({
+                          threadId: input.threadId,
+                          result,
+                          commandId: serverCommandId("pr-created-link"),
+                        }).pipe(
+                          Effect.provideService(
+                            OrchestrationEngine.OrchestrationEngineService,
+                            orchestrationEngine,
+                          ),
+                          Effect.provideService(
+                            ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+                            projectionSnapshotQuery,
+                          ),
+                        )
+                    ).pipe(
+                      Effect.andThen(refreshGitStatus(input.cwd)),
+                      Effect.andThen(Queue.end(queue).pipe(Effect.asVoid)),
+                    ),
+                }),
+              ),
             ),
             { "rpc.aggregate": "vcs" },
           ),
@@ -3715,13 +3727,15 @@ const makeWsRpcLayer = (
         [WS_METHODS.vcsMergeInto]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsMergeInto,
-            gitWorkflow.mergeInto(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            asCaller(gitWorkflow.mergeInto(input)).pipe(
+              Effect.tap(() => refreshGitStatus(input.cwd)),
+            ),
             { "rpc.aggregate": "vcs" },
           ),
         [WS_METHODS.vcsSyncWith]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsSyncWith,
-            gitWorkflow.syncWith(input).pipe(
+            asCaller(gitWorkflow.syncWith(input)).pipe(
               Effect.flatMap((result) =>
                 result.status === "conflicted"
                   ? Effect.succeed(result)
@@ -3744,7 +3758,9 @@ const makeWsRpcLayer = (
         [WS_METHODS.vcsMergeTaskPrepare]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsMergeTaskPrepare,
-            gitWorkflow.mergeTaskPrepare(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            asCaller(gitWorkflow.mergeTaskPrepare(input)).pipe(
+              Effect.tap(() => refreshGitStatus(input.cwd)),
+            ),
             { "rpc.aggregate": "vcs" },
           ),
         [WS_METHODS.macAppBuild]: (input) =>

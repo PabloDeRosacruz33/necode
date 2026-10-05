@@ -298,6 +298,15 @@ export interface GitRemoteStatusOptions {
   readonly refreshUpstream?: boolean;
 }
 
+/**
+ * Variables that make the git commands of the current request sign commits as a person (see
+ * TeamService.gitIdentityEnvironment). Empty, the default, keeps the machine's own identity.
+ */
+export const GitAuthorEnvironment = Context.Reference<Readonly<Record<string, string>>>(
+  "t3/vcs/GitAuthorEnvironment",
+  { defaultValue: () => ({}) },
+);
+
 export class GitVcsDriver extends Context.Service<
   GitVcsDriver,
   {

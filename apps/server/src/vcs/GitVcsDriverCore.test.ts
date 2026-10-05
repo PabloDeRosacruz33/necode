@@ -949,6 +949,29 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.equal(locale, "zh_CN.UTF-8");
       }),
     );
+
+    it.effect("signs commits as the person the request runs for", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "notes.md", "hola\n");
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "by roi"]).pipe(
+          Effect.provideService(GitVcsDriver.GitAuthorEnvironment, {
+            GIT_AUTHOR_NAME: "Roi",
+            GIT_AUTHOR_EMAIL: "roi@necora.pro",
+            GIT_COMMITTER_NAME: "Roi",
+            GIT_COMMITTER_EMAIL: "roi@necora.pro",
+          }),
+        );
+
+        assert.equal(
+          yield* git(cwd, ["log", "-1", "--format=%an <%ae> %cn"]),
+          "Roi <roi@necora.pro> Roi",
+        );
+        assert.equal(yield* git(cwd, ["log", "-1", "--format=%an", "HEAD~1"]), "Test");
+      }),
+    );
   });
 
   describe("structured errors", () => {
