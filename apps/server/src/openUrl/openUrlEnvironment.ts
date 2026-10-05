@@ -5,6 +5,10 @@
  * with a token bound to its thread; whatever Necode cannot deliver to a device opens here, as it
  * did before.
  *
+ * The same PATH entry holds a `git` stand-in: before commands that make commits it asks
+ * `/api/git-identity` who the thread works for now (whoever sent its latest message), so a
+ * long-running agent shared by several people signs each commit as the right one.
+ *
  * The secret behind the tokens lives in the state directory so terminals that outlive a server
  * restart keep working.
  */
@@ -16,6 +20,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
 export const OPEN_URL_ROUTE = "/api/open-url";
+export const GIT_IDENTITY_ROUTE = "/api/git-identity";
 
 const SHIM_DIR = "open-url/bin";
 const SECRET_FILE = "open-url/secret";
@@ -42,6 +47,38 @@ export PATH
 ${fallback}
 `;
 
+const gitScript = `#!/bin/sh
+# Necode: commits are signed by the person the thread works for right now.
+self_dir=$(cd "$(dirname "$0")" && pwd)
+PATH=$(printf '%s' "$PATH" | tr ':' '\\n' | grep -vxF "$self_dir" | paste -sd: -)
+export PATH
+signs=""
+for arg in "$@"; do
+  case "$arg" in
+    commit|commit-tree|merge|pull|rebase|cherry-pick|revert|am|stash|tag|notes) signs=1; break ;;
+  esac
+done
+if [ -n "$signs" ] && [ -n "$NECODE_OPEN_URL_ENDPOINT" ] && command -v curl >/dev/null 2>&1; then
+  if identity=$(curl -fsS -m 5 \\
+    -H "Authorization: Bearer $NECODE_OPEN_URL_TOKEN" \\
+    --data-urlencode "threadId=$NECODE_THREAD_ID" \\
+    "\${NECODE_OPEN_URL_ENDPOINT%/open-url}/git-identity" 2>/dev/null); then
+    name=$(printf '%s\\n' "$identity" | sed -n 1p)
+    email=$(printf '%s\\n' "$identity" | sed -n 2p)
+    if [ -n "$name" ] && [ -n "$email" ]; then
+      export GIT_AUTHOR_NAME="$name" GIT_AUTHOR_EMAIL="$email"
+      export GIT_COMMITTER_NAME="$name" GIT_COMMITTER_EMAIL="$email"
+    else
+      # Nobody's identity: the machine's own, not whoever this process started for.
+      unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
+    fi
+  fi
+fi
+real=$(command -v git)
+[ "$real" != "$self_dir/git" ] || real=/usr/bin/git
+exec "$real" "$@"
+`;
+
 const cache = new Map<string, { readonly binDir: string; readonly secret: string }>();
 
 /** Writes the stand-ins and the secret once per state directory. */
@@ -64,9 +101,15 @@ const ensureOpenUrlShim = Effect.fn("ensureOpenUrlShim")(function* (stateDir: st
     "necode-browser":
       'if command -v open >/dev/null 2>&1; then exec open "$@"; else exec xdg-open "$@"; fi',
   };
-  for (const [name, fallback] of Object.entries(scripts)) {
+  const files = {
+    ...Object.fromEntries(
+      Object.entries(scripts).map(([name, fallback]) => [name, shimScript(fallback)]),
+    ),
+    git: gitScript,
+  };
+  for (const [name, contents] of Object.entries(files)) {
     const file = path.join(binDir, name);
-    yield* fs.writeFileString(file, shimScript(fallback));
+    yield* fs.writeFileString(file, contents);
     yield* fs.chmod(file, 0o755);
   }
   const result = { binDir, secret };

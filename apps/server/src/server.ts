@@ -79,7 +79,7 @@ import * as DeviceService from "./device/DeviceService.ts";
 import { deviceHubProxyRouteLayer } from "./device/DeviceHubProxy.ts";
 import { portForwardRouteLayer } from "./preview/PortForwardProxy.ts";
 import * as OpenUrlBroker from "./openUrl/OpenUrlBroker.ts";
-import { openUrlRouteLayer } from "./openUrl/openUrlRoute.ts";
+import { gitIdentityRouteLayer, openUrlRouteLayer } from "./openUrl/openUrlRoute.ts";
 import * as ClientDeviceHosts from "./device/ClientDeviceHosts.ts";
 import {
   clientDeviceHostToolsRouteLayer,
@@ -629,6 +629,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     deviceHubProxyRouteLayer,
     portForwardRouteLayer,
     openUrlRouteLayer,
+    gitIdentityRouteLayer,
     clientDeviceHostLinkRouteLayer,
     clientDeviceHostToolsRouteLayer,
     staticAndDevRouteLayer,

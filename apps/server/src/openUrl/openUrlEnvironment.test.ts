@@ -137,3 +137,95 @@ it.layer(TestLayer)("open-url stand-in", (it) => {
     ),
   );
 });
+
+/** A stand-in for `/api/git-identity` answering with `identity` ("name\nemail\n" or ""). */
+const identityServer = (identity: string) =>
+  Effect.acquireRelease(
+    Effect.promise(
+      () =>
+        new Promise<{ port: number; paths: Array<string>; server: NodeHttp.Server }>((resolve) => {
+          const paths: Array<string> = [];
+          const server = NodeHttp.createServer((request, response) => {
+            paths.push(request.url ?? "");
+            request.resume();
+            request.on("end", () => response.writeHead(200).end(identity));
+          });
+          server.listen(0, "127.0.0.1", () => {
+            const address = server.address();
+            resolve({
+              port: typeof address === "object" && address ? address.port : 0,
+              paths,
+              server,
+            });
+          });
+        }),
+    ),
+    ({ server }) =>
+      Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve()))),
+  );
+
+it.layer(TestLayer)("git stand-in", (it) => {
+  const commitAs = (identity: string) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const runner = yield* ProcessRunner.ProcessRunner;
+      const dirs = yield* makeDirs;
+      const repo = path.join(dirs.stateDir, "..", "repo");
+      yield* fs.makeDirectory(repo, { recursive: true });
+      const server = yield* identityServer(identity);
+      const env = yield* openUrlEnvironment({
+        stateDir: dirs.stateDir,
+        port: server.port,
+        host: undefined,
+        threadId: "thread-1",
+      });
+      // The agent started for Pablo; Roi sent the thread's latest message since.
+      const processEnv = withPathPrefix(
+        {
+          ...process.env,
+          GIT_AUTHOR_NAME: "Pablo",
+          GIT_AUTHOR_EMAIL: "pablo@necora.pro",
+          GIT_COMMITTER_NAME: "Pablo",
+          GIT_COMMITTER_EMAIL: "pablo@necora.pro",
+        },
+        env,
+      );
+      const git = (...args: Array<string>) =>
+        runner.run({ command: "git", args: ["-C", repo, ...args], env: processEnv });
+      yield* git("init", "-q");
+      yield* git(
+        "-c",
+        "user.name=Machine",
+        "-c",
+        "user.email=machine@test",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "x",
+      );
+      const author = yield* git("log", "-1", "--format=%an <%ae> / %cn");
+      return { author: author.stdout.trim(), paths: server.paths };
+    });
+
+  it.effect("signs a commit as whoever the thread works for now", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const result = yield* commitAs("Roi\nroi@necora.pro\n");
+        assert.equal(result.author, "Roi <roi@necora.pro> / Roi");
+        // Only the command that commits asks; `init` and `log` do not.
+        assert.deepStrictEqual(result.paths, ["/api/git-identity"]);
+      }),
+    ),
+  );
+
+  it.effect("uses the machine's identity when nobody's is set", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const result = yield* commitAs("");
+        assert.equal(result.author, "Machine <machine@test> / Machine");
+      }),
+    ),
+  );
+});

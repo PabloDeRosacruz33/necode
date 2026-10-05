@@ -8,24 +8,30 @@ import * as Effect from "effect/Effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import * as ServerConfig from "../config.ts";
+import * as TeamService from "../team/TeamService.ts";
 import { latestAuthorMemberId } from "../team/threadAuthor.ts";
 import * as OpenUrlBroker from "./OpenUrlBroker.ts";
-import { OPEN_URL_ROUTE, verifyOpenUrlToken } from "./openUrlEnvironment.ts";
+import { GIT_IDENTITY_ROUTE, OPEN_URL_ROUTE, verifyOpenUrlToken } from "./openUrlEnvironment.ts";
 
-const handler = Effect.gen(function* () {
+/** The form a stand-in posted, when its token is valid for the thread it names. */
+const authorizedForm = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const config = yield* ServerConfig.ServerConfig;
   const body = new URLSearchParams(yield* request.text.pipe(Effect.orElseSucceed(() => "")));
   const threadId = body.get("threadId") ?? "";
-  const url = body.get("url") ?? "";
   const token = /^Bearer (.+)$/.exec(request.headers.authorization ?? "")?.[1] ?? "";
-  if (
-    !threadId ||
-    !token ||
-    !(yield* verifyOpenUrlToken({ stateDir: config.stateDir, threadId, token }))
-  ) {
-    return HttpServerResponse.text("Unauthorized", { status: 401 });
-  }
+  const valid =
+    threadId !== "" &&
+    token !== "" &&
+    (yield* verifyOpenUrlToken({ stateDir: config.stateDir, threadId, token }));
+  return valid ? { threadId, body } : null;
+});
+
+const handler = Effect.gen(function* () {
+  const form = yield* authorizedForm;
+  if (!form) return HttpServerResponse.text("Unauthorized", { status: 401 });
+  const { threadId } = form;
+  const url = form.body.get("url") ?? "";
   if (!/^https?:\/\//i.test(url)) {
     return HttpServerResponse.text("Only web pages are sent to devices", { status: 400 });
   }
@@ -37,4 +43,18 @@ const handler = Effect.gen(function* () {
     : HttpServerResponse.text("No device took it", { status: 404 });
 });
 
+/**
+ * `POST /api/git-identity`, asked by the `git` stand-in before a command that makes commits:
+ * the name and email (one per line) of whoever the thread works for now, or nothing for the
+ * machine's own identity.
+ */
+const gitIdentityHandler = Effect.gen(function* () {
+  const form = yield* authorizedForm;
+  if (!form) return HttpServerResponse.text("Unauthorized", { status: 401 });
+  const team = yield* TeamService.TeamService;
+  const identity = yield* team.gitIdentityForThread(form.threadId);
+  return HttpServerResponse.text(identity ? `${identity.name}\n${identity.email}\n` : "");
+});
+
 export const openUrlRouteLayer = HttpRouter.add("POST", OPEN_URL_ROUTE, handler);
+export const gitIdentityRouteLayer = HttpRouter.add("POST", GIT_IDENTITY_ROUTE, gitIdentityHandler);

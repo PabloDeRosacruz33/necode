@@ -150,7 +150,7 @@ mis otros aparatos** copies it to the person's other devices there). The environ
 set anyone's from **Settings → Connections → Team → Git**. Commits a thread's agent, terminals and
 **Fusionar en …** make are then signed by whoever sent the thread's latest message, and the tasks
 they start are named after them (`roi/…`). Without one, commits use the machine's own Git identity.
-An agent already running keeps the identity it started with until its session restarts.
+Each commit asks who that is at the moment it is made, so a long-running thread that several people take turns on signs every commit as the right person.
 
 ## Git history
 
