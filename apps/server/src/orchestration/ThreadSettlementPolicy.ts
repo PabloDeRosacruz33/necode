@@ -8,7 +8,6 @@ export interface SettlementPullRequest {
   readonly updatedAt?: string | null;
 }
 
-const DAY_MS = 24 * 60 * 60 * 1_000;
 const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000;
 
 function latestTimestamp(values: ReadonlyArray<string | null | undefined>): string | null {
@@ -70,7 +69,6 @@ export function resolveAutoSettlementAt(input: {
   readonly thread: OrchestrationThreadShell;
   readonly pullRequest: SettlementPullRequest | null;
   readonly now: string;
-  readonly autoSettleAfterDays: number | null;
   readonly autoSettleOnMerge: boolean;
 }): string | null {
   const { thread } = input;
@@ -103,15 +101,11 @@ export function resolveAutoSettlementAt(input: {
     thread.latestTurn?.startedAt,
     thread.latestTurn?.completedAt,
   ]);
-  if (pullRequest !== null) {
-    if (pullRequestSettles(thread, pullRequest, input.autoSettleOnMerge)) {
-      return activityAt ?? thread.createdAt;
-    }
+  // Threads settle only when their work closes; idle time never settles one.
+  if (pullRequest === null || !pullRequestSettles(thread, pullRequest, input.autoSettleOnMerge)) {
+    return null;
   }
-  if (input.autoSettleAfterDays === null || activityAt === null) return null;
-  return Date.parse(activityAt) < Date.parse(input.now) - input.autoSettleAfterDays * DAY_MS
-    ? activityAt
-    : null;
+  return activityAt ?? thread.createdAt;
 }
 
 /** Cheap checks that run before any source control lookup. */

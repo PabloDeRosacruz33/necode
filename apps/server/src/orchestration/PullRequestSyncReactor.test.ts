@@ -823,7 +823,6 @@ describe("PullRequestSyncReactor", () => {
                   thread,
                   pullRequest: null,
                   now: NOW,
-                  autoSettleAfterDays: null,
                   autoSettleOnMerge: true,
                 }),
               );

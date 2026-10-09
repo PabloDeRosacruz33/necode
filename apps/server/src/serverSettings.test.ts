@@ -327,7 +327,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         const changes = yield* serverSettings.subscribeChanges;
 
         const next = yield* serverSettings.updateSettings({
-          sidebarAutoSettleAfterDays: null,
           sidebarAutoSettleOnMerge: false,
         });
         const change = Option.getOrUndefined(yield* Stream.runHead(changes));
@@ -336,11 +335,8 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         // @effect-diagnostics-next-line preferSchemaOverJson:off
         const persisted = JSON.parse(raw) as Record<string, unknown>;
 
-        assert.strictEqual(next.sidebarAutoSettleAfterDays, null);
         assert.isFalse(next.sidebarAutoSettleOnMerge);
-        assert.strictEqual(change?.sidebarAutoSettleAfterDays, null);
         assert.isFalse(change?.sidebarAutoSettleOnMerge);
-        assert.strictEqual(persisted.sidebarAutoSettleAfterDays, null);
         assert.isFalse(persisted.sidebarAutoSettleOnMerge);
       }),
     ).pipe(Effect.provide(makeServerSettingsLayer())),

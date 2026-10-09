@@ -41,13 +41,9 @@ export class ThreadSettlementReactor extends Context.Service<
 /** @public Service construction is part of the canonical Effect module API. */
 /** Whether any environment default or project override can settle a thread. */
 function autoSettlementConfigured(settings: ServerSettingsValue): boolean {
-  if (settings.sidebarAutoSettleOnMerge || settings.sidebarAutoSettleAfterDays !== null) {
-    return true;
-  }
+  if (settings.sidebarAutoSettleOnMerge) return true;
   return Object.values(settings.projectSettingsOverrides).some(
-    (entry) =>
-      entry.sidebarAutoSettleOnMerge === true ||
-      (entry.sidebarAutoSettleAfterDays !== undefined && entry.sidebarAutoSettleAfterDays !== null),
+    (entry) => entry.sidebarAutoSettleOnMerge === true,
   );
 }
 
@@ -56,24 +52,12 @@ function autoSettlementConfigured(settings: ServerSettingsValue): boolean {
 export function autoSettlementSettingsKey(settings: ServerSettingsValue): string {
   return JSON.stringify([
     settings.sidebarAutoSettleOnMerge,
-    settings.sidebarAutoSettleAfterDays,
     // Only entries that touch settlement, in a stable order, so a project
-    // override on an unrelated key does not queue a sweep. JSON drops
-    // undefined, so inherit (absent) and never (null) need distinct marks.
+    // override on an unrelated key does not queue a sweep.
     Object.entries(settings.projectSettingsOverrides)
-      .filter(
-        ([, entry]) =>
-          entry.sidebarAutoSettleOnMerge !== undefined ||
-          entry.sidebarAutoSettleAfterDays !== undefined,
-      )
+      .filter(([, entry]) => entry.sidebarAutoSettleOnMerge !== undefined)
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([projectId, entry]) => [
-        projectId,
-        entry.sidebarAutoSettleOnMerge ?? "inherit",
-        entry.sidebarAutoSettleAfterDays === undefined
-          ? "inherit"
-          : entry.sidebarAutoSettleAfterDays,
-      ]),
+      .map(([projectId, entry]) => [projectId, entry.sidebarAutoSettleOnMerge]),
   ]);
 }
 
@@ -115,7 +99,6 @@ export const make = Effect.gen(function* () {
           thread,
           pullRequest,
           now: decisionNow,
-          autoSettleAfterDays: settings.sidebarAutoSettleAfterDays,
           autoSettleOnMerge: settings.sidebarAutoSettleOnMerge,
         });
         if (settledAt === null) {
@@ -144,8 +127,8 @@ export const make = Effect.gen(function* () {
         ),
     );
 
-    // Inactivity needs no host state. Finish these decisions before any lookup
-    // can fail or wait on the network, including lookups shared by recent threads.
+    // Linked pull request snapshots need no host state. Finish these decisions
+    // before any lookup can fail or wait on the network.
     const lookupCandidates = (yield* Effect.forEach(
       candidates,
       (thread) => settleThread(thread, null),
@@ -218,7 +201,6 @@ export const make = Effect.gen(function* () {
             thread,
             pullRequest,
             now: decisionNow,
-            autoSettleAfterDays: settings.sidebarAutoSettleAfterDays,
             autoSettleOnMerge: settings.sidebarAutoSettleOnMerge,
           }) !== null
         );

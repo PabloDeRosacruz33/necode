@@ -660,30 +660,20 @@ describe("ClientSettings composer collapse", () => {
 });
 
 describe("ServerSettings thread settlement", () => {
-  it("defaults merge settlement on and inactivity settlement to three days", () => {
-    const settings = decodeServerSettings({});
-    expect(settings.sidebarAutoSettleAfterDays).toBe(3);
-    expect(settings.sidebarAutoSettleOnMerge).toBe(true);
+  it("defaults merge settlement on and can turn it off", () => {
+    expect(decodeServerSettings({}).sidebarAutoSettleOnMerge).toBe(true);
+    expect(
+      decodeServerSettingsPatch({ sidebarAutoSettleOnMerge: false }).sidebarAutoSettleOnMerge,
+    ).toBe(false);
   });
 
-  it("allows both automatic rules to be disabled", () => {
-    expect(
-      decodeServerSettings({
-        sidebarAutoSettleAfterDays: null,
-        sidebarAutoSettleOnMerge: false,
-      }),
-    ).toMatchObject({ sidebarAutoSettleAfterDays: null, sidebarAutoSettleOnMerge: false });
-    expect(
-      decodeServerSettingsPatch({
-        sidebarAutoSettleAfterDays: null,
-        sidebarAutoSettleOnMerge: false,
-      }),
-    ).toMatchObject({ sidebarAutoSettleAfterDays: null, sidebarAutoSettleOnMerge: false });
-  });
-
-  it.each([-1, 0, 91])("rejects an auto-settle threshold outside 1..90: %s", (value) => {
-    expect(() => decodeServerSettings({ sidebarAutoSettleAfterDays: value })).toThrow();
-    expect(() => decodeServerSettingsPatch({ sidebarAutoSettleAfterDays: value })).toThrow();
+  it("drops the retired inactivity threshold from old settings and clients", () => {
+    expect(decodeServerSettings({ sidebarAutoSettleAfterDays: 3 })).not.toHaveProperty(
+      "sidebarAutoSettleAfterDays",
+    );
+    expect(decodeServerSettingsPatch({ sidebarAutoSettleAfterDays: 3 })).not.toHaveProperty(
+      "sidebarAutoSettleAfterDays",
+    );
   });
 });
 

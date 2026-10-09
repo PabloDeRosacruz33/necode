@@ -172,9 +172,7 @@ describe("searchSettings", () => {
       "t3-connect",
       "tailscale-https",
       "wsl-backend",
-      "auto-settle-inactive-threads",
       "auto-settle-merged-threads",
-      "days-before-auto-settle",
     ]);
     expect(available.map((item) => item.id).filter((id) => gatedIds.has(id))).toEqual([]);
   });
@@ -233,9 +231,7 @@ describe("searchSettings", () => {
     });
 
     expect(searchSettings("auto-settle", available).map((item) => item.id)).toEqual([
-      "auto-settle-inactive-threads",
       "auto-settle-merged-threads",
-      "days-before-auto-settle",
     ]);
   });
 
@@ -359,21 +355,20 @@ describe("searchSettings", () => {
       hasThreadAutoSettlement: true,
     });
     expect(searchSettings("writing style", available)[0]?.id).toBe("source-control-writing-style");
-    expect(searchSettings("auto-settle", available)).toHaveLength(3);
+    expect(searchSettings("auto-settle", available)).toHaveLength(1);
   });
 });
 
 describe("settings search targets", () => {
-  it.each([
-    "auto-settle-inactive-threads",
-    "auto-settle-merged-threads",
-    "days-before-auto-settle",
-  ])("retains the capability requirement for %s", (targetId) => {
-    expect(getSettingsSearchTargetScope(targetId)).toMatchObject({
-      scope: "project-defaults",
-      requiresThreadAutoSettlement: true,
-    });
-  });
+  it.each(["auto-settle-merged-threads"])(
+    "retains the capability requirement for %s",
+    (targetId) => {
+      expect(getSettingsSearchTargetScope(targetId)).toMatchObject({
+        scope: "project-defaults",
+        requiresThreadAutoSettlement: true,
+      });
+    },
+  );
 
   it("treats device-local rows as reachable from every selection", () => {
     const setting = getSettingsSearchTargetScope("time-format")!;
@@ -454,9 +449,7 @@ describe("auto-settlement search availability", () => {
       hasThreadAutoSettlement: availability.eligibleEnvironmentIds.length > 0,
     });
     expect(searchSettings("auto-settle", items).map((item) => item.id)).toEqual([
-      "auto-settle-inactive-threads",
       "auto-settle-merged-threads",
-      "days-before-auto-settle",
     ]);
   });
 

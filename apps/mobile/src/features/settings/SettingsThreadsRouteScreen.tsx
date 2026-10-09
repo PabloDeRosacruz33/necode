@@ -1,4 +1,3 @@
-import { AutoSettleDaysField } from "./components/AutoSettleDaysField";
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/unstable/reactivity";
@@ -6,7 +5,6 @@ import { useRef, useState } from "react";
 import { Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import { supportsSharedSettingsSync } from "@t3tools/client-runtime/state/shared-settings";
 import { AppText as Text } from "../../components/AppText";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
@@ -50,8 +48,6 @@ export function SettingsThreadsRouteScreen() {
     </>
   );
 }
-
-const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_SERVER_SETTINGS.sidebarAutoSettleAfterDays ?? 3;
 
 /**
  * Mobile edits auto-settle defaults across selected capable targets.
@@ -123,17 +119,10 @@ function AutoSettleSettingsRows() {
   const disabled = pendingWrites > 0 || (projectSelected && !supportsProjectOverrides);
   const hasProjectOverrides =
     projectSelected &&
-    syncTargets.some(
-      (target) =>
-        target.sources.sidebarAutoSettleOnMerge === "project" ||
-        target.sources.sidebarAutoSettleAfterDays === "project",
-    );
+    syncTargets.some((target) => target.sources.sidebarAutoSettleOnMerge === "project");
   const clearProjectOverrides = () => {
     if (writeInFlight.current) return;
-    const writes = planMobileScopedSettingsClear(syncTargets, [
-      "sidebarAutoSettleOnMerge",
-      "sidebarAutoSettleAfterDays",
-    ]);
+    const writes = planMobileScopedSettingsClear(syncTargets, ["sidebarAutoSettleOnMerge"]);
     if (writes.length === 0) return;
     writeInFlight.current = true;
     setPendingTargets(syncTargets);
@@ -148,8 +137,6 @@ function AutoSettleSettingsRows() {
       setPendingWrites((count) => count - 1);
     });
   };
-
-  const afterDays = referenceSettings.sidebarAutoSettleAfterDays;
 
   return (
     <View className="gap-6">
@@ -170,26 +157,6 @@ function AutoSettleSettingsRows() {
           disabled={disabled}
           onValueChange={(value) => writeToAll({ sidebarAutoSettleOnMerge: value })}
         />
-        <SettingsSwitchRow
-          icon="clock"
-          label="Auto-settle inactive threads"
-          value={afterDays !== null}
-          disabled={disabled}
-          onValueChange={(value) =>
-            writeToAll({ sidebarAutoSettleAfterDays: value ? AUTO_SETTLE_DEFAULT_DAYS : null })
-          }
-        />
-        {afterDays !== null ? (
-          <View className="flex-row items-center gap-4 px-4 py-4 android:min-h-14 android:py-3">
-            <View className="w-[22px] android:w-6" />
-            <Text className="flex-1 text-foreground text-lg android:text-base">Inactive days</Text>
-            <AutoSettleDaysField
-              value={afterDays}
-              disabled={disabled}
-              onValueChange={(value) => writeToAll({ sidebarAutoSettleAfterDays: value })}
-            />
-          </View>
-        ) : null}
       </SettingsSection>
       {pendingWrites === 0 && mismatches.length > 0 ? (
         <SettingsSection title="Across environments">

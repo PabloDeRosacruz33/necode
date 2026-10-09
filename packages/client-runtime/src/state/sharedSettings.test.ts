@@ -98,7 +98,6 @@ describe("splitSharedServerPatch", () => {
 
   it("routes preference keys to the shared patch and machine keys to the local patch", () => {
     const { sharedPatch, localPatch } = splitSharedServerPatch({
-      sidebarAutoSettleAfterDays: 7,
       sidebarAutoSettleOnMerge: false,
       continueThreadsAfterServerUpdate: true,
       enableAgentBrowserAccess: false,
@@ -106,7 +105,6 @@ describe("splitSharedServerPatch", () => {
       newWorktreesStartFromOrigin: true,
     });
     expect(sharedPatch).toEqual({
-      sidebarAutoSettleAfterDays: 7,
       sidebarAutoSettleOnMerge: false,
       continueThreadsAfterServerUpdate: true,
       newWorktreesStartFromOrigin: true,
@@ -125,7 +123,6 @@ describe("pickSharedServerSettings", () => {
     ).toEqual([
       "continueThreadsAfterServerUpdate",
       "newWorktreesStartFromOrigin",
-      "sidebarAutoSettleAfterDays",
       "sidebarAutoSettleOnMerge",
       "sourceControlWritingStyle",
       "textGenerationModelSelection",
@@ -155,14 +152,14 @@ describe("filterSharedServerPatch", () => {
       const patch = {
         textGenerationModelSelection: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection,
         continueThreadsAfterServerUpdate: true,
-        sidebarAutoSettleAfterDays: 7,
+        sidebarAutoSettleOnMerge: false,
       };
       expect(filterSharedServerPatch(patch, undefined, settings, settings, targetIsSource)).toEqual(
         {
           ...(targetIsSource
             ? { textGenerationModelSelection: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection }
             : {}),
-          sidebarAutoSettleAfterDays: 7,
+          sidebarAutoSettleOnMerge: false,
         },
       );
     },
@@ -188,7 +185,7 @@ describe("filterSharedServerPatch", () => {
         ...DEFAULT_SERVER_SETTINGS,
         providerInstances: availability === "missing" ? {} : { [instanceId]: instance },
       };
-      const patch = { sidebarAutoSettleAfterDays: 7, textGenerationModelSelection: selection };
+      const patch = { sidebarAutoSettleOnMerge: false, textGenerationModelSelection: selection };
       const sourceSettings = {
         ...settings,
         providerInstances: {
@@ -196,7 +193,7 @@ describe("filterSharedServerPatch", () => {
         },
       };
       expect(filterSharedServerPatch(patch, restartCapabilities, settings, sourceSettings)).toEqual(
-        availability === "enabled" ? patch : { sidebarAutoSettleAfterDays: 7 },
+        availability === "enabled" ? patch : { sidebarAutoSettleOnMerge: false },
       );
       const primarySettings = {
         ...sourceSettings,
@@ -215,7 +212,7 @@ describe("filterSharedServerPatch", () => {
   );
 
   it.each([true, false])("preserves supported restart preference %s", (enabled) => {
-    const patch = { continueThreadsAfterServerUpdate: enabled, sidebarAutoSettleAfterDays: 7 };
+    const patch = { continueThreadsAfterServerUpdate: enabled, sidebarAutoSettleOnMerge: false };
     expect(filterSharedServerPatch(patch, restartCapabilities)).toEqual(patch);
   });
 
@@ -224,10 +221,10 @@ describe("filterSharedServerPatch", () => {
     (capabilities) => {
       expect(
         filterSharedServerPatch(
-          { continueThreadsAfterServerUpdate: true, sidebarAutoSettleAfterDays: 7 },
+          { continueThreadsAfterServerUpdate: true, sidebarAutoSettleOnMerge: false },
           capabilities,
         ),
-      ).toEqual({ sidebarAutoSettleAfterDays: 7 });
+      ).toEqual({ sidebarAutoSettleOnMerge: false });
       expect(pickSharedServerSettings(DEFAULT_SERVER_SETTINGS, capabilities)).not.toHaveProperty(
         "continueThreadsAfterServerUpdate",
       );
@@ -236,7 +233,7 @@ describe("filterSharedServerPatch", () => {
 });
 
 describe("findSharedSettingsMismatches", () => {
-  const primarySettings = { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 7 };
+  const primarySettings = { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleOnMerge: false };
 
   it.each([true, false])(
     "detects remote restart continuation drift when the preference is %s",
@@ -305,7 +302,7 @@ describe("findSharedSettingsMismatches", () => {
           environments: [
             {
               ...environment,
-              settings: { ...environment.settings, sidebarAutoSettleAfterDays: 14 },
+              settings: { ...environment.settings, sidebarAutoSettleOnMerge: true },
             },
           ],
         }),
