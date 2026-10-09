@@ -101,6 +101,8 @@ const readWorkspaceConfig = Effect.fn("readWorkspaceConfig")(function* () {
 
 interface DesktopBuildIconAssets {
   readonly macIconPng: string;
+  /** Icon Composer project compiled into Assets.car for macOS 26+; macIconPng stays the icns fallback. */
+  readonly macIconComposerProject: string;
   readonly linuxIconPng: string;
   readonly windowsIconIco: string;
 }
@@ -2305,6 +2307,11 @@ export const stageBrowserSecret = Effect.fn("stageBrowserSecret")(function* (inp
   );
 });
 
+// electron-builder compiles this with actool (Xcode 26+) into Assets.car and
+// sets CFBundleIconName, so macOS 26 shows the Liquid Glass icon. icon.icns
+// from the same resources directory remains the fallback for older systems.
+const MAC_ICON_COMPOSER_FILENAME = "app-icon.icon";
+
 function generateMacIconSet(
   sourcePng: string,
   targetIcns: string,
@@ -2342,16 +2349,21 @@ function generateMacIconSet(
   });
 }
 
-function stageMacIcons(stageResourcesDir: string, sourcePng: string, verbose: boolean) {
+function stageMacIcons(
+  stageResourcesDir: string,
+  sourcePng: string,
+  iconComposerProject: string,
+  verbose: boolean,
+) {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    if (!(yield* fs.exists(sourcePng))) {
-      return yield* new DesktopIconSourceMissingError({
-        platform: "mac",
-        sourcePath: sourcePng,
-      });
+    for (const sourcePath of [sourcePng, iconComposerProject]) {
+      if (!(yield* fs.exists(sourcePath))) {
+        return yield* new DesktopIconSourceMissingError({ platform: "mac", sourcePath });
+      }
     }
+    yield* fs.copy(iconComposerProject, path.join(stageResourcesDir, MAC_ICON_COMPOSER_FILENAME));
 
     const tmpRoot = yield* fs.makeTempDirectoryScoped({
       prefix: "t3code-icon-build-",
@@ -2584,6 +2596,7 @@ export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIcon
   if (resolveDesktopUpdateChannel(version) === "nightly") {
     return {
       macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
+      macIconComposerProject: BRAND_ASSET_PATHS.nightlyIconComposerProject,
       linuxIconPng: BRAND_ASSET_PATHS.nightlyLinuxIconPng,
       windowsIconIco: BRAND_ASSET_PATHS.nightlyWindowsIconIco,
     };
@@ -2591,6 +2604,7 @@ export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIcon
 
   return {
     macIconPng: BRAND_ASSET_PATHS.productionMacIconPng,
+    macIconComposerProject: BRAND_ASSET_PATHS.productionIconComposerProject,
     linuxIconPng: BRAND_ASSET_PATHS.productionLinuxIconPng,
     windowsIconIco: BRAND_ASSET_PATHS.productionWindowsIconIco,
   };
@@ -2688,7 +2702,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     const repoRoot = yield* RepoRoot;
     buildConfig.mac = {
       target: target === "dmg" ? [target, "zip"] : [target],
-      icon: "icon.icns",
+      icon: MAC_ICON_COMPOSER_FILENAME,
       category: "public.app-category.developer-tools",
       extendInfo: {
         NSScreenCaptureUsageDescription:
@@ -2809,7 +2823,12 @@ const assertPlatformBuildResources = Effect.fn("assertPlatformBuildResources")(f
   verbose: boolean,
 ) {
   if (platform === "mac") {
-    yield* stageMacIcons(stageResourcesDir, iconAssets.macIconPng, verbose);
+    yield* stageMacIcons(
+      stageResourcesDir,
+      iconAssets.macIconPng,
+      iconAssets.macIconComposerProject,
+      verbose,
+    );
     return;
   }
 
@@ -3602,6 +3621,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     stageResourcesDir,
     {
       macIconPng: path.join(repoRoot, iconAssets.macIconPng),
+      macIconComposerProject: path.join(repoRoot, iconAssets.macIconComposerProject),
       linuxIconPng: path.join(repoRoot, iconAssets.linuxIconPng),
       windowsIconIco: path.join(repoRoot, iconAssets.windowsIconIco),
     },
