@@ -171,6 +171,11 @@ describe("resolveAutoSettlementAt", () => {
 
   it("blocks pins, snooze, pending work, live sessions, and queued starts", () => {
     expect(decide(makeThread({ settledOverride: "active" }))).toBe(false);
+    const pinned = makeThread({ pinnedAt: "2026-08-01T00:00:00.000Z" });
+    expect(decide(pinned)).toBe(false);
+    expect(
+      decide(pinned, { state: "merged", mergedAt: "2026-08-21T00:00:00.000Z", closedAt: null }),
+    ).toBe(false);
   });
 
   it("never settles a thread whose auto-settle is turned off, by inactivity or merge", () => {

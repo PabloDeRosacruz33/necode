@@ -486,7 +486,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
       if (
         command.type === "thread.auto-settle" &&
-        (thread.settledOverride !== null || thread.autoSettleDisabledAt != null)
+        (thread.settledOverride !== null ||
+          thread.autoSettleDisabledAt != null ||
+          thread.pinnedAt != null)
       ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
