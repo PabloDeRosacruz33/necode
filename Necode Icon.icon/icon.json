@@ -1,21 +1,18 @@
 {
   "fill" : {
-    "linear-gradient" : [
-      "extended-gray:0.00000,1.00000",
-      "display-p3:0.00000,0.00000,0.00000,1.00000"
-    ]
+    "automatic-gradient" : "extended-srgb:0.00000,0.53333,1.00000,1.00000"
   },
   "groups" : [
     {
       "layers" : [
         {
-          "image-name" : "exec-4300f816-7b2e-4aac-9c74-e90f007da2ef.png",
-          "name" : "exec-4300f816-7b2e-4aac-9c74-e90f007da2ef",
+          "image-name" : "Necora_Logo.png",
+          "name" : "Necora_Logo",
           "position" : {
-            "scale" : 0.66,
+            "scale" : 0.8,
             "translation-in-points" : [
-              0,
-              0
+              -177,
+              292.79999999999995
             ]
           }
         }
