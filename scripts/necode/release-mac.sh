@@ -60,3 +60,8 @@ gh release create "v$VERSION" "${ASSETS[@]}" \
   --title "Necode $VERSION" \
   --notes "Necode $VERSION for macOS (Apple silicon)."
 echo "Published v$VERSION. Installed copies will offer the update."
+
+# Each build is hundreds of megabytes and lives on GitHub; keep only this one and the previous.
+ls -t release/Necode-*-arm64.* 2>/dev/null \
+  | sed -E 's/.*Necode-([0-9.]+)-arm64.*/\1/' | awk '!seen[$0]++' | tail -n +3 \
+  | while read -r old; do rm -f release/Necode-"$old"-arm64.*; done

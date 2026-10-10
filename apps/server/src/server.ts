@@ -137,6 +137,7 @@ import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http
 import * as ReplayMarkers from "./auth/replayMarkers.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import * as DiskSpace from "./diskSpace/DiskSpace.ts";
 import * as TeamService from "./team/TeamService.ts";
 import * as VoiceTranscription from "./voice/VoiceTranscription.ts";
 import {
@@ -577,6 +578,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(RepositoryIdentityResolverLayerLive),
   Layer.provideMerge(ServerEnvironmentLayerLive),
   Layer.provideMerge(TeamService.layer),
+  Layer.provideMerge(DiskSpace.layer),
   Layer.provideMerge(VoiceTranscription.layer),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(ServerSecretStore.layer),

@@ -1,6 +1,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 
 import {
   GitManagerError,
@@ -43,6 +44,7 @@ import {
   type VcsStatusResult,
 } from "@t3tools/contracts";
 
+import * as DiskSpace from "../diskSpace/DiskSpace.ts";
 import * as GitManager from "./GitManager.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
@@ -216,6 +218,28 @@ export const make = Effect.gen(function* () {
     }
   });
 
+  const diskSpace = yield* Effect.serviceOption(DiskSpace.DiskSpace);
+  /** A new task folder can take gigabytes; with the disk almost full it would starve the database. */
+  const refuseWhenDiskIsFull = (cwd: string) =>
+    Option.match(diskSpace, {
+      onNone: () => Effect.void,
+      onSome: (disk) =>
+        disk.refusal.pipe(
+          Effect.flatMap((detail) =>
+            detail === null
+              ? Effect.void
+              : Effect.fail(
+                  new GitCommandError({
+                    operation: "GitWorkflowService.createWorktree",
+                    command: "disk-space",
+                    cwd,
+                    detail,
+                  }),
+                ),
+          ),
+        ),
+    });
+
   const ensureGitCommand = Effect.fn("GitWorkflowService.ensureGitCommand")(function* (
     operation: string,
     cwd: string,
@@ -378,7 +402,8 @@ export const make = Effect.gen(function* () {
         ),
       ),
     createWorktree: (input, options) =>
-      ensureGitCommand("GitWorkflowService.createWorktree", input.cwd).pipe(
+      refuseWhenDiskIsFull(input.cwd).pipe(
+        Effect.andThen(ensureGitCommand("GitWorkflowService.createWorktree", input.cwd)),
         Effect.andThen(git.createWorktree(input, options)),
       ),
     fetchRemote: (input) =>

@@ -213,11 +213,14 @@ export const resolveIosSimulatorPlan = Effect.fn("iosSimulatorPlan.resolve")(fun
       "CODE_SIGN_IDENTITY=- -quiet build",
     ].join(" ");
   const printApp = `ls -dt "${derivedData}"/Build/Products/*-iphonesimulator/*.app | head -1`;
+  // Each build folder takes gigabytes; the ones no thread has simulated from in two days go.
+  const pruneOldBuilds = `find "\${TMPDIR:-/tmp}/necode-simulator" -mindepth 1 -maxdepth 1 -type d -mtime +2 -exec rm -rf {} + 2>/dev/null || true`;
 
   if (found.kind === "javascript") {
     const install = yield* installStep(cwd, found.dir);
     const steps = [
       "set -e",
+      pruneOldBuilds,
       `cd ${quote(found.dir)}`,
       ...(install ? [install] : []),
       // A generated native folder is regenerated so it matches the app's config; a committed one
@@ -238,6 +241,7 @@ export const resolveIosSimulatorPlan = Effect.fn("iosSimulatorPlan.resolve")(fun
 
   const steps = [
     "set -e",
+    pruneOldBuilds,
     `cd ${quote(found.dir)}`,
     // A generated project is regenerated so it matches project.yml; a committed one is left alone.
     ...(found.xcodegen

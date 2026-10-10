@@ -48,6 +48,7 @@ import {
   View,
   type GestureResponderEvent,
 } from "react-native";
+import { DiskSpaceBanner } from "../../components/DiskSpaceBanner";
 import {
   KeyboardController,
   KeyboardStickyView,
@@ -991,6 +992,10 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     onDismiss={() => props.onDismissFeedback(submission.id)}
                   />
                 ))}
+                <DiskSpaceBanner
+                  environmentId={props.environmentId}
+                  environmentLabel={props.environmentLabel}
+                />
                 {usageLimitsReport && activeUserInputRequestId === null ? (
                   <Animated.View
                     className="shrink-0 px-4 pb-3"

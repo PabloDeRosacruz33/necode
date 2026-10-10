@@ -43,7 +43,11 @@ export class RemoteEnvironmentAuthUndeclaredStatusError extends Data.TaggedError
 }> {
   constructor(requestUrl: string, status: number) {
     super({
-      message: `Remote environment endpoint ${requestUrl} returned undeclared status ${status}.`,
+      message:
+        status >= 502 && status <= 504
+          ? // A proxy in front (Tailscale Serve, a tunnel) answered for a server that is not running.
+            `The machine answered but its Necode server is not running (status ${status} from ${requestUrl}). It restarts on its own; if this persists, check that machine.`
+          : `Remote environment endpoint ${requestUrl} returned undeclared status ${status}.`,
       requestUrl,
       status,
     });

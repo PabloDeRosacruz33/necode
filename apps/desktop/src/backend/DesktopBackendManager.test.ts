@@ -807,6 +807,52 @@ describe("DesktopBackendManager", () => {
       ),
   );
 
+  it.effect("kills a backend that stays alive without ever answering, then gives up on it", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const killSignals: Array<string | undefined> = [];
+        const firstProbe = yield* Deferred.make<void>();
+        // Alive forever: it ignores the kill and never reports an exit (stuck on a full disk).
+        const spawnerLayer = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Effect.succeed(
+              makeProcess({
+                exitCode: Effect.never,
+                kill: (options) =>
+                  Effect.sync(() => {
+                    killSignals.push(options?.killSignal?.toString());
+                  }),
+              }),
+            ),
+          ),
+        );
+        const httpLayer = httpClientLayer((request) =>
+          Deferred.succeed(firstProbe, void 0).pipe(Effect.as(responseForRequest(request, 503))),
+        );
+
+        const runFiber = yield* DesktopBackendManager.runBackendProcess({
+          ...baseConfig,
+          desktopTelemetryStream: Stream.empty,
+          readinessTimeout: Duration.millis(50),
+          unresponsiveRounds: 2,
+        }).pipe(Effect.provide(Layer.merge(spawnerLayer, httpLayer)), Effect.forkChild);
+
+        yield* Deferred.await(firstProbe);
+        yield* TestClock.adjust(Duration.millis(50));
+        assert.deepStrictEqual(killSignals, []);
+        // The second unanswered round: killed.
+        yield* TestClock.adjust(Duration.millis(50));
+        assert.deepStrictEqual(killSignals, ["SIGKILL"]);
+        // It does not report an exit either; the run ends anyway so the manager restarts.
+        yield* TestClock.adjust(Duration.seconds(10));
+        const exit = yield* Fiber.join(runFiber);
+        assert.isTrue(Option.isNone(exit.code));
+        assert.include(exit.reason, "never became ready");
+      }).pipe(Effect.provide(TestClock.layer())),
+    ),
+  );
+
   it.effect("starts the configured backend and closes the scoped process on stop", () =>
     Effect.scoped(
       Effect.gen(function* () {

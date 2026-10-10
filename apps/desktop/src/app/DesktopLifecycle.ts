@@ -1,4 +1,5 @@
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
@@ -81,12 +82,28 @@ function addScopedListener<Args extends ReadonlyArray<unknown>>(
   ).pipe(Effect.asVoid);
 }
 
+/**
+ * Quitting never hangs: if an orderly shutdown has not ended the app by then (a backend that will
+ * not exit, a stuck cleanup), it exits anyway.
+ */
+const QUIT_DEADLINE = Duration.seconds(20);
+
 const requestDesktopShutdownAndWait = Effect.fn("desktop.lifecycle.requestShutdownAndWait")(
   function* (
     afterBoundsFlush: Effect.Effect<void> = Effect.void,
-  ): Effect.fn.Return<void, never, DesktopShutdown.DesktopShutdown | DesktopWindow.DesktopWindow> {
+  ): Effect.fn.Return<
+    void,
+    never,
+    DesktopShutdown.DesktopShutdown | DesktopWindow.DesktopWindow | ElectronApp.ElectronApp
+  > {
     const shutdown = yield* DesktopShutdown.DesktopShutdown;
     const desktopWindow = yield* DesktopWindow.DesktopWindow;
+    const electronApp = yield* ElectronApp.ElectronApp;
+    yield* Effect.sleep(QUIT_DEADLINE).pipe(
+      Effect.andThen(logLifecycleError("shutdown did not finish in time; exiting anyway")),
+      Effect.andThen(electronApp.exit(0)),
+      Effect.forkDetach,
+    );
     yield* desktopWindow.flushMainWindowBounds;
     yield* afterBoundsFlush;
     yield* shutdown.request;

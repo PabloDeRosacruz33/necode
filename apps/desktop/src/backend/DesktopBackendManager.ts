@@ -25,6 +25,7 @@
 
 import * as Brand from "effect/Brand";
 import * as Cause from "effect/Cause";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -62,6 +63,14 @@ const MAX_RESTART_DELAY = Duration.seconds(10);
 // self-heal for a while but must not leave the app connecting forever.
 const MAX_PREFLIGHT_FAILURE_ATTEMPTS = 5;
 const DEFAULT_BACKEND_READINESS_TIMEOUT = Duration.minutes(1);
+/**
+ * Readiness rounds an alive backend gets before it is treated as hung and replaced. Generous for
+ * slow cold boots (WSL across /mnt/c, first launch after an update).
+ */
+const DEFAULT_BACKEND_UNRESPONSIVE_ROUNDS = 5;
+/** How long a killed backend gets to report its exit before the run is given up on anyway. */
+const BACKEND_ABANDON_GRACE = Duration.seconds(10);
+const FINALIZER_STOP_TIMEOUT = Duration.seconds(5);
 const DEFAULT_BACKEND_READINESS_INTERVAL = Duration.millis(100);
 const DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT = Duration.seconds(1);
 const DEFAULT_BACKEND_TERMINATE_GRACE = Duration.seconds(2);
@@ -226,6 +235,7 @@ interface RunBackendProcessOptions extends DesktopBackendStartConfig {
     message: DesktopTelemetryControlMessageValue,
   ) => Effect.Effect<void>;
   readonly readinessTimeout?: Duration.Duration;
+  readonly unresponsiveRounds?: number;
   readonly outputDrainTimeout?: Duration.Duration;
   readonly onStarted?: (pid: number) => Effect.Effect<void>;
   readonly onExitObserved?: () => Effect.Effect<void>;
@@ -588,12 +598,37 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
       Effect.as(true),
       Effect.catchTags({
         BackendReadinessTimeoutError: (error) =>
-          (options.onReadinessFailure?.(error) ?? Effect.void).pipe(Effect.as(false)),
+          (options.onReadinessFailure?.(error) ?? Effect.void).pipe(
+            Effect.andThen(Ref.updateAndGet(failedRounds, (rounds) => rounds + 1)),
+            Effect.flatMap((rounds) =>
+              rounds < unresponsiveRounds ? Effect.void : replaceHungBackend,
+            ),
+            Effect.as(false),
+          ),
       }),
     ),
   );
+  // A backend that stays alive without ever answering (stuck on a full disk, say) never exits,
+  // and only an exit makes the manager start another: kill it, and if even that is not
+  // reported, give up on it so the restart still happens.
+  const unresponsiveRounds = options.unresponsiveRounds ?? DEFAULT_BACKEND_UNRESPONSIVE_ROUNDS;
+  const failedRounds = yield* Ref.make(0);
+  const abandoned = yield* Deferred.make<void>();
+  const replaceHungBackend = handle
+    .kill({ killSignal: "SIGKILL" })
+    .pipe(
+      Effect.ignore,
+      Effect.andThen(Effect.sleep(BACKEND_ABANDON_GRACE)),
+      Effect.andThen(Deferred.succeed(abandoned, undefined)),
+      Effect.forkScoped,
+      Effect.asVoid,
+    );
 
-  yield* probeReadiness().pipe(Effect.repeat({ while: (ready) => !ready }), Effect.forkScoped);
+  yield* probeReadiness().pipe(
+    Effect.repeat({ while: (ready) => !ready }),
+    Effect.raceFirst(Deferred.await(abandoned)),
+    Effect.forkScoped,
+  );
 
   const exit = yield* handle.exitCode.pipe(
     Effect.mapError(
@@ -607,6 +642,8 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
           cause,
         }),
     ),
+    Effect.map(Option.some),
+    Effect.raceFirst(Deferred.await(abandoned).pipe(Effect.as(Option.none<number>()))),
     Effect.exit,
   );
   yield* options.onExitObserved?.() ?? Effect.void;
@@ -620,11 +657,15 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
   if (Exit.isFailure(exit)) {
     return yield* Effect.failCause(exit.cause);
   }
-  const exitCode = exit.value;
-  return {
-    code: Option.some(exitCode),
-    reason: `code=${exitCode}`,
-  } satisfies BackendProcessExit;
+  return Option.match(exit.value, {
+    onSome: (exitCode) =>
+      ({ code: Option.some(exitCode), reason: `code=${exitCode}` }) satisfies BackendProcessExit,
+    onNone: () =>
+      ({
+        code: Option.none(),
+        reason: `pid=${Number(handle.pid)} never became ready and did not exit when killed`,
+      }) satisfies BackendProcessExit,
+  });
 });
 
 // Factory for one pooled backend instance. The returned instance owns
@@ -1154,7 +1195,8 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
       Effect.map(Option.getOrElse(() => false)),
     );
 
-  yield* Effect.addFinalizer(() => stop());
+  // Bounded like every other stop: a backend that never exits must not hold the app open.
+  yield* Effect.addFinalizer(() => stop({ timeout: FINALIZER_STOP_TIMEOUT }));
 
   return {
     id: spec.id,

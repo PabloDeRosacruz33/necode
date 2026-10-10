@@ -240,6 +240,7 @@ import {
   DownloadIcon,
   GitBranchIcon,
   Minimize2Icon,
+  HardDriveIcon,
   PaperclipIcon,
   WifiOffIcon,
 } from "lucide-react";
@@ -400,6 +401,8 @@ import {
   shouldShowThreadErrorBanner,
   ThreadErrorBanner,
 } from "./chat/ThreadErrorBanner";
+import { diskSpaceNotice } from "@t3tools/client-runtime/state/diskSpace";
+import { useServerDiskSpace } from "~/state/diskSpace";
 import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import {
@@ -2688,6 +2691,12 @@ export default function ChatView(props: ChatViewProps) {
       ? `${environmentById.get(activeThread.environmentId)?.label ?? serverConfig?.environment.label ?? activeThread.environmentId} server`
       : "server";
   const serverUpdateEnvironmentId = activeThread?.environmentId ?? null;
+  const activeDiskSpaceNotice = diskSpaceNotice(
+    useServerDiskSpace(serverUpdateEnvironmentId),
+    (serverUpdateEnvironmentId && environmentById.get(serverUpdateEnvironmentId)?.label) ??
+      serverConfig?.environment.label ??
+      "este equipo",
+  );
   const versionMismatchSelfUpdate = resolveServerSelfUpdateCapability(serverConfig);
   const versionMismatchDesktopAppUpdate = supportsDesktopAppUpdate(serverConfig);
   const versionMismatchThreadContinuation = supportsServerUpdateThreadContinuation(serverConfig);
@@ -2832,9 +2841,20 @@ export default function ChatView(props: ChatViewProps) {
             }),
       });
     }
+    if (activeDiskSpaceNotice && serverUpdateEnvironmentId) {
+      items.push({
+        id: `disk-space:${serverUpdateEnvironmentId}`,
+        variant: activeDiskSpaceNotice.severity,
+        priority: activeDiskSpaceNotice.severity === "error" ? "urgent" : "notice",
+        icon: <HardDriveIcon />,
+        title: activeDiskSpaceNotice.title,
+      });
+    }
     if (autoBalanceUpdateBanner) items.push(autoBalanceUpdateBanner);
     return items;
   }, [
+    activeDiskSpaceNotice?.severity,
+    activeDiskSpaceNotice?.title,
     automaticEnvironment,
     autoBalanceUpdateBanner,
     activeEnvironmentUnavailableState,

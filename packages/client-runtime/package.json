@@ -111,6 +111,10 @@
       "types": "./src/state/team.ts",
       "default": "./src/state/team.ts"
     },
+    "./state/diskSpace": {
+      "types": "./src/state/diskSpace.ts",
+      "default": "./src/state/diskSpace.ts"
+    },
     "./state/assets": {
       "types": "./src/state/assets.ts",
       "default": "./src/state/assets.ts"

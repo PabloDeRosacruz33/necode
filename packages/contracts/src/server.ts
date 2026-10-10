@@ -766,6 +766,17 @@ export const ServerConfigStreamEvent = Schema.Union([
 ]);
 export type ServerConfigStreamEvent = typeof ServerConfigStreamEvent.Type;
 
+/**
+ * Free space on the disk holding the environment's state and task folders. `low` warns every
+ * client; `critical` also stops new task folders, so the database never runs out of room.
+ */
+export const ServerDiskSpace = Schema.Struct({
+  level: Schema.Literals(["ok", "low", "critical"]),
+  freeBytes: Schema.Number,
+  totalBytes: Schema.Number,
+});
+export type ServerDiskSpace = typeof ServerDiskSpace.Type;
+
 /** Terminal selection recorded by the service launcher for one update. */
 export const ServerSelfUpdateOutcome = Schema.Struct({
   id: TrimmedNonEmptyString,

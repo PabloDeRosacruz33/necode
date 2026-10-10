@@ -287,6 +287,7 @@ import {
   ServerProviderUpdateError,
   ServerProviderUpdateInput,
   ServerLifecycleStreamEvent,
+  ServerDiskSpace,
   ServerRemoveKeybindingInput,
   ServerRemoveKeybindingResult,
   ServerProviderUpdatedPayload,
@@ -529,6 +530,7 @@ export const WS_METHODS = {
   subscribeDeviceState: "subscribeDeviceState",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
+  subscribeServerDiskSpace: "subscribeServerDiskSpace",
   subscribeAuthAccess: "subscribeAuthAccess",
 
   // Team (members, invites, presence)
@@ -1622,6 +1624,13 @@ export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerCon
   stream: true,
 });
 
+const WsSubscribeServerDiskSpaceRpc = Rpc.make(WS_METHODS.subscribeServerDiskSpace, {
+  payload: Schema.Struct({}),
+  success: ServerDiskSpace,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
 const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecycle, {
   payload: Schema.Struct({}),
   success: ServerLifecycleStreamEvent,
@@ -1852,6 +1861,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeDeviceStateRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
+  WsSubscribeServerDiskSpaceRpc,
   WsSubscribeAuthAccessRpc,
   WsTeamSubscribeRpc,
   WsTeamSetViewingRpc,

@@ -18,6 +18,7 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TeamService from "./team/TeamService.ts";
+import * as DiskSpace from "./diskSpace/DiskSpace.ts";
 import * as VoiceTranscription from "./voice/VoiceTranscription.ts";
 import { subscribeChatGptHandoff } from "./provider/CodexChatGptHandoff.ts";
 import { subscribeCodexAuthCallback } from "./provider/CodexAuthCallback.ts";
@@ -575,6 +576,7 @@ const makeWsRpcLayer = (
           hasClientOrigin ? { origin: attributedOrigin } : undefined,
         );
       const team = yield* TeamService.TeamService;
+      const diskSpace = yield* Effect.serviceOption(DiskSpace.DiskSpace);
       // Tasks someone starts are named after them (`roi/…`), from their git identity.
       const memberBranchPrefix =
         memberId === null
@@ -4489,6 +4491,12 @@ const makeWsRpcLayer = (
                 liveUpdates,
               );
             }),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.subscribeServerDiskSpace]: (_input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeServerDiskSpace,
+            Option.match(diskSpace, { onNone: () => Stream.never, onSome: (disk) => disk.changes }),
             { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.subscribeServerLifecycle]: (_input) =>
