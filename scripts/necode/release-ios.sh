@@ -34,6 +34,7 @@ AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$ASC_KEY_PATH" -authenti
 
 xcodebuild -workspace ios/Necode.xcworkspace -scheme Necode -configuration Release \
   -destination "generic/platform=iOS" -archivePath "$WORK/Necode.xcarchive" archive \
+  -derivedDataPath "$WORK/DerivedData" \
   "${AUTH[@]}" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic -quiet
 
 cat >"$WORK/ExportOptions.plist" <<PLIST
@@ -51,5 +52,7 @@ PLIST
 xcodebuild -exportArchive -archivePath "$WORK/Necode.xcarchive" \
   -exportOptionsPlist "$WORK/ExportOptions.plist" -exportPath "$WORK/export" "${AUTH[@]}" -quiet
 
-rm -rf "$WORK"
+# The build folder and the generated native project take gigabytes; prebuild --clean makes the
+# project again next time.
+rm -rf "$WORK" "$MOBILE/ios"
 echo "Uploaded build $BUILD_NUMBER. It reaches TestFlight after Apple finishes processing (5 to 30 minutes)."
