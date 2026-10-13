@@ -69,9 +69,15 @@ type Step =
       readonly setupFailed: boolean;
     }
   | { readonly kind: "publishing" }
-  | { readonly kind: "merged"; readonly commit: string; readonly localTargetUpdated: boolean }
+  /** `folderClosed`: the task's folder and branch are gone (false when it had unsaved changes). */
+  | {
+      readonly kind: "merged";
+      readonly commit: string;
+      readonly localTargetUpdated: boolean;
+      readonly folderClosed: boolean;
+    }
   | { readonly kind: "closed" }
-  | { readonly kind: "upToDate" }
+  | { readonly kind: "upToDate"; readonly folderClosed: boolean }
   /** `commit` is null when the integration branch already had the whole task. */
   | { readonly kind: "continuing"; readonly commit: string | null; readonly next: string }
   | { readonly kind: "continued"; readonly commit: string | null; readonly branch: string }
@@ -223,7 +229,21 @@ export function MergeTaskDialog({
       );
       return;
     }
-    setStep(landed ? { kind: "merged", ...landed } : { kind: "upToDate" });
+    // Nothing is left to do in the folder: it goes now instead of piling up. The thread stays a
+    // task; if anyone writes in it again, the server makes it a fresh folder from the target.
+    const folderClosed = await closeTaskFolder();
+    setStep(
+      landed ? { kind: "merged", ...landed, folderClosed } : { kind: "upToDate", folderClosed },
+    );
+  };
+
+  /** Removes the task's folder and branch without moving the thread out of its task. */
+  const closeTaskFolder = async () => {
+    const result = await closeTask({
+      environmentId,
+      input: { projectCwd, worktreePath: cwd, branch, targetRef, deleteRemote: true },
+    });
+    return result._tag === "Success" && result.value.removedWorktree;
   };
 
   const landedLabel = (commit: string | null) =>
@@ -462,8 +482,14 @@ export function MergeTaskDialog({
             ) : null}
             {step.kind === "upToDate" ? (
               <p className="text-muted-foreground">
-                No hay nada que fusionar: {targetRef} ya tiene todo lo de esta tarea. Puedes
-                cerrarla o seguir en una nueva.
+                No hay nada que fusionar: {targetRef} ya tiene todo lo de esta tarea.
+              </p>
+            ) : null}
+            {step.kind === "merged" || step.kind === "upToDate" ? (
+              <p className="text-muted-foreground">
+                {step.folderClosed
+                  ? `Se han borrado la carpeta y la rama de la tarea. Si sigues escribiendo en este hilo, la tarea empieza de nuevo desde ${targetRef}.`
+                  : "La carpeta de la tarea tiene cambios sin guardar o está en uso, así que se ha quedado. Ciérrala cuando ya no la necesites."}
               </p>
             ) : null}
             {step.kind === "continuing" ? (
@@ -598,12 +624,15 @@ export function MergeTaskDialog({
           ) : null}
           {step.kind === "merged" || step.kind === "upToDate" ? (
             <>
-              <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
-                Dejar la tarea abierta
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => void finishTask()}>
-                Cerrar tarea
-              </Button>
+              {step.folderClosed ? (
+                <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
+                  Listo
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => void finishTask()}>
+                  Cerrar tarea
+                </Button>
+              )}
               <Button
                 size="sm"
                 onClick={() => {

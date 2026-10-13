@@ -12,6 +12,7 @@ import {
   type ProviderSession,
   type RuntimeMode,
   type TurnId,
+  T3_PROJECT_FILE_NAME,
 } from "@t3tools/contracts";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
@@ -62,9 +63,14 @@ import {
   resolveSourceControlWriterModelSelection,
   ServerSettingsService,
 } from "../../serverSettings.ts";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import {
+  configuredIntegrationBranch,
+  resolveProjectSettings,
+} from "@t3tools/shared/projectSettings";
+import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import * as ProjectSetupScriptRunner from "../../project/ProjectSetupScriptRunner.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
 const isProviderAdapterProcessError = Schema.is(ProviderAdapterProcessError);
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
@@ -472,9 +478,33 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * Recreates a thread's worktree from its branch when the directory has
-   * disappeared. Provider sessions resume into the persisted cwd, so a missing
-   * worktree makes every later turn fail as a bogus "session not found".
+   * The branch a recreated task starts from when its own branch is gone: the
+   * repository's t3.json or project setting, else `staging` when it exists.
+   */
+  const resolveIntegrationBranch = (projectId: ProjectId, workspaceRoot: string) =>
+    Effect.gen(function* () {
+      const projectFile = parseT3ProjectFile(
+        yield* fileSystem
+          .readFileString(path.join(workspaceRoot, T3_PROJECT_FILE_NAME))
+          .pipe(Effect.orElseSucceed(() => "")),
+      );
+      const settings = yield* serverSettingsService.getSettings;
+      const configured = configuredIntegrationBranch(settings, projectId, projectFile);
+      if (configured) return configured;
+      const hasStaging = yield* gitWorkflow.remoteBranchExists({
+        cwd: workspaceRoot,
+        remoteName: "origin",
+        refName: "staging",
+      });
+      return hasStaging ? "staging" : null;
+    }).pipe(Effect.orElseSucceed(() => null));
+
+  /**
+   * Recreates a thread's worktree when the directory has disappeared (closed after merging,
+   * cleaned up, or removed by hand): from its branch, or when the branch went too, as the same
+   * branch started again from the integration branch. Its setup script then installs
+   * dependencies in the thread's terminal. Provider sessions resume into the persisted cwd, so
+   * a missing worktree makes every later turn fail as a bogus "session not found".
    * Best-effort: on failure the turn proceeds and reports the real error.
    */
   const ensureThreadWorktree = Effect.fnUntraced(function* (thread: {
@@ -509,20 +539,74 @@ const make = Effect.gen(function* () {
       Effect.map((settings) => settings.worktreeSubmodules),
       Effect.orElseSucceed(() => null),
     );
-    yield* gitWorkflow.pruneWorktrees({ cwd }).pipe(
-      Effect.andThen(
-        gitWorkflow.createWorktree({ cwd, refName: branch, path: worktreePath }, { submodules }),
-      ),
-      Effect.catchCauseIf(
-        (cause) => !Cause.hasInterruptsOnly(cause),
-        (cause) =>
-          Effect.logWarning("provider command reactor failed to recreate worktree", {
-            threadId: thread.id,
-            worktreePath,
-            cause: Cause.pretty(cause),
-          }),
-      ),
+    /** Logs a failed attempt and yields null; an interruption still interrupts. */
+    const orLogged = <A, E, R>(attempt: Effect.Effect<A, E, R>) =>
+      attempt.pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.interrupt
+            : Effect.logWarning("provider command reactor failed to recreate worktree", {
+                threadId: thread.id,
+                worktreePath,
+                cause: Cause.pretty(cause),
+              }).pipe(Effect.as(null)),
+        ),
+      );
+    const fromBranch = gitWorkflow
+      .pruneWorktrees({ cwd })
+      .pipe(
+        Effect.andThen(
+          gitWorkflow.createWorktree({ cwd, refName: branch, path: worktreePath }, { submodules }),
+        ),
+        Effect.as("its branch"),
+      );
+    const fromIntegration = Effect.gen(function* () {
+      const base = yield* resolveIntegrationBranch(thread.projectId, cwd);
+      if (base === null) return null;
+      yield* gitWorkflow.fetchRemote({ cwd, remoteName: "origin", refName: base });
+      const { commitSha } = yield* gitWorkflow.resolveRemoteTrackingCommit({
+        cwd,
+        refName: base,
+        fallbackRemoteName: "origin",
+      });
+      yield* gitWorkflow.createWorktree(
+        { cwd, refName: commitSha, newRefName: branch, baseRefName: base, path: worktreePath },
+        { submodules },
+      );
+      return base;
+    });
+    // The branch usually went with the folder (deleted after merging); start it again then.
+    const source = (yield* orLogged(fromBranch)) ?? (yield* orLogged(fromIntegration));
+    if (source === null) return;
+    const setupRunner = yield* Effect.serviceOption(
+      ProjectSetupScriptRunner.ProjectSetupScriptRunner,
     );
+    if (Option.isSome(setupRunner)) {
+      yield* setupRunner.value
+        .runForThread({ threadId: thread.id, projectCwd: cwd, worktreePath })
+        .pipe(Effect.ignoreCause({ log: true }));
+    }
+    const createdAt = DateTime.formatIso(yield* DateTime.now);
+    yield* orchestrationEngine
+      .dispatch({
+        type: "thread.activity.append",
+        commandId: yield* serverCommandId("worktree-recreated"),
+        threadId: thread.id,
+        activity: {
+          id: yield* serverEventId(),
+          tone: "info",
+          kind: "task.worktreeRecreated",
+          summary:
+            source === "its branch"
+              ? `La carpeta de la tarea no existía; se ha vuelto a crear desde ${branch}`
+              : `La carpeta y la rama de la tarea no existían; ${branch} empieza de nuevo desde ${source}`,
+          payload: { branch, worktreePath },
+          turnId: null,
+          createdAt,
+        },
+        createdAt,
+      })
+      .pipe(Effect.ignoreCause({ log: true }));
   });
 
   const resolveThreadShell = Effect.fnUntraced(function* (threadId: ThreadId) {

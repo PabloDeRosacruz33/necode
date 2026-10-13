@@ -21,11 +21,12 @@ const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
 describe("storage cleanup settings", () => {
-  it("keeps cleanup disabled for existing installations", () => {
+  // Necode (2026-10-13, Roi): merged task folders must not pile up, so only that rule is on.
+  it("removes merged task folders by default and keeps every other rule off", () => {
     expect(decodeServerSettings({}).worktreeCleanup).toBeNull();
     expect(decodeServerSettings({}).storageCleanup).toEqual({
       worktreeAfterDays: null,
-      worktreeOnMerge: false,
+      worktreeOnMerge: true,
       worktreeOnDelete: false,
       worktreeUnchanged: false,
       browserArtifactsAfterDays: null,

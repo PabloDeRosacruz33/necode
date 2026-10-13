@@ -226,7 +226,7 @@ export function StorageSettingsPanel() {
             <SettingsRow
               title="Delete merged worktrees"
               status={ruleStatus("worktreeOnMerge")}
-              description="Remove worktrees whose pull request is merged and whose commits are included in the default branch."
+              description="Remove worktrees whose commits are all in the integration branch (merged there with or without a pull request) once their thread has been quiet for a day. The folder comes back if the thread continues."
               serverScoped={!isProjectScope}
               control={
                 <Switch

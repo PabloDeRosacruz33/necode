@@ -120,8 +120,10 @@ else the remote's default branch.
   check (`preMergeCheck` in `t3.json`, or the script marked `runBeforeMerge`) with its log live, and
   builds the merge commit, which records this task's summary for whoever merges next, and pushes
   it. Uncommitted work, conflicts (left in the task's folder for its agent) and a failed check stop
-  the merge with a way forward. Afterwards, **Cerrar tarea** deletes the task's folder and its
-  branch, locally and on the remote; the thread stays usable in the project's folder.
+  the merge with a way forward. Once merged, the task's folder and its branch are deleted,
+  locally and on the remote, so finished tasks never pile up; writing in the thread again starts
+  the task afresh from the integration branch. A folder with unsaved changes stays, and
+  **Cerrar tarea** removes it when you are done.
 - **Seguir en una tarea nueva**, after a merge or from the branch menu, keeps the thread and its
   whole conversation: the current task is closed and the same thread continues on a new branch and
   folder from the latest integration branch.

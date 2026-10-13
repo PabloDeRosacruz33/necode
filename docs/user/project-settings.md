@@ -64,9 +64,9 @@ applies when the project and environment are both on **Inherit**.
 
 ## Storage cleanup
 
-Open **Settings → Storage** to enable automatic cleanup on one machine or all connected
-environments. Policies are off by default and run on the server at startup, when changed, and
-hourly. Offline machines keep their existing policies.
+Open **Settings → Storage** to change automatic cleanup on one machine or all connected
+environments. Only **Delete merged worktrees** is on by default; policies run on the server at
+startup, when changed, and hourly. Offline machines keep their existing policies.
 
 Select a project to set **Automatic worktree cleanup** to **Inherit**, **Off**, or **Custom**.
 Inherit follows each machine's rules; Off keeps that project's worktrees until you remove them
@@ -74,11 +74,14 @@ manually. Custom applies separate worktree rules to the selected project or chec
 captures and log retention remain machine-wide.
 
 Worktrees can be removed after a chosen number of inactive days, after merging, or when they
-have no commits beyond the default branch. Only T3-managed worktrees are eligible. Active
-sessions, shared worktrees, uncommitted changes, and ignored files other than `node_modules`
-prevent removal. Branches and thread history stay; starting another turn recreates the checkout.
-Merge cleanup requires the commits to be included in the remote default branch, so squash merges
-may need the inactivity rule instead.
+have no commits beyond the integration branch. Only T3-managed worktrees are eligible. Active
+sessions, shared worktrees, uncommitted changes, and ignored files other than dependencies, build
+output and the links the setup script makes (an `.env`, say) prevent removal. Thread history
+stays; starting another turn recreates the checkout, from its branch or, when the branch is gone
+too, as the same branch started again from the integration branch. Merge cleanup takes worktrees
+whose commits are all in the integration branch (`staging` when it exists), merged with or
+without a pull request, once their thread has been quiet for a day; squash merges are recognized
+through their merged pull request.
 
 Enable **Delete worktrees with deleted threads** to remove safe worktrees after their last
 thread is deleted, including archived threads and worktrees left by earlier deletions. The

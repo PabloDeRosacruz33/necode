@@ -6,7 +6,12 @@ import type {
   TerminalSummary,
   WorktreeCleanupRules,
 } from "@t3tools/contracts";
-import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
+import { T3_PROJECT_FILE_NAME } from "@t3tools/contracts";
+import {
+  configuredIntegrationBranch,
+  resolveWorktreeCleanup,
+} from "@t3tools/shared/projectSettings";
+import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -45,6 +50,10 @@ export class StorageCleanup extends Context.Service<
 >()("t3/storageCleanup") {}
 
 const DAY_MS = 86_400_000;
+
+/** Ignored paths a task folder can always rebuild: installs, build output, setup links. */
+export const REGENERABLE_IGNORED =
+  /(^|\/)(node_modules|build|dist|out|\.next|\.turbo|\.expo|\.cache|\.vercel|\.temp|ios|android|Pods|DerivedData|target|coverage)\/?$/;
 
 const worktreeCleanupEnabled = (rules: WorktreeCleanupRules) =>
   rules.worktreeAfterDays !== null ||
@@ -117,6 +126,28 @@ export const make = Effect.gen(function* () {
   const terminals = yield* TerminalManager.TerminalManager;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  /** The branch tasks merge into: t3.json or the project setting, else `staging` when it exists. */
+  const integrationBranch = (
+    serverSettings: ServerSettings,
+    projectId: ProjectId | null,
+    repositoryCwd: string,
+  ) =>
+    Effect.gen(function* () {
+      const projectFile = parseT3ProjectFile(
+        yield* fs
+          .readFileString(path.join(repositoryCwd, T3_PROJECT_FILE_NAME))
+          .pipe(Effect.orElseSucceed(() => "")),
+      );
+      const configured = configuredIntegrationBranch(serverSettings, projectId, projectFile);
+      if (configured) return configured;
+      const staging = yield* git.execute({
+        operation: "StorageCleanup.stagingBranch",
+        cwd: repositoryCwd,
+        args: ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/staging"],
+        allowNonZeroExit: true,
+      });
+      return staging.exitCode === 0 ? "staging" : null;
+    }).pipe(Effect.orElseSucceed(() => null));
   const liveTerminals = new Map<string, Map<string, TerminalSummary>>();
   const noteTerminal = (terminal: TerminalSummary) => {
     const threadTerminals =
@@ -229,13 +260,14 @@ export const make = Effect.gen(function* () {
           args: ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"],
           maxOutputBytes: 64 * 1024,
         });
-        // Ignored files can contain secrets or local datasets. Dependency installs
-        // are reproducible; every other ignored path prevents automatic removal.
+        // Ignored files can contain secrets or local datasets. Dependency installs, build output
+        // and links the setup script makes are reproducible; any other ignored path prevents
+        // automatic removal.
         if (
           ignored.stdoutTruncated ||
           ignored.stdout
             .split("\0")
-            .some((entry) => entry !== "" && !/(^|\/)node_modules\/$/.test(entry))
+            .some((entry) => entry !== "" && !REGENERABLE_IGNORED.test(entry))
         )
           return;
         const old =
@@ -246,7 +278,10 @@ export const make = Effect.gen(function* () {
         if (!eligible && (settings.worktreeUnchanged || settings.worktreeOnMerge)) {
           const repositoryCwd = path.resolve(project.workspaceRoot);
           const remote = yield* git.resolvePrimaryRemoteName(repositoryCwd);
-          const branch = yield* git.resolveDefaultBranchName(repositoryCwd, remote);
+          // Tasks merge into the integration branch (staging), which is often not the default.
+          const branch =
+            (yield* integrationBranch(serverSettings, thread.projectId, repositoryCwd)) ??
+            (yield* git.resolveDefaultBranchName(repositoryCwd, remote));
           if (branch === null) return;
           const defaultRef = `refs/remotes/${remote}/${branch}`;
           const refreshed = refreshedDefaultRefs.get(repositoryCwd) ?? new Set<string>();
@@ -270,7 +305,14 @@ export const make = Effect.gen(function* () {
             allowNonZeroExit: true,
           });
           if (ancestor.exitCode !== 0) return;
-          eligible = settings.worktreeUnchanged;
+          // Everything in it is in the integration branch: unchanged, or merged there without a
+          // pull request ("Fusionar", or an agent merging by hand) once the thread has been quiet
+          // for a day; ProviderCommandReactor brings the folder back if the thread continues.
+          eligible =
+            settings.worktreeUnchanged ||
+            (settings.worktreeOnMerge &&
+              !("deletedAt" in thread) &&
+              storageCleanupActivityAt(thread) < now - DAY_MS);
           if (!eligible && settings.worktreeOnMerge && thread.branch !== null) {
             const pullRequest = yield* gitManager.branchPullRequest(
               { cwd: worktreePath, branch: thread.branch },

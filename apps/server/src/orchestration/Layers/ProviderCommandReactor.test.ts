@@ -188,6 +188,8 @@ describe("ProviderCommandReactor", () => {
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderServiceError>;
     readonly tryHandlePromptCommandEffect?: ProviderAuthService["Service"]["tryHandlePromptCommand"];
+    /** The thread's branch is gone too, so only a new branch from staging can be checked out. */
+    readonly missingBranch?: boolean;
   }) {
     const now = "2026-01-01T00:00:00.000Z";
     const baseDir =
@@ -309,9 +311,18 @@ describe("ProviderCommandReactor", () => {
     );
     const pruneWorktrees = vi.fn((_: { readonly cwd: string }) => Effect.void);
     const closeIdleTerminals = vi.fn((_: { readonly threadId: string }) => Effect.void);
+    const createWorktreeFromBranchFails = input?.missingBranch === true;
     const createWorktree = vi.fn(
-      (input: { readonly refName: string; readonly path: string | null }) =>
-        Effect.succeed({ worktree: { path: input.path ?? "", refName: input.refName } }),
+      (input: {
+        readonly refName: string;
+        readonly newRefName?: string | undefined;
+        readonly path: string | null;
+      }) =>
+        input.newRefName === undefined && createWorktreeFromBranchFails
+          ? Effect.die(new Error(`invalid reference: ${input.refName}`))
+          : Effect.succeed({
+              worktree: { path: input.path ?? "", refName: input.newRefName ?? input.refName },
+            }),
     );
     const refreshStatus = vi.fn((_: string) =>
       Effect.succeed({
@@ -473,6 +484,10 @@ describe("ProviderCommandReactor", () => {
           renameBranch,
           pruneWorktrees,
           createWorktree,
+          remoteBranchExists: () => Effect.succeed(true),
+          fetchRemote: () => Effect.void,
+          resolveRemoteTrackingCommit: () =>
+            Effect.succeed({ commitSha: "staging-tip", remoteRefName: "origin/staging" }),
         } satisfies Partial<GitWorkflowService.GitWorkflowService["Service"]>),
       ),
       Layer.provideMerge(
@@ -2735,6 +2750,49 @@ describe("ProviderCommandReactor", () => {
     );
     expect(harness.createWorktree.mock.invocationCallOrder[0]).toBeLessThan(
       harness.startSession.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("starts a task again from staging when its folder and branch were both deleted", async () => {
+    const harness = await createHarness({ missingBranch: true });
+    const worktreePath = NodePath.join(harness.stateDir, "deleted-task");
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("cmd-thread-deleted-task"),
+        threadId: ThreadId.make("thread-1"),
+        branch: "roi/demo",
+        worktreePath,
+      }),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-deleted-task"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-deleted-task"),
+          role: "user",
+          text: "si hazlo",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    expect(harness.createWorktree).toHaveBeenLastCalledWith(
+      {
+        cwd: "/tmp/provider-project",
+        refName: "staging-tip",
+        newRefName: "roi/demo",
+        baseRefName: "staging",
+        path: worktreePath,
+      },
+      { submodules: null },
     );
   });
 
