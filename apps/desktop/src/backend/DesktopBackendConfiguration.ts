@@ -584,6 +584,8 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       env: {
         ...backendChildEnvPatch(),
         ELECTRON_RUN_AS_NODE: "1",
+        // Only SIGINT from this app stops the server (apps/server/src/shutdownSignals.ts).
+        T3CODE_DESKTOP_MANAGED: "1",
       },
       // Primary wants process.env (PATH, dev-runner's T3CODE_HOME, etc.).
       extendEnv: true,

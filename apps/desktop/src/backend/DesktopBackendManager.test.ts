@@ -256,7 +256,7 @@ describe("DesktopBackendManager", () => {
         assert.equal(spawnedCommand.options.extendEnv, true);
         assert.equal(spawnedCommand.options.stdout, "pipe");
         assert.equal(spawnedCommand.options.stderr, "pipe");
-        assert.equal(spawnedCommand.options.killSignal, "SIGTERM");
+        assert.equal(spawnedCommand.options.killSignal, "SIGINT");
         assert.isDefined(spawnedCommand.options.forceKillAfter);
         assert.equal(spawnedCommand.options.additionalFds?.fd4?.type, "input");
         assert.equal(spawnedCommand.options.additionalFds?.fd5?.type, "output");

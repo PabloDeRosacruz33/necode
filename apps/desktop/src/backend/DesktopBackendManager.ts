@@ -492,7 +492,9 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
     stdin: options.bootstrapDelivery === "stdin" ? bootstrapStream : "ignore",
     stdout: options.captureOutput ? "pipe" : "inherit",
     stderr: options.captureOutput ? "pipe" : "inherit",
-    killSignal: "SIGTERM",
+    // The server ignores SIGTERM under the app (apps/server/src/shutdownSignals.ts): agents send
+    // it to whatever holds their dev server's port, and the server often does.
+    killSignal: "SIGINT",
     forceKillAfter: DEFAULT_BACKEND_TERMINATE_GRACE,
     // wsl.exe drops additional file descriptors when forwarding to the Linux
     // side, so the WSL spawn path delivers the bootstrap envelope via stdin

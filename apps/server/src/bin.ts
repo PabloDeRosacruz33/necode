@@ -14,6 +14,7 @@ import { pairCommand } from "./cli/pair.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { sharedServerCommandFlags } from "./cli/config.ts";
 import { isEntrypoint } from "./entrypoint.ts";
+import { installShutdownSignals } from "./shutdownSignals.ts";
 import { installSocketGuards } from "./socketGuards.ts";
 import { projectCommand } from "./cli/project.ts";
 import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
@@ -94,4 +95,6 @@ if (
     Effect.provide(CliRuntimeLayer),
     NodeRuntime.runMain,
   );
+  // After runMain, whose own SIGINT/SIGTERM listeners it adjusts.
+  installShutdownSignals();
 }
