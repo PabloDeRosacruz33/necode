@@ -56,19 +56,28 @@ const describeApp = Effect.fn("macApp.describe")(function* (appPath: string) {
   } satisfies MacAppBuilt;
 });
 
-export const runMacAppBuild = (cwd: string, target: "mac" | "ios-simulator" = "mac") =>
+export const runMacAppBuild = (
+  cwd: string,
+  target: "mac" | "ios-simulator" | "ios-simulator-dev" = "mac",
+) =>
   Stream.unwrap(
     Effect.gen(function* () {
       const loader = yield* T3ProjectFileLoader.T3ProjectFileLoader;
       const path = yield* Path.Path;
       const file = Option.getOrNull(yield* loader.load(cwd));
       const config =
-        target === "ios-simulator" ? yield* resolveIosSimulatorPlan(cwd) : file?.macApp;
+        target === "mac"
+          ? file?.macApp
+          : target === "ios-simulator"
+            ? yield* resolveIosSimulatorPlan(cwd)
+            : (yield* resolveIosSimulatorPlan(cwd))?.dev;
       if (!config) {
         return yield* fail(
-          target === "ios-simulator"
-            ? "No iOS app found in this project. Add iosSimulator.build to its t3.json."
-            : "This project's t3.json has no macApp.build command.",
+          target === "mac"
+            ? "This project's t3.json has no macApp.build command."
+            : target === "ios-simulator"
+              ? "No iOS app found in this project. Add iosSimulator.build to its t3.json."
+              : "This project's iOS app has no live variant. Add iosSimulator.devBuild and iosSimulator.devServer to its t3.json.",
         );
       }
       const runner = yield* ProcessRunner.ProcessRunner;
@@ -113,7 +122,7 @@ export const runMacAppBuild = (cwd: string, target: "mac" | "ios-simulator" = "m
           const appPath =
             exitCode !== 0
               ? null
-              : config.appPath
+              : "appPath" in config && config.appPath
                 ? path.resolve(cwd, config.appPath)
                 : findBuiltAppPath(yield* Ref.get(tail));
           const app = appPath ? yield* describeApp(appPath) : null;

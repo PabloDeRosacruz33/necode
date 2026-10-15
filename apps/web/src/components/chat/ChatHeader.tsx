@@ -75,6 +75,8 @@ interface ChatHeaderProps {
   onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
   onRunProjectScript: (script: ProjectScript) => void;
+  /** Runs a shell command in one of the thread's terminals on its environment. */
+  onRunCommand: (command: string) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateProjectScript: (
     scriptId: string,
@@ -144,6 +146,7 @@ export const ChatHeader = memo(function ChatHeader({
   onNewThreadInProject,
   onOpenProjectSettings,
   onRunProjectScript,
+  onRunCommand,
   onAddProjectScript,
   onUpdateProjectScript,
   onDeleteProjectScript,
@@ -399,6 +402,7 @@ export const ChatHeader = memo(function ChatHeader({
           cwd={gitCwd}
           presentation={actionsCollapsed ? "menu" : "toolbar"}
           onAskAgent={(prompt) => setComposerPrompt(draftId ?? activeThreadRef, prompt)}
+          onRunCommand={onRunCommand}
         />
       )}
       {activeProjectName && gitCwd && (

@@ -414,7 +414,7 @@ export function createVcsEnvironmentAtoms<R, E>(
       subscribe: (input: {
         readonly cwd: string;
         readonly runId: string;
-        readonly target?: "mac" | "ios-simulator";
+        readonly target?: "mac" | "ios-simulator" | "ios-simulator-dev";
       }) =>
         subscribe(WS_METHODS.macAppBuild, {
           cwd: input.cwd,

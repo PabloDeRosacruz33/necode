@@ -126,11 +126,17 @@ builds the simulator app and prints its path; it replaces the automatic build:
 { "iosSimulator": { "build": "npm run build:mobile:simulator", "appPath": "path/to/App.app" } }
 ```
 
-**Simular** offers two choices:
+**Simular** offers these choices:
 
 - **En este Mac**: the environment builds the app, the desktop app downloads it and runs it in this
   Mac's own simulator, starting one when none is running. Nothing crosses the network while you
   test; to see a change, simulate again.
+- **En este Mac, con cambios en directo** (Expo and React Native, desktop app): the environment
+  starts Metro in a terminal of the thread and builds the development app, which runs in this Mac's
+  simulator and loads its code from the environment through `localhost:8081`. Saved changes
+  appear at once, and you tap and type in the simulator as usual. Build again only after native
+  changes. If your Metro needs its own steps, set them in `t3.json` as `iosSimulator.devServer`
+  (and `iosSimulator.devBuild` for the development build). Port 8081 must be free on this Mac.
 - **En <environment>, con cambios en directo**: the thread's agent starts the app with its dev
   server on the environment's simulator, so saved changes appear at once in the Device panel.
 

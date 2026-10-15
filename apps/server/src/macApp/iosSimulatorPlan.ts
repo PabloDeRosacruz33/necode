@@ -17,6 +17,11 @@ import * as T3ProjectFileLoader from "../project/T3ProjectFileLoader.ts";
 export interface IosSimulatorPlan {
   readonly build: string;
   readonly appPath?: string;
+  /**
+   * The live variant, for apps whose code comes from a dev server (Expo, React Native): a
+   * development build that loads it from localhost:8081, and the command that serves it there.
+   */
+  readonly dev?: { readonly build: string; readonly server: string };
 }
 
 /** Deep enough for monorepos (`apps/mobile/ios`), shallow enough to stay instant. */
@@ -171,15 +176,32 @@ const installStep = Effect.fn("iosSimulatorPlan.install")(function* (root: strin
   }
 });
 
-/** The build "Simular" runs in `cwd`, or null when the project has no iOS app this Mac can build. */
+/**
+ * The build "Simular" runs in `cwd`, or null when the project has no iOS app this Mac can build.
+ * t3.json's `iosSimulator` wins field by field; detection fills in the live variant it omits.
+ */
 export const resolveIosSimulatorPlan = Effect.fn("iosSimulatorPlan.resolve")(function* (
   cwd: string,
 ) {
   const loader = yield* T3ProjectFileLoader.T3ProjectFileLoader;
   const configured = Option.getOrNull(yield* loader.load(cwd))?.iosSimulator;
-  if (configured) return configured satisfies IosSimulatorPlan;
-  if ((yield* HostProcessPlatform) !== "darwin") return null;
+  const detected =
+    (yield* HostProcessPlatform) === "darwin" && !(configured?.devBuild && configured.devServer)
+      ? yield* detectIosSimulatorPlan(cwd)
+      : null;
+  const build = configured?.build ?? detected?.build;
+  if (!build) return null;
+  const devBuild = configured?.devBuild ?? detected?.dev?.build;
+  const devServer = configured?.devServer ?? detected?.dev?.server;
+  return {
+    build,
+    ...(configured?.appPath ? { appPath: configured.appPath } : {}),
+    ...(devBuild && devServer ? { dev: { build: devBuild, server: devServer } } : {}),
+  } satisfies IosSimulatorPlan;
+}, Effect.provide(T3ProjectFileLoader.layer));
 
+/** The plan for the iOS app found in `cwd`, or null when there is none. */
+const detectIosSimulatorPlan = Effect.fn("iosSimulatorPlan.detect")(function* (cwd: string) {
   const found = yield* findApp(cwd);
   if (!found) return null;
   const path = yield* Path.Path;
@@ -218,11 +240,11 @@ export const resolveIosSimulatorPlan = Effect.fn("iosSimulatorPlan.resolve")(fun
 
   if (found.kind === "javascript") {
     const install = yield* installStep(cwd, found.dir);
-    const steps = [
+    const prepare = [`cd ${quote(found.dir)}`, ...(install ? [install] : [])];
+    const steps = (configuration: "Release" | "Debug") => [
       "set -e",
       pruneOldBuilds,
-      `cd ${quote(found.dir)}`,
-      ...(install ? [install] : []),
+      ...prepare,
       // A generated native folder is regenerated so it matches the app's config; a committed one
       // is the project's own and is left alone.
       ...(found.expo
@@ -232,11 +254,20 @@ export const resolveIosSimulatorPlan = Effect.fn("iosSimulatorPlan.resolve")(fun
         : []),
       "[ ! -f ios/Podfile ] || [ -d ios/Pods ] || (cd ios && pod install)",
       'WORKSPACE=$(ls -d ios/*.xcworkspace | head -1); SCHEME=$(basename "$WORKSPACE" .xcworkspace)',
-      // Release bundles the JavaScript into the app.
-      xcodebuild("-workspace", '"$WORKSPACE"', '"$SCHEME"', "Release"),
+      // Release bundles the JavaScript into the app; Debug loads it from localhost:8081.
+      xcodebuild("-workspace", '"$WORKSPACE"', '"$SCHEME"', configuration),
       printApp,
     ];
-    return { build: steps.join("\n") } satisfies IosSimulatorPlan;
+    return {
+      build: steps("Release").join("\n"),
+      dev: {
+        build: steps("Debug").join("\n"),
+        server: [
+          ...prepare,
+          found.expo ? "npx expo start --port 8081" : "npx react-native start --port 8081",
+        ].join(" && "),
+      },
+    } satisfies IosSimulatorPlan;
   }
 
   const steps = [
@@ -259,4 +290,4 @@ export const resolveIosSimulatorPlan = Effect.fn("iosSimulatorPlan.resolve")(fun
     printApp,
   ];
   return { build: steps.join("\n") } satisfies IosSimulatorPlan;
-}, Effect.provide(T3ProjectFileLoader.layer));
+});

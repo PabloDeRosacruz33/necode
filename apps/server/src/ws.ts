@@ -3785,7 +3785,11 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.macAppIosSimulatorPlan,
             resolveIosSimulatorPlan(input.cwd).pipe(
-              Effect.map((plan) => (plan ? { build: plan.build } : null)),
+              Effect.map((plan) =>
+                plan
+                  ? { build: plan.build, ...(plan.dev ? { devServer: plan.dev.server } : {}) }
+                  : null,
+              ),
             ),
             { "rpc.aggregate": "mac-app" },
           ),

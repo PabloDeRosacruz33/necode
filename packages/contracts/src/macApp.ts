@@ -9,8 +9,11 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
  */
 export const MacAppBuildInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
-  /** `ios-simulator` builds the project's iOS app for the simulator instead of its `macApp`. */
-  target: Schema.optional(Schema.Literals(["mac", "ios-simulator"])),
+  /**
+   * `ios-simulator` builds the project's iOS app for the simulator instead of its `macApp`;
+   * `ios-simulator-dev` builds its development app, which loads its code from the dev server.
+   */
+  target: Schema.optional(Schema.Literals(["mac", "ios-simulator", "ios-simulator-dev"])),
 });
 export type MacAppBuildInput = typeof MacAppBuildInput.Type;
 
@@ -38,7 +41,11 @@ export const MacAppIosSimulatorPlanInput = Schema.Struct({ cwd: TrimmedNonEmptyS
 export type MacAppIosSimulatorPlanInput = typeof MacAppIosSimulatorPlanInput.Type;
 
 export const MacAppIosSimulatorPlan = Schema.NullOr(
-  Schema.Struct({ build: TrimmedNonEmptyString }),
+  Schema.Struct({
+    build: TrimmedNonEmptyString,
+    /** Starts the dev server; present when the app can also run live (Expo, React Native). */
+    devServer: Schema.optional(TrimmedNonEmptyString),
+  }),
 );
 export type MacAppIosSimulatorPlan = typeof MacAppIosSimulatorPlan.Type;
 

@@ -137,6 +137,18 @@ export const T3ProjectFile = Schema.Struct({
             "Path of the built simulator .app, relative to the thread's folder or absolute. When absent, Necode uses the last .app path the build printed.",
         }),
       ),
+      devBuild: Schema.optionalKey(
+        trimmedNonEmpty({
+          description:
+            "Shell command that builds a development simulator app, which loads its JavaScript from the dev server on localhost:8081 so saved changes appear at once. It prints the built .app last. Detected for Expo and React Native apps when absent.",
+        }),
+      ),
+      devServer: Schema.optionalKey(
+        trimmedNonEmpty({
+          description:
+            "Shell command that starts the dev server (Metro) on port 8081 in the thread's folder, e.g. `npx expo start`. Detected for Expo and React Native apps when absent.",
+        }),
+      ),
     }).annotate({
       description: "The project's iOS app as a simulator build, run on the user's own Mac.",
     }),

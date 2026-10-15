@@ -1,9 +1,13 @@
 /**
  * "Simular" for projects with an iOS app (found by the environment, or declared in t3.json's
- * `iosSimulator`), with the two ways to try it:
+ * `iosSimulator`), with the ways to try it:
  * - On this Mac: the environment builds a self-contained simulator app, this Mac downloads it and
  *   runs it in its own simulator. Nothing crosses the network while testing; seeing a change
  *   means simulating again.
+ * - On this Mac, live (Expo, React Native): the environment starts the dev server (Metro) in a
+ *   terminal and builds the development app, which runs in this Mac's simulator and loads its
+ *   code from localhost:8081. The desktop app forwards that port to the environment
+ *   (preview/PortForwards.tsx), so saved changes appear at once with native touch and typing.
  * - On the environment, live: its agent starts the app with the dev server on the environment's
  *   simulator, so saved changes appear at once, watched through the Device panel.
  */
@@ -14,6 +18,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useT3ProjectFileState } from "~/hooks/useT3ProjectFileScripts";
 import { randomUUID } from "~/lib/utils";
+import { useDiscoveredPortsState } from "~/portDiscoveryState";
 import { useEnvironment } from "~/state/environments";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -32,10 +37,16 @@ import { Menu, MenuItem, MenuItemLabel, MenuPopup, MenuTrigger } from "../ui/men
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
 
+/** The port a development build of a React Native app loads its code from. */
+const METRO_PORT = 8081;
+/** How long a finished live build waits for Metro before opening anyway. */
+const METRO_WAIT_MS = 120_000;
+
 type Phase =
   | { readonly kind: "idle" }
-  | { readonly kind: "building"; readonly runId: string }
-  | { readonly kind: "installing"; readonly app: MacAppBuilt }
+  | { readonly kind: "building"; readonly runId: string; readonly live: boolean }
+  | { readonly kind: "waiting-metro"; readonly app: MacAppBuilt }
+  | { readonly kind: "installing"; readonly app: MacAppBuilt; readonly live: boolean }
   | { readonly kind: "failed"; readonly message: string };
 
 function failureMessage(result: { readonly cause: Cause.Cause<unknown> }): string {
@@ -54,11 +65,14 @@ export function SimulatorControl({
   cwd,
   presentation,
   onAskAgent,
+  onRunCommand,
 }: {
   environmentId: EnvironmentId;
   cwd: string;
   presentation: "menu" | "toolbar";
   onAskAgent: (prompt: string) => void;
+  /** Runs a shell command in one of the thread's terminals on the environment. */
+  onRunCommand: (command: string) => void;
 }) {
   const projectFile = useT3ProjectFileState(environmentId, cwd);
   const environment = useEnvironment(environmentId);
@@ -70,11 +84,20 @@ export function SimulatorControl({
   );
   // Environments from before the plan request only know t3.json's.
   const buildCommand = plan.data?.build ?? projectFile.file?.iosSimulator?.build ?? null;
+  const devServer = plan.data?.devServer ?? null;
+  const live = (phase.kind === "building" && phase.live) || phase.kind === "waiting-metro";
+  // Watched only during a live run: the scan has a cost and nothing else here needs it.
+  const { servers } = useDiscoveredPortsState(live ? environmentId : null);
+  const metroRunning = servers.some((server) => server.port === METRO_PORT);
   const build = useEnvironmentQuery(
     phase.kind === "building"
       ? vcsEnvironment.macAppBuild({
           environmentId,
-          input: { cwd, runId: phase.runId, target: "ios-simulator" },
+          input: {
+            cwd,
+            runId: phase.runId,
+            target: phase.live ? "ios-simulator-dev" : "ios-simulator",
+          },
         })
       : null,
   );
@@ -89,8 +112,8 @@ export function SimulatorControl({
   const canRunHere = bridge?.finishSimulatorAppInstall !== undefined;
   const environmentLabel = environment?.label ?? "el entorno";
 
-  const install = async (app: MacAppBuilt) => {
-    setPhase({ kind: "installing", app });
+  const install = async (app: MacAppBuilt, live: boolean) => {
+    setPhase({ kind: "installing", app, live });
     try {
       if (!bridge?.beginMacAppInstall || !bridge.appendMacAppInstall) {
         throw new Error("Solo la app de escritorio puede abrir el simulador de este Mac.");
@@ -115,7 +138,16 @@ export function SimulatorControl({
         bundleId: app.bundleId,
       });
       setPhase({ kind: "idle" });
-      toastManager.add({ type: "success", title: `${app.name} abierta en ${device}` });
+      toastManager.add({
+        type: "success",
+        title: `${app.name} abierta en ${device}`,
+        ...(live
+          ? {
+              description:
+                "Los cambios que guardes se ven al momento. Si sale una pantalla roja, espera a que Metro termine de arrancar en la terminal y pulsa ⌘R en el simulador.",
+            }
+          : {}),
+      });
     } catch (error) {
       setPhase({
         kind: "failed",
@@ -129,7 +161,8 @@ export function SimulatorControl({
     if (phase.kind !== "building" || !buildState?.done) return;
     setFinishedBuild(buildState);
     if (buildState.exitCode === 0 && buildState.app) {
-      void install(buildState.app);
+      if (phase.live && !metroRunning) setPhase({ kind: "waiting-metro", app: buildState.app });
+      else void install(buildState.app, phase.live);
     } else {
       setPhase({
         kind: "failed",
@@ -141,6 +174,16 @@ export function SimulatorControl({
       setLogOpen(true);
     }
   }, [buildState?.done]);
+  // The development app needs Metro answering before it opens, or it starts on an error screen.
+  useEffect(() => {
+    if (phase.kind !== "waiting-metro") return;
+    if (metroRunning) {
+      void install(phase.app, true);
+      return;
+    }
+    const timeout = setTimeout(() => void install(phase.app, true), METRO_WAIT_MS);
+    return () => clearTimeout(timeout);
+  }, [phase, metroRunning]);
   useEffect(() => {
     if (build.error && phase.kind === "building") {
       setPhase({ kind: "failed", message: "No se pudo compilar." });
@@ -150,24 +193,44 @@ export function SimulatorControl({
 
   if (buildCommand === null) return null;
 
-  const busy = phase.kind === "building" || phase.kind === "installing";
+  const busy =
+    phase.kind === "building" || phase.kind === "waiting-metro" || phase.kind === "installing";
   const runHere = () => {
     if (busy) return;
-    setPhase({ kind: "building", runId: randomUUID() });
+    setPhase({ kind: "building", runId: randomUUID(), live: false });
+  };
+  const runHereLive = () => {
+    if (busy || devServer === null) return;
+    // A Metro left running from before keeps serving; a second one would ask for another port.
+    onRunCommand(
+      `lsof -nP -iTCP:${METRO_PORT} -sTCP:LISTEN >/dev/null 2>&1 && echo "Metro ya está en marcha en el puerto ${METRO_PORT}." || (${devServer})`,
+    );
+    setPhase({ kind: "building", runId: randomUUID(), live: true });
   };
   const runLive = () => onAskAgent(livePrompt(environmentLabel));
   const label =
     phase.kind === "building"
       ? "Compilando…"
-      : phase.kind === "installing"
-        ? "Abriendo…"
-        : "Simular";
+      : phase.kind === "waiting-metro"
+        ? "Esperando a Metro…"
+        : phase.kind === "installing"
+          ? "Abriendo…"
+          : "Simular";
 
   const items = (density: "touch" | undefined) => (
     <>
       <MenuItem {...(density ? { density } : {})} disabled={busy || !canRunHere} onClick={runHere}>
         <MenuItemLabel>En este Mac</MenuItemLabel>
       </MenuItem>
+      {devServer !== null ? (
+        <MenuItem
+          {...(density ? { density } : {})}
+          disabled={busy || !canRunHere}
+          onClick={runHereLive}
+        >
+          <MenuItemLabel>En este Mac, con cambios en directo</MenuItemLabel>
+        </MenuItem>
+      ) : null}
       <MenuItem {...(density ? { density } : {})} onClick={runLive}>
         <MenuItemLabel>En {environmentLabel}, con cambios en directo</MenuItemLabel>
       </MenuItem>

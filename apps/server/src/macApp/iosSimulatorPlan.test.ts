@@ -43,6 +43,11 @@ it.layer(NodeServices.layer)("resolveIosSimulatorPlan", (it) => {
         assert.include(plan?.build, `(cd '${cwd}' && pnpm install --frozen-lockfile)`);
         assert.include(plan?.build, "npx expo prebuild --platform ios");
         assert.include(plan?.build, "-configuration Release");
+        // The live variant builds in Debug and serves the code from Metro on 8081.
+        assert.include(plan?.dev?.build, "-configuration Debug");
+        assert.include(plan?.dev?.build, `cd '${cwd}/apps/mobile'`);
+        assert.include(plan?.dev?.server, `cd '${cwd}/apps/mobile'`);
+        assert.include(plan?.dev?.server, "npx expo start --port 8081");
       }),
     ),
   );
@@ -57,6 +62,7 @@ it.layer(NodeServices.layer)("resolveIosSimulatorPlan", (it) => {
         const plan = yield* resolveIosSimulatorPlan(cwd);
         assert.include(plan?.build, "-workspace 'Demo.xcworkspace' -scheme 'Demo'");
         assert.include(plan?.build, "pod install");
+        assert.isUndefined(plan?.dev);
       }),
     ),
   );
@@ -121,6 +127,23 @@ it.layer(NodeServices.layer)("resolveIosSimulatorPlan", (it) => {
           "Demo.xcodeproj/project.pbxproj": IOS_PBXPROJ,
         });
         assert.deepStrictEqual(yield* resolveIosSimulatorPlan(cwd), { build: "npm run sim" });
+      }),
+    ),
+  );
+
+  it.effect("keeps t3.json's build and fills in the live variant it does not set", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const cwd = yield* project({
+          "t3.json": encodeJson({
+            iosSimulator: { build: "npm run sim", devServer: "npm run dev:mobile" },
+          }),
+          "apps/mobile/package.json": encodeJson({ dependencies: { expo: "54.0.0" } }),
+        });
+        const plan = yield* resolveIosSimulatorPlan(cwd);
+        assert.equal(plan?.build, "npm run sim");
+        assert.equal(plan?.dev?.server, "npm run dev:mobile");
+        assert.include(plan?.dev?.build, "-configuration Debug");
       }),
     ),
   );
