@@ -15,6 +15,8 @@ export type ModelOption = {
   readonly providerKey: string;
   readonly providerLabel: string;
   readonly providerDriver: string;
+  /** Instances sharing a key can resume each other's sessions (accounts of one agent). */
+  readonly continuationGroupKey: string | null;
   readonly isDefault: boolean;
   readonly isLegacy: boolean;
   readonly isUnavailable?: boolean;
@@ -173,6 +175,7 @@ export function buildModelOptions(
         providerKey: provider.instanceId,
         providerLabel,
         providerDriver: provider.driver,
+        continuationGroupKey: provider.continuation?.groupKey ?? null,
         isDefault: model.isDefault === true,
         isLegacy: model.isLegacy === true,
         capabilities: model.capabilities,
@@ -220,6 +223,7 @@ export function buildModelOptions(
         providerKey: fallbackModelSelection.instanceId,
         providerLabel,
         providerDriver,
+        continuationGroupKey: provider?.continuation?.groupKey ?? null,
         isDefault: false,
         isLegacy: model?.isLegacy === true,
         ...(isModelSelectionUnavailable(config, fallbackModelSelection)
@@ -253,4 +257,28 @@ export function groupByProvider(options: ReadonlyArray<ModelOption>): ReadonlyAr
     providerLabel: group.providerLabel,
     models: group.models,
   }));
+}
+
+/**
+ * The provider groups a thread can move to, the same rule as the web picker and the server:
+ * any before its first turn; after it, instances of the thread's driver that share its
+ * continuation group, such as another account of the same agent. Antigravity without a group
+ * stays on its own instance so history never moves to another Google profile.
+ */
+export function threadCompatibleProviderGroups(
+  groups: ReadonlyArray<ProviderGroup>,
+  currentInstanceId: string,
+  threadHasStarted: boolean,
+): ReadonlyArray<ProviderGroup> {
+  if (!threadHasStarted) return groups;
+  const current = groups.find((group) => group.providerKey === currentInstanceId)?.models[0];
+  return groups.filter((group) => {
+    if (group.providerKey === currentInstanceId) return true;
+    const candidate = group.models[0];
+    if (!current || !candidate || candidate.providerDriver !== current.providerDriver) {
+      return false;
+    }
+    if (current.continuationGroupKey === null) return current.providerDriver !== "antigravity";
+    return candidate.continuationGroupKey === current.continuationGroupKey;
+  });
 }

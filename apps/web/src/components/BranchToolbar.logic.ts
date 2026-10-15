@@ -324,66 +324,9 @@ export function shouldIncludeBranchPickerItem(input: {
   );
 }
 
-/** The branch work merges into when nothing is configured and the repository has it. */
-export const INTEGRATION_BRANCH_NAME = "staging";
-
-/**
- * The branch tasks start from and merge into: the one configured (t3.json, then the project
- * setting), else `staging` when the repository has it, else its default branch.
- */
-export function resolveIntegrationBranch(
-  refs: ReadonlyArray<Pick<VcsRef, "name" | "isRemote" | "isDefault">>,
-  configured?: string | null,
-): string | null {
-  if (configured?.trim()) return configured.trim();
-  const hasStaging = refs.some((ref) =>
-    ref.isRemote
-      ? deriveLocalBranchNameFromRemoteRef(ref.name) === INTEGRATION_BRANCH_NAME
-      : ref.name === INTEGRATION_BRANCH_NAME,
-  );
-  if (hasStaging) return INTEGRATION_BRANCH_NAME;
-  const defaultRef = refs.find((ref) => ref.isDefault);
-  if (!defaultRef) return null;
-  return defaultRef.isRemote
-    ? deriveLocalBranchNameFromRemoteRef(defaultRef.name)
-    : defaultRef.name;
-}
-
-/**
- * Composer text that asks the agent to resolve a merge of the integration branch into a task.
- * `inProgress` means the merge was left open in the folder; otherwise Necode backed out of it.
- * What already landed on the integration branch is kept, and the task's goal is reapplied on
- * top of it, including where the teammate's work merged cleanly but still overlaps the task.
- */
-export function buildResolveConflictsPrompt(input: {
-  readonly mergedRef: string;
-  readonly refName: string;
-  readonly conflictedFiles: ReadonlyArray<string>;
-  readonly inProgress: boolean;
-}): string {
-  const { mergedRef, refName } = input;
-  return [
-    input.inProgress
-      ? `Hay un merge de ${mergedRef} a medias en esta rama (${refName}). Archivos en conflicto:`
-      : `Fusiona ${mergedRef} en esta rama (${refName}). Necode lo intentó y lo deshizo por conflictos en:`,
-    ...input.conflictedFiles.map((file) => `- ${file}`),
-    "",
-    `${mergedRef} trae trabajo de otras tareas que ya está integrado. Para resolverlo:`,
-    `1. Entiende qué entró con \`git log --format='%h %an %s%n%b' ${refName}..${mergedRef}\` (los merges de tareas llevan el título del hilo que las hizo) y el objetivo de esta rama por esta conversación y \`git log ${mergedRef}..${refName}\`.`,
-    `2. Conserva todo lo que ya está en ${mergedRef}: funcionalidades, props, textos y arreglos. No devuelvas un archivo a su versión antigua para que encaje con esta rama.`,
-    `3. Vuelve a aplicar el objetivo de esta rama sobre el código nuevo, también donde ${mergedRef} cambió la zona que toca esta rama aunque Git no marque conflicto.`,
-    "4. Si los dos lados son incompatibles y no puedes conservar ambos, para y pregúntame antes de elegir.",
-    "5. Ejecuta las comprobaciones que correspondan y haz commit del merge.",
-    `6. Al terminar, resume qué conservaste de ${mergedRef}, qué adaptaste de esta rama y qué revisaste sin conflicto.`,
-  ].join("\n");
-}
-
-/**
- * A task named `…-v<N>` is a permanent thread (a "department": UI, performance…): merging it
- * continues the same thread in `…-v<N+1>`. Returns that next task name, or null for other tasks.
- */
-export function nextPermanentTaskName(branch: string): string | null {
-  const name = branch.slice(branch.lastIndexOf("/") + 1);
-  const match = /^(.+)-v(\d+)$/.exec(name);
-  return match ? `${match[1]}-v${Number(match[2]) + 1}` : null;
-}
+export {
+  INTEGRATION_BRANCH_NAME,
+  buildResolveConflictsPrompt,
+  nextPermanentTaskName,
+  resolveIntegrationBranch,
+} from "@t3tools/client-runtime/task-flow";

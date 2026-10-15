@@ -23,6 +23,7 @@ function modelOption(
     providerKey: "codex",
     providerLabel: "Codex",
     providerDriver: "codex",
+    continuationGroupKey: null,
     isDefault: false,
     isLegacy: false,
     capabilities: null,

@@ -10,7 +10,10 @@ import {
 } from "../components/git/DuplicateThreadDialog";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useComposerDraftStore } from "../composerDraftStore";
-import { buildThreadHandoffPrompt, resolveThreadHandoffTargets } from "../lib/threadHandoff";
+import {
+  buildThreadHandoffPrompt,
+  resolveThreadHandoffTargets,
+} from "@t3tools/client-runtime/thread-handoff";
 import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,

@@ -11,6 +11,14 @@
       "types": "./src/device/hubAccess.ts",
       "default": "./src/device/hubAccess.ts"
     },
+    "./thread-handoff": {
+      "types": "./src/threadHandoff.ts",
+      "default": "./src/threadHandoff.ts"
+    },
+    "./task-flow": {
+      "types": "./src/taskFlow.ts",
+      "default": "./src/taskFlow.ts"
+    },
     "./worktree-setup": {
       "types": "./src/worktreeSetup.ts",
       "default": "./src/worktreeSetup.ts"

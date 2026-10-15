@@ -45,7 +45,7 @@ import { Button } from "../ui/button";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
-import { describeWorktreeSetup } from "./worktreeSetupNotice";
+import { describeWorktreeSetup } from "@t3tools/client-runtime/task-flow";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { layoutCommitGraph, type GraphRow, type GraphSegment } from "./commitGraph.logic";
 import {

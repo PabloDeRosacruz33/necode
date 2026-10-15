@@ -20,6 +20,8 @@ type NewTaskDraftRouteParams = {
   readonly projectId?: string | string[];
   readonly branch?: string | null;
   readonly worktreePath?: string | null;
+  /** "Nueva tarea": a new worktree from the latest of this integration branch. */
+  readonly taskFrom?: string | string[];
   readonly title?: string | string[];
   /** Set by Add Project when this draft opens while the project's clone runs. */
   readonly cloning?: string | string[];
@@ -50,6 +52,7 @@ export function NewTaskDraftRouteScreen({ route }: StaticScreenProps<NewTaskDraf
       projectId: Array.isArray(params.projectId) ? params.projectId[0] : params.projectId,
       branch: params.branch,
       worktreePath: params.worktreePath,
+      taskFrom: Array.isArray(params.taskFrom) ? params.taskFrom[0] : params.taskFrom,
       cloning: (Array.isArray(params.cloning) ? params.cloning[0] : params.cloning) === "1",
     }),
     [params],

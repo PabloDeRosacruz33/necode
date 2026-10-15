@@ -42,6 +42,7 @@ import { useSelectedThreadGitState } from "../../../state/use-selected-thread-gi
 import { useSelectedThreadWorktree } from "../../../state/use-selected-thread-worktree";
 import { vcsEnvironment } from "../../../state/vcs";
 import { resolveGitOverviewReviewNavigationAction } from "./git-overview-navigation";
+import { GitTaskSection } from "./GitTaskSection";
 import { MetaCard, SheetListRow, menuItemIconName, statusSummary } from "./gitSheetComponents";
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
@@ -307,6 +308,10 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
           }
         />
       </View>
+
+      {isRepo ? (
+        <GitTaskSection currentBranch={gitStatus.data?.refName ?? null} busy={busy} />
+      ) : null}
 
       {linkedPrChains.length > 0 ? (
         <View className="gap-2">

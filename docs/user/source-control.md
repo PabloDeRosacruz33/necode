@@ -137,6 +137,11 @@ else the remote's default branch.
   full context over (Claude and Codex); otherwise the copy gets the history and a written summary.
   Work in the copy never changes the original.
 
+On mobile, the branch button next to **+** in the composer opens the Git overview, whose **Tarea**
+section has the same actions. There, **Nueva tarea** names the task from the first message,
+there is no **Hilo permanente** switch, and **Duplicar en un hilo paralelo** stays on the thread's
+own computer.
+
 Threads without their own folder share the project's checkout, so switching branches there
 changes it for all of them; Necode warns before it does. If uncommitted edits would be overwritten,
 choose **Stash and switch**: the edits are saved for that branch and come back when you switch to

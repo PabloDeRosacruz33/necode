@@ -9,7 +9,7 @@ import {
   buildThreadHandoffPrompt,
   resolveThreadHandoffTargets,
   type ThreadHandoffTarget,
-} from "../lib/threadHandoff";
+} from "@t3tools/client-runtime/thread-handoff";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { readThread, readThreadShell } from "../state/entities";
 import { environmentServerConfigsAtom } from "../state/server";

@@ -9,6 +9,7 @@ import {
   resolveDefaultableModelSelection,
   resolveNewTaskModelSelection,
   resolveSelectableModelSelection,
+  threadCompatibleProviderGroups,
   type ModelOption,
 } from "./modelOptions";
 
@@ -407,5 +408,50 @@ describe("mobile model options", () => {
         modelOptions: [unavailable],
       }),
     ).toBeNull();
+  });
+});
+
+describe("threadCompatibleProviderGroups", () => {
+  const provider = (instanceId: string, driver: string, groupKey?: string) => ({
+    instanceId,
+    driver,
+    displayName: instanceId,
+    enabled: true,
+    installed: true,
+    auth: { status: "authenticated" },
+    ...(groupKey ? { continuation: { groupKey } } : {}),
+    models: [{ slug: "model", name: "Model", isCustom: false, capabilities: null }],
+  });
+  const groups = groupByProvider(
+    buildModelOptions(
+      {
+        providers: [
+          provider("claude-work", "claudeAgent", "claude:home:default"),
+          provider("claude-personal", "claudeAgent", "claude:home:default"),
+          provider("claude-isolated", "claudeAgent", "claude:home:isolated"),
+          provider("codex", "codex", "codex:default"),
+        ],
+      } as unknown as ServerConfig,
+      null,
+    ),
+  );
+  const keys = (result: ReturnType<typeof threadCompatibleProviderGroups>) =>
+    result.map((group) => group.providerKey);
+
+  it("offers every provider before the first turn", () => {
+    expect(keys(threadCompatibleProviderGroups(groups, "claude-work", false))).toEqual([
+      "claude-work",
+      "claude-personal",
+      "claude-isolated",
+      "codex",
+    ]);
+  });
+
+  it("offers accounts that can resume the thread's session once it started", () => {
+    expect(keys(threadCompatibleProviderGroups(groups, "claude-work", true))).toEqual([
+      "claude-work",
+      "claude-personal",
+    ]);
+    expect(keys(threadCompatibleProviderGroups(groups, "codex", true))).toEqual(["codex"]);
   });
 });

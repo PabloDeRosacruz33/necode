@@ -101,7 +101,7 @@ import {
   ComboboxTrigger,
 } from "./ui/combobox";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { describeWorktreeSetup } from "./git/worktreeSetupNotice";
+import { describeWorktreeSetup } from "@t3tools/client-runtime/task-flow";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
 

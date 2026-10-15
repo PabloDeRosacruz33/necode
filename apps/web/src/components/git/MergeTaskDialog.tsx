@@ -41,7 +41,7 @@ import {
   buildTaskMergeMessage,
   buildTestMissionPrompt,
   type ReviewChecklistItem,
-} from "./mergeTaskReview.logic";
+} from "@t3tools/client-runtime/task-flow";
 
 /** A push rejected because someone merged first starts over this many times. */
 const MAX_ATTEMPTS = 3;

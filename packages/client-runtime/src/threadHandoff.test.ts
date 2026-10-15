@@ -1,7 +1,7 @@
 import type { OrchestrationMessage, ServerProvider } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildThreadHandoffPrompt, resolveThreadHandoffTargets } from "./threadHandoff";
+import { buildThreadHandoffPrompt, resolveThreadHandoffTargets } from "./threadHandoff.ts";
 
 const provider = (overrides: Partial<Record<keyof ServerProvider, unknown>>): ServerProvider =>
   ({

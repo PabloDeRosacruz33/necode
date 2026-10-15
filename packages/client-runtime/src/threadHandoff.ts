@@ -69,7 +69,7 @@ export function buildThreadHandoffPrompt(input: {
 
   const kept: string[] = [];
   let used = 0;
-  for (const turn of turns.toReversed()) {
+  for (const turn of [...turns].reverse()) {
     if (used + turn.length > MAX_TRANSCRIPT_CHARS) break;
     kept.unshift(turn);
     used += turn.length;

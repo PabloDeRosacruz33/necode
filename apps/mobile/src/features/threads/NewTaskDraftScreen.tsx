@@ -180,6 +180,8 @@ export function NewTaskDraftScreen(props: {
     readonly projectId?: string;
     readonly branch?: string | null;
     readonly worktreePath?: string | null;
+    /** "Nueva tarea": start a new worktree from the latest of this integration branch. */
+    readonly taskFrom?: string;
     /** The project was just added by a clone that is still running. */
     readonly cloning?: boolean;
   };
@@ -658,7 +660,8 @@ export function NewTaskDraftScreen(props: {
         if (appliedInitialProjectKeyRef.current === directProjectKey) {
           return;
         }
-        if (props.initialProjectRef?.branch) {
+        const taskFrom = props.initialProjectRef?.taskFrom;
+        if (props.initialProjectRef?.branch || taskFrom) {
           if (
             selectedProject?.environmentId !== directProject.environmentId ||
             selectedProject.id !== directProject.id
@@ -670,12 +673,14 @@ export function NewTaskDraftScreen(props: {
           // The route completes checkout before mounting this composer. Local
           // mode reuses an existing worktree; worktree mode would create another.
           updateComposerDraftSettings(flow.draftKey, {
-            workspaceSelection: {
-              mode: "local",
-              branch: props.initialProjectRef.branch,
-              worktreePath: props.initialProjectRef.worktreePath ?? null,
-              startFromOrigin: false,
-            },
+            workspaceSelection: taskFrom
+              ? { mode: "worktree", branch: taskFrom, worktreePath: null, startFromOrigin: true }
+              : {
+                  mode: "local",
+                  branch: props.initialProjectRef?.branch ?? null,
+                  worktreePath: props.initialProjectRef?.worktreePath ?? null,
+                  startFromOrigin: false,
+                },
           });
         }
         appliedInitialProjectKeyRef.current = directProjectKey;

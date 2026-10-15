@@ -46,6 +46,9 @@ import { DevicePreviewRouteScreen } from "./features/devices/DevicePreviewRouteS
 import { GitBranchesSheet } from "./features/threads/git/GitBranchesSheet";
 import { GitCommitSheet } from "./features/threads/git/GitCommitSheet";
 import { GitConfirmSheet } from "./features/threads/git/GitConfirmSheet";
+import { GitContinueTaskSheet } from "./features/threads/git/GitContinueTaskSheet";
+import { GitDuplicateThreadSheet } from "./features/threads/git/GitDuplicateThreadSheet";
+import { GitMergeTaskSheet } from "./features/threads/git/GitMergeTaskSheet";
 import { GitOverviewSheet } from "./features/threads/git/GitOverviewSheet";
 import { ThreadRouteScreen } from "./features/threads/ThreadRouteScreen";
 import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteScreen";
@@ -472,6 +475,9 @@ const WORKSPACE_OVERLAY_ROUTES = new Set([
   "GitBranches",
   "GitCommit",
   "GitConfirm",
+  "GitContinueTask",
+  "GitDuplicateThread",
+  "GitMergeTask",
   "GitOverview",
   "NewTaskSheet",
   "SettingsLegal",
@@ -716,6 +722,35 @@ const RootStackConfig = createNativeStackNavigator({
         ...FORM_SHEET_PRESENTATION_OPTIONS,
         sheetAllowedDetents: [0.55, 0.92],
         sheetGrabberVisible: true,
+      },
+    }),
+    GitContinueTask: createNativeStackScreen({
+      screen: GitContinueTaskSheet,
+      linking: `${THREAD_LINKING_PREFIX}/git/continue-task`,
+      options: {
+        ...FORM_SHEET_PRESENTATION_OPTIONS,
+        sheetAllowedDetents: [0.55, 0.92],
+        sheetGrabberVisible: true,
+      },
+    }),
+    GitDuplicateThread: createNativeStackScreen({
+      screen: GitDuplicateThreadSheet,
+      linking: `${THREAD_LINKING_PREFIX}/git/duplicate`,
+      options: {
+        ...FORM_SHEET_PRESENTATION_OPTIONS,
+        sheetAllowedDetents: [0.7, 0.92],
+        sheetGrabberVisible: true,
+      },
+    }),
+    GitMergeTask: createNativeStackScreen({
+      screen: GitMergeTaskSheet,
+      linking: `${THREAD_LINKING_PREFIX}/git/merge-task`,
+      options: {
+        ...FORM_SHEET_PRESENTATION_OPTIONS,
+        sheetAllowedDetents: [0.92],
+        sheetGrabberVisible: true,
+        // A merge in progress must not be swiped away half-way.
+        gestureEnabled: false,
       },
     }),
     GitConfirm: createNativeStackScreen({

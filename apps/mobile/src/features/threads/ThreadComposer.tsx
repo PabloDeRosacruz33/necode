@@ -34,6 +34,7 @@ import {
   type RefObject,
 } from "react";
 import { Alert, Keyboard, Platform, Pressable, View, type ViewStyle } from "react-native";
+import { SymbolView } from "../../components/AppSymbol";
 import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
 import {
   composerAttachmentUploadBlockReason,
@@ -85,6 +86,7 @@ import {
 import {
   buildModelOptions,
   groupByProvider,
+  threadCompatibleProviderGroups,
   isModelSelectionUnavailable,
 } from "../../lib/modelOptions";
 import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
@@ -526,11 +528,18 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     [props.serverConfig, currentModelSelection],
   );
   const providerGroups = useMemo(() => groupByProvider(modelOptions), [modelOptions]);
-  // An existing thread is bound to its harness: sessions can't move between
-  // provider instances, so the picker only offers the thread's own group.
+  const threadHasStarted =
+    props.selectedThread.latestTurn !== null ||
+    props.selectedThread.latestUserMessageAt !== null ||
+    props.selectedThread.session !== null;
   const threadProviderGroups = useMemo(
-    () => providerGroups.filter((group) => group.providerKey === currentModelSelection.instanceId),
-    [providerGroups, currentModelSelection.instanceId],
+    () =>
+      threadCompatibleProviderGroups(
+        providerGroups,
+        currentModelSelection.instanceId,
+        threadHasStarted,
+      ),
+    [providerGroups, currentModelSelection.instanceId, threadHasStarted],
   );
   const currentModelOption =
     modelOptions.find(
@@ -960,13 +969,34 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                   />
                 ) : (
                   <View className="min-w-0 flex-1 flex-row items-center justify-between">
-                    <ComposerAttachmentButton
-                      supportsFiles={Boolean(
-                        props.serverConfig?.environment.capabilities.fileAttachments,
-                      )}
-                      onPickMedia={props.onPickDraftMedia}
-                      onPickFiles={props.onPickDraftFiles}
-                    />
+                    <View className="shrink-0 flex-row items-center">
+                      <ComposerAttachmentButton
+                        supportsFiles={Boolean(
+                          props.serverConfig?.environment.capabilities.fileAttachments,
+                        )}
+                        onPickMedia={props.onPickDraftMedia}
+                        onPickFiles={props.onPickDraftFiles}
+                      />
+                      <Pressable
+                        accessibilityLabel="Branch and task actions"
+                        accessibilityRole="button"
+                        className="size-[44px] shrink-0 items-center justify-center rounded-full active:opacity-70"
+                        onPress={() => {
+                          Keyboard.dismiss();
+                          navigation.navigate("GitOverview", {
+                            environmentId: String(props.environmentId),
+                            threadId: String(props.selectedThread.id),
+                          });
+                        }}
+                      >
+                        <SymbolView
+                          name="arrow.triangle.branch"
+                          size={18}
+                          tintColorClassName="accent-icon"
+                          type="monochrome"
+                        />
+                      </Pressable>
+                    </View>
                     <View className="min-w-0 shrink">
                       <ComposerInlineControl
                         accessibilityLabel="Model and reasoning settings"
