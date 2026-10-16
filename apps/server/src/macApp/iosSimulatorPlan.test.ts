@@ -42,6 +42,8 @@ it.layer(NodeServices.layer)("resolveIosSimulatorPlan", (it) => {
         assert.include(plan?.build, `cd '${cwd}/apps/mobile'`);
         assert.include(plan?.build, `(cd '${cwd}' && pnpm install --frozen-lockfile)`);
         assert.include(plan?.build, "npx expo prebuild --platform ios");
+        // A half-made Pods folder must not skip the install.
+        assert.include(plan?.build, "cmp -s ios/Podfile.lock ios/Pods/Manifest.lock");
         assert.include(plan?.build, "-configuration Release");
         // The live variant builds in Debug and serves the code from Metro on 8081.
         assert.include(plan?.dev?.build, "-configuration Debug");

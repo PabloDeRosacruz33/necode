@@ -249,11 +249,15 @@ const detectIosSimulatorPlan = Effect.fn("iosSimulatorPlan.detect")(function* (c
       // is the project's own and is left alone.
       ...(found.expo
         ? [
-            "git ls-files --error-unmatch ios >/dev/null 2>&1 || CI=1 npx expo prebuild --platform ios",
+            "git ls-files --error-unmatch ios >/dev/null 2>&1 || CI=1 npx expo prebuild --platform ios --no-install",
           ]
         : []),
-      "[ ! -f ios/Podfile ] || [ -d ios/Pods ] || (cd ios && pod install)",
-      'WORKSPACE=$(ls -d ios/*.xcworkspace | head -1); SCHEME=$(basename "$WORKSPACE" .xcworkspace)',
+      // CocoaPods' own staleness check: a Pods folder left half-made, or older than the
+      // Podfile.lock, installs again.
+      "[ ! -f ios/Podfile ] || cmp -s ios/Podfile.lock ios/Pods/Manifest.lock || (cd ios && pod install)",
+      "WORKSPACE=$(ls -d ios/*.xcworkspace 2>/dev/null | head -1)",
+      '[ -n "$WORKSPACE" ] || { echo "No .xcworkspace in ios/ after pod install." >&2; exit 1; }',
+      'SCHEME=$(basename "$WORKSPACE" .xcworkspace)',
       // Release bundles the JavaScript into the app; Debug loads it from localhost:8081.
       xcodebuild("-workspace", '"$WORKSPACE"', '"$SCHEME"', configuration),
       printApp,
@@ -280,7 +284,7 @@ const detectIosSimulatorPlan = Effect.fn("iosSimulatorPlan.detect")(function* (c
           `git ls-files --error-unmatch ${quote(found.container)} >/dev/null 2>&1 || xcodegen generate`,
         ]
       : []),
-    "[ ! -f Podfile ] || [ -d Pods ] || pod install",
+    "[ ! -f Podfile ] || cmp -s Podfile.lock Pods/Manifest.lock || pod install",
     xcodebuild(
       found.container.endsWith(".xcworkspace") ? "-workspace" : "-project",
       quote(found.container),
