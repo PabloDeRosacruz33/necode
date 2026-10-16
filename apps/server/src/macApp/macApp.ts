@@ -20,6 +20,8 @@ import * as ProcessRunner from "../processRunner.ts";
 
 /** Enough of the end of the log to find the `.app` path the build printed last. */
 const OUTPUT_TAIL_BYTES = 64_000;
+/** Folders with a build running: a second build in the same folder would wreck the first. */
+const buildingCwds = new Set<string>();
 
 const fail = (message: string) => new MacAppError({ message });
 
@@ -65,6 +67,11 @@ export const runMacAppBuild = (
       const loader = yield* T3ProjectFileLoader.T3ProjectFileLoader;
       const path = yield* Path.Path;
       const file = Option.getOrNull(yield* loader.load(cwd));
+      if (buildingCwds.has(cwd)) {
+        return yield* fail(
+          "Ya hay una compilación en marcha en esta carpeta; espera a que termine o mira su log.",
+        );
+      }
       const config =
         target === "mac"
           ? file?.macApp
@@ -130,7 +137,12 @@ export const runMacAppBuild = (
         }),
       );
       const started: MacAppBuildEvent = { _tag: "started", command: config.build };
-      return Stream.make(started).pipe(Stream.concat(output), Stream.concat(finished));
+      buildingCwds.add(cwd);
+      return Stream.make(started).pipe(
+        Stream.concat(output),
+        Stream.concat(finished),
+        Stream.ensuring(Effect.sync(() => buildingCwds.delete(cwd))),
+      );
     }),
   ).pipe(Stream.provide(Layer.mergeAll(T3ProjectFileLoader.layer, ProcessRunner.layer)));
 

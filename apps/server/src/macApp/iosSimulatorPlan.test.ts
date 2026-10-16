@@ -41,7 +41,7 @@ it.layer(NodeServices.layer)("resolveIosSimulatorPlan", (it) => {
         const plan = yield* resolveIosSimulatorPlan(cwd);
         assert.include(plan?.build, `cd '${cwd}/apps/mobile'`);
         assert.include(plan?.build, `(cd '${cwd}' && pnpm install --frozen-lockfile)`);
-        assert.include(plan?.build, "npx expo prebuild --platform ios");
+        assert.include(plan?.build, "[ -f ios/Podfile ] || CI=1 npx expo prebuild --platform ios");
         // A half-made Pods folder must not skip the install.
         assert.include(plan?.build, "cmp -s ios/Podfile.lock ios/Pods/Manifest.lock");
         assert.include(plan?.build, "-configuration Release");

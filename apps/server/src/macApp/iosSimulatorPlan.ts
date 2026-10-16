@@ -245,12 +245,11 @@ const detectIosSimulatorPlan = Effect.fn("iosSimulatorPlan.detect")(function* (c
       "set -e",
       pruneOldBuilds,
       ...prepare,
-      // A generated native folder is regenerated so it matches the app's config; a committed one
-      // is the project's own and is left alone.
+      // The native folder is generated once and kept: regenerating it on every build threw the
+      // installed pods away and broke a build already running in it. Delete ios/ to regenerate
+      // after changing the app's config.
       ...(found.expo
-        ? [
-            "git ls-files --error-unmatch ios >/dev/null 2>&1 || CI=1 npx expo prebuild --platform ios --no-install",
-          ]
+        ? ["[ -f ios/Podfile ] || CI=1 npx expo prebuild --platform ios --no-install"]
         : []),
       // CocoaPods' own staleness check: a Pods folder left half-made, or older than the
       // Podfile.lock, installs again.
