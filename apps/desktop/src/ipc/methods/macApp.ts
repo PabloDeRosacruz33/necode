@@ -80,19 +80,37 @@ async function simulatorDevice(): Promise<SimulatorDevice> {
 }
 
 /**
- * Xcode's Simulator app by path: a Mac that never opened it has it unregistered, so
- * `open -a Simulator` fails with "Unable to find application named 'Simulator'".
+ * Xcode's Simulator app, by path: a Mac that never opened it has it unregistered, so
+ * `open -a Simulator` fails with "Unable to find application named 'Simulator'". The Xcode
+ * that `simctl` runs from is the authority (it may be Xcode-beta or renamed); then the
+ * selected developer folder, any /Applications/Xcode*.app, and Spotlight. Null when none.
  */
-async function simulatorApp(): Promise<string> {
-  const developer = (await execOutput("/usr/bin/xcode-select", ["-p"]).catch(() => "")).trim();
+async function simulatorApp(): Promise<string | null> {
+  const fromDeveloperDir = (developerDir: string) =>
+    NodePath.join(developerDir, "Applications", "Simulator.app");
+  const simctl = (await execOutput("/usr/bin/xcrun", ["--find", "simctl"]).catch(() => "")).trim();
+  const selected = (await execOutput("/usr/bin/xcode-select", ["-p"]).catch(() => "")).trim();
+  const xcodes = (await NodeFSP.readdir("/Applications").catch(() => [] as string[]))
+    .filter((name) => /^Xcode.*\.app$/.test(name))
+    .map((name) => fromDeveloperDir(NodePath.join("/Applications", name, "Contents", "Developer")));
+  const spotlight = (
+    await execOutput("/usr/bin/mdfind", [
+      "kMDItemCFBundleIdentifier == com.apple.iphonesimulator",
+    ]).catch(() => "")
+  )
+    .split("\n")
+    .map((line) => line.trim());
   const candidates = [
-    developer ? NodePath.join(developer, "Applications", "Simulator.app") : null,
-    "/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app",
+    // …/Contents/Developer/usr/bin/simctl → …/Contents/Developer
+    simctl ? fromDeveloperDir(NodePath.resolve(simctl, "..", "..", "..")) : null,
+    selected ? fromDeveloperDir(selected) : null,
+    ...xcodes,
+    ...spotlight,
   ];
   for (const candidate of candidates) {
     if (candidate && (await NodeFSP.stat(candidate).catch(() => null))) return candidate;
   }
-  return "Simulator";
+  return null;
 }
 
 const attempt = <A>(message: string, run: () => Promise<A>) =>
@@ -223,7 +241,7 @@ export const finishSimulatorAppInstall = DesktopIpc.makeIpcMethod({
     name: Schema.String,
     bundleId: Schema.NullOr(Schema.String),
   }),
-  result: Schema.Struct({ name: Schema.String, udid: Schema.String }),
+  result: Schema.Struct({ name: Schema.String, udid: Schema.String, window: Schema.Boolean }),
   handler: Effect.fn("desktop.ipc.macApp.finishSimulatorInstall")(function* (input, event) {
     yield* ensureMainWindowSender(event);
     const zipPath = pendingInstalls.get(input.id);
@@ -251,19 +269,30 @@ export const finishSimulatorAppInstall = DesktopIpc.makeIpcMethod({
             ])
           ).trim();
         const device = await simulatorDevice();
-        await exec("/usr/bin/open", [
-          "-a",
-          await simulatorApp(),
-          "--args",
-          "-CurrentDeviceUDID",
-          device.udid,
-        ]);
+        // The window is a convenience: the device is booted either way, so a Simulator that
+        // cannot be opened still gets the app installed and running (and the Device panel can
+        // show it).
+        // Xcode 27 ships no Simulator.app: devices run headless and the client shows them in its
+        // Device panel instead.
+        const simulator = await simulatorApp();
+        const window =
+          simulator !== null &&
+          (await exec("/usr/bin/open", [
+            "-a",
+            simulator,
+            "--args",
+            "-CurrentDeviceUDID",
+            device.udid,
+          ]).then(
+            () => true,
+            () => false,
+          ));
         await exec("/usr/bin/xcrun", ["simctl", "terminate", device.udid, bundleId]).catch(
           () => undefined,
         );
         await exec("/usr/bin/xcrun", ["simctl", "install", device.udid, appPath]);
         await exec("/usr/bin/xcrun", ["simctl", "launch", device.udid, bundleId]);
-        return { name: device.name, udid: device.udid };
+        return { name: device.name, udid: device.udid, window };
       } finally {
         await NodeFSP.rm(zipPath, { force: true });
         await NodeFSP.rm(staging, { recursive: true, force: true });

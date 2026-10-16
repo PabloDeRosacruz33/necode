@@ -121,21 +121,31 @@ export function SimulatorControl({
   const deviceStateRef = useRef(deviceState);
   deviceStateRef.current = deviceState;
   const openDeviceSession = useAtomCommand(deviceEnvironment.open, { reportFailure: false });
+  const listDevices = useAtomCommand(deviceEnvironment.list, { reportFailure: false });
 
   const showInDevicePanel = async (simulator: { readonly udid: string; readonly name: string }) => {
     if (!threadRef) return;
-    const state = deviceStateRef.current;
-    const ownHosts = new Set(
-      state.hosts
-        .filter((host) => host.kind === "client" || host.kind === "local")
-        .map((host) => host.id),
-    );
-    const device = state.devices.find(
-      (candidate) =>
-        candidate.platform === "ios" &&
-        candidate.id === simulator.udid &&
-        ownHosts.has(candidate.hostId),
-    );
+    const findDevice = () => {
+      const state = deviceStateRef.current;
+      const ownHosts = new Set(
+        state.hosts
+          .filter((host) => host.kind === "client" || host.kind === "local")
+          .map((host) => host.id),
+      );
+      return state.devices.find(
+        (candidate) =>
+          candidate.platform === "ios" &&
+          candidate.id === simulator.udid &&
+          ownHosts.has(candidate.hostId),
+      );
+    };
+    // A simulator booted moments ago reaches the environment's list on its next refresh.
+    let device = findDevice();
+    for (let attempt = 0; !device && attempt < 8; attempt++) {
+      await listDevices({ environmentId, input: {} });
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      device = findDevice();
+    }
     if (!device) {
       toastManager.add({
         type: "error",
@@ -202,6 +212,8 @@ export function SimulatorControl({
       });
       setPhase({ kind: "idle" });
       setOpened(true);
+      // No Simulator window on this Mac (Xcode 27 ships none): the panel is where it shows.
+      if (!simulator.window) void showInDevicePanel(simulator);
       toastManager.add(
         stackedThreadToast({
           type: "success",
@@ -213,7 +225,7 @@ export function SimulatorControl({
               }
             : {}),
           // The Simulator window is the smooth way to work; the panel keeps it beside the chat.
-          ...(threadRef
+          ...(threadRef && simulator.window
             ? {
                 actionProps: {
                   children: "Ver en el panel Device",

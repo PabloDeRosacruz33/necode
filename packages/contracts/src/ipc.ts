@@ -1168,7 +1168,7 @@ export interface DesktopBridge {
     id: string;
     name: string;
     bundleId: string | null;
-  }) => Promise<{ name: string; udid: string }>;
+  }) => Promise<{ name: string; udid: string; window: boolean }>;
   /**
    * Makes the given ports of a remote environment answer on this Mac's localhost, each through
    * its `/api/port-forward/<port>` WebSocket URL. Ports missing from `forwards` stop.
