@@ -275,6 +275,9 @@ export function SimulatorControl({
     if (busy) return;
     setPhase({ kind: "building", runId: randomUUID(), live: false });
   };
+  // Leaving the building phase drops the build subscription, which ends the build on the
+  // environment; a download or install in flight is simply forgotten.
+  const cancel = () => setPhase({ kind: "idle" });
   const runHereLive = () => {
     if (busy || devServer === null) return;
     // A Metro left running from before keeps serving; a second one would ask for another port.
@@ -313,6 +316,11 @@ export function SimulatorControl({
       <MenuItem {...(density ? { density } : {})} onClick={() => setLogOpen(true)}>
         <MenuItemLabel>Ver log de la compilación</MenuItemLabel>
       </MenuItem>
+      {busy ? (
+        <MenuItem {...(density ? { density } : {})} onClick={cancel}>
+          <MenuItemLabel>Cancelar</MenuItemLabel>
+        </MenuItem>
+      ) : null}
     </>
   );
 
