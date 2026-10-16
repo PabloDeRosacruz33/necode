@@ -198,7 +198,7 @@ export const finishMacAppInstall = DesktopIpc.makeIpcMethod({
 /**
  * Unpacks a simulator build downloaded from the environment and runs it on this Mac's own
  * simulator (booting one when none is), so the person tests with no network in between.
- * Returns the simulator's name.
+ * Returns the simulator, so the client can also show it in its Device panel.
  */
 export const finishSimulatorAppInstall = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.FINISH_SIMULATOR_APP_INSTALL_CHANNEL,
@@ -207,7 +207,7 @@ export const finishSimulatorAppInstall = DesktopIpc.makeIpcMethod({
     name: Schema.String,
     bundleId: Schema.NullOr(Schema.String),
   }),
-  result: Schema.String,
+  result: Schema.Struct({ name: Schema.String, udid: Schema.String }),
   handler: Effect.fn("desktop.ipc.macApp.finishSimulatorInstall")(function* (input, event) {
     yield* ensureMainWindowSender(event);
     const zipPath = pendingInstalls.get(input.id);
@@ -247,7 +247,7 @@ export const finishSimulatorAppInstall = DesktopIpc.makeIpcMethod({
         );
         await exec("/usr/bin/xcrun", ["simctl", "install", device.udid, appPath]);
         await exec("/usr/bin/xcrun", ["simctl", "launch", device.udid, bundleId]);
-        return device.name;
+        return { name: device.name, udid: device.udid };
       } finally {
         await NodeFSP.rm(zipPath, { force: true });
         await NodeFSP.rm(staging, { recursive: true, force: true });

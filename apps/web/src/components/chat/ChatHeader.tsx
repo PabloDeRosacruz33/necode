@@ -403,6 +403,7 @@ export const ChatHeader = memo(function ChatHeader({
           presentation={actionsCollapsed ? "menu" : "toolbar"}
           onAskAgent={(prompt) => setComposerPrompt(draftId ?? activeThreadRef, prompt)}
           onRunCommand={onRunCommand}
+          threadRef={isServerThread ? activeThreadRef : null}
         />
       )}
       {activeProjectName && gitCwd && (

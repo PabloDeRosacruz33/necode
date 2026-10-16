@@ -11,7 +11,7 @@
  * - On the environment, live: its agent starts the app with the dev server on the environment's
  *   simulator, so saved changes appear at once, watched through the Device panel.
  */
-import type { EnvironmentId, MacAppBuilt } from "@t3tools/contracts";
+import type { EnvironmentId, MacAppBuilt, ScopedThreadRef } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { ChevronDownIcon, SmartphoneIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -19,6 +19,8 @@ import { useEffect, useRef, useState } from "react";
 import { useT3ProjectFileState } from "~/hooks/useT3ProjectFileScripts";
 import { randomUUID } from "~/lib/utils";
 import { useDiscoveredPortsState } from "~/portDiscoveryState";
+import { useRightPanelStore } from "~/rightPanelStore";
+import { deviceEnvironment, useDeviceState } from "~/state/device";
 import { useEnvironment } from "~/state/environments";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -35,7 +37,7 @@ import {
 } from "../ui/dialog";
 import { Menu, MenuItem, MenuItemLabel, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
-import { toastManager } from "../ui/toast";
+import { stackedThreadToast, toastManager } from "../ui/toast";
 
 /** The port a development build of a React Native app loads its code from. */
 const METRO_PORT = 8081;
@@ -66,6 +68,7 @@ export function SimulatorControl({
   presentation,
   onAskAgent,
   onRunCommand,
+  threadRef,
 }: {
   environmentId: EnvironmentId;
   cwd: string;
@@ -73,6 +76,8 @@ export function SimulatorControl({
   onAskAgent: (prompt: string) => void;
   /** Runs a shell command in one of the thread's terminals on the environment. */
   onRunCommand: (command: string) => void;
+  /** The thread whose Device panel can show the simulator; null for drafts. */
+  threadRef: ScopedThreadRef | null;
 }) {
   const projectFile = useT3ProjectFileState(environmentId, cwd);
   const environment = useEnvironment(environmentId);
@@ -108,6 +113,64 @@ export function SimulatorControl({
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [buildState?.output]);
 
+  // This Mac's simulators reach the environment's device list as its client host (or its local
+  // one when the environment is this Mac); watched from the install on, so the panel can open it.
+  const [opened, setOpened] = useState(false);
+  const watchDevices = threadRef !== null && (opened || phase.kind === "installing");
+  const { state: deviceState } = useDeviceState(watchDevices ? environmentId : null);
+  const deviceStateRef = useRef(deviceState);
+  deviceStateRef.current = deviceState;
+  const openDeviceSession = useAtomCommand(deviceEnvironment.open, { reportFailure: false });
+
+  const showInDevicePanel = async (simulator: { readonly udid: string; readonly name: string }) => {
+    if (!threadRef) return;
+    const state = deviceStateRef.current;
+    const ownHosts = new Set(
+      state.hosts
+        .filter((host) => host.kind === "client" || host.kind === "local")
+        .map((host) => host.id),
+    );
+    const device = state.devices.find(
+      (candidate) =>
+        candidate.platform === "ios" &&
+        candidate.id === simulator.udid &&
+        ownHosts.has(candidate.hostId),
+    );
+    if (!device) {
+      toastManager.add({
+        type: "error",
+        title: "Este simulador no está en el panel Device",
+        description:
+          "Activa los dispositivos en Settings → Integrations → Devices y vuelve a intentarlo.",
+      });
+      return;
+    }
+    const result = await openDeviceSession({
+      environmentId,
+      input: {
+        threadId: threadRef.threadId,
+        hostId: device.hostId,
+        deviceId: device.id,
+        platform: "ios",
+        boot: false,
+      },
+    });
+    if (result._tag === "Failure") {
+      toastManager.add({
+        type: "error",
+        title: "No se pudo abrir en el panel Device",
+        description: failureMessage(result),
+      });
+      return;
+    }
+    useRightPanelStore.getState().openDevice(threadRef, {
+      hostId: result.value.hostId,
+      deviceId: result.value.deviceId,
+      platform: "ios",
+      name: device.name,
+    });
+  };
+
   const bridge = window.desktopBridge;
   const canRunHere = bridge?.finishSimulatorAppInstall !== undefined;
   const environmentLabel = environment?.label ?? "el entorno";
@@ -132,22 +195,34 @@ export function SimulatorControl({
       });
       if (result._tag === "Failure") throw new Error(failureMessage(result));
       await writes;
-      const device = await bridge.finishSimulatorAppInstall!({
+      const simulator = await bridge.finishSimulatorAppInstall!({
         id,
         name: app.name,
         bundleId: app.bundleId,
       });
       setPhase({ kind: "idle" });
-      toastManager.add({
-        type: "success",
-        title: `${app.name} abierta en ${device}`,
-        ...(live
-          ? {
-              description:
-                "Los cambios que guardes se ven al momento. Si sale una pantalla roja, espera a que Metro termine de arrancar en la terminal y pulsa ⌘R en el simulador.",
-            }
-          : {}),
-      });
+      setOpened(true);
+      toastManager.add(
+        stackedThreadToast({
+          type: "success",
+          title: `${app.name} abierta en ${simulator.name}`,
+          ...(live
+            ? {
+                description:
+                  "Los cambios que guardes se ven al momento. Si sale una pantalla roja, espera a que Metro termine de arrancar en la terminal y pulsa ⌘R en el simulador.",
+              }
+            : {}),
+          // The Simulator window is the smooth way to work; the panel keeps it beside the chat.
+          ...(threadRef
+            ? {
+                actionProps: {
+                  children: "Ver en el panel Device",
+                  onClick: () => void showInDevicePanel(simulator),
+                },
+              }
+            : {}),
+        }),
+      );
     } catch (error) {
       setPhase({
         kind: "failed",
@@ -186,7 +261,8 @@ export function SimulatorControl({
   }, [phase, metroRunning]);
   useEffect(() => {
     if (build.error && phase.kind === "building") {
-      setPhase({ kind: "failed", message: "No se pudo compilar." });
+      // The build's stream broke (dropped connection, server restart): say why, not just that.
+      setPhase({ kind: "failed", message: `Se cortó la compilación: ${build.error}` });
       setLogOpen(true);
     }
   }, [build.error, phase.kind]);
