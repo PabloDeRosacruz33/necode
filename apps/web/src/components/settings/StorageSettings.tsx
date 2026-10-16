@@ -224,6 +224,21 @@ export function StorageSettingsPanel() {
               }
             />
             <SettingsRow
+              title="Hibernate inactive tasks"
+              status={ruleStatus("worktreeHibernateAfterDays")}
+              description="Remove installs and build output from task folders whose threads have been inactive for this many days. Code, commits and local changes stay; the setup script runs again when the thread continues."
+              serverScoped={!isProjectScope}
+              control={
+                <RetentionControl
+                  label="Hibernate inactive tasks"
+                  value={settings.worktreeHibernateAfterDays}
+                  onChange={(worktreeHibernateAfterDays) =>
+                    updateWorktree({ worktreeHibernateAfterDays })
+                  }
+                />
+              }
+            />
+            <SettingsRow
               title="Delete merged worktrees"
               status={ruleStatus("worktreeOnMerge")}
               description="Remove worktrees whose commits are all in the integration branch (merged there with or without a pull request) once their thread has been quiet for a day. The folder comes back if the thread continues."

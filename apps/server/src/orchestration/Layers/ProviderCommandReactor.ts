@@ -71,6 +71,8 @@ import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import * as ProjectSetupScriptRunner from "../../project/ProjectSetupScriptRunner.ts";
+import { locateTaskWorktree, takeWorktreeHibernated } from "../../project/worktreeDependencies.ts";
+import * as ProcessRunner from "../../processRunner.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
 const isProviderAdapterProcessError = Schema.is(ProviderAdapterProcessError);
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
@@ -500,6 +502,49 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.orElseSucceed(() => null));
 
   /**
+   * Storage cleanup empties idle task folders of installs and build output (hibernation). The
+   * next turn starts them again: the setup script runs in the thread's terminal while the
+   * agent begins, like a recreated folder. Best-effort.
+   */
+  const restoreHibernatedDependencies = Effect.fnUntraced(function* (
+    threadId: ThreadId,
+    worktreePath: string,
+  ) {
+    const worktree = yield* locateTaskWorktree(worktreePath).pipe(
+      Effect.provide(ProcessRunner.layer),
+      Effect.orElseSucceed(() => null),
+    );
+    if (!worktree || !(yield* takeWorktreeHibernated(worktree.gitDir))) return;
+    const setupRunner = yield* Effect.serviceOption(
+      ProjectSetupScriptRunner.ProjectSetupScriptRunner,
+    );
+    if (Option.isSome(setupRunner)) {
+      yield* setupRunner.value
+        .runForThread({ threadId, projectCwd: worktree.projectRoot, worktreePath })
+        .pipe(Effect.ignoreCause({ log: true }));
+    }
+    const createdAt = DateTime.formatIso(yield* DateTime.now);
+    yield* orchestrationEngine
+      .dispatch({
+        type: "thread.activity.append",
+        commandId: yield* serverCommandId("worktree-dependencies-restored"),
+        threadId,
+        activity: {
+          id: yield* serverEventId(),
+          tone: "info",
+          kind: "task.dependenciesRestored",
+          summary:
+            "La tarea estaba en reposo: sus dependencias se reinstalan en la terminal mientras el agente empieza",
+          payload: { worktreePath },
+          turnId: null,
+          createdAt,
+        },
+        createdAt,
+      })
+      .pipe(Effect.ignoreCause({ log: true }));
+  });
+
+  /**
    * Recreates a thread's worktree when the directory has disappeared (closed after merging,
    * cleaned up, or removed by hand): from its branch, or when the branch went too, as the same
    * branch started again from the integration branch. Its setup script then installs
@@ -519,6 +564,7 @@ const make = Effect.gen(function* () {
     }
     const exists = yield* fileSystem.exists(worktreePath).pipe(Effect.orElseSucceed(() => true));
     if (exists) {
+      yield* restoreHibernatedDependencies(thread.id, worktreePath);
       return;
     }
     const project = yield* resolveProject(thread.projectId);

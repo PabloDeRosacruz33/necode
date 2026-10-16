@@ -61,6 +61,8 @@ export interface ProjectSetupScriptRunnerInput {
   readonly projectCwd?: string;
   readonly worktreePath: string;
   readonly preferredTerminalId?: string;
+  /** Extra environment for the script, e.g. T3CODE_DEPENDENCIES_READY after a dependency clone. */
+  readonly extraEnv?: Readonly<Record<string, string>>;
   /**
    * Wrap the command so the shell reports its exit code back through the
    * terminal stream, and forward cleaned output lines while it runs. The
@@ -379,6 +381,7 @@ export const make = Effect.gen(function* () {
     const env = projectScriptRuntimeEnv({
       project: { cwd: project.workspaceRoot },
       worktreePath: input.worktreePath,
+      ...(input.extraEnv ? { extraEnv: { ...input.extraEnv } } : {}),
     });
     const observe = input.observeCompletion;
     const completionToken = observe ? NodeCrypto.randomUUID().replaceAll("-", "") : null;

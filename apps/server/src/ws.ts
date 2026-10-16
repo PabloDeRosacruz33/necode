@@ -171,6 +171,10 @@ import {
 import { archiveMacApp, openMacApp, quitMacApp, runMacAppBuild } from "./macApp/macApp.ts";
 import { resolveIosSimulatorPlan } from "./macApp/iosSimulatorPlan.ts";
 import { resolveTaskWorktree, slugifyTaskName } from "./vcs/taskBranch.ts";
+import { cloneDependencies } from "./project/dependencyClone.ts";
+
+/** Tells a setup script its dependencies were cloned from a matching checkout already. */
+const DEPENDENCIES_READY_ENV = { T3CODE_DEPENDENCIES_READY: "1" } as const;
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { expandHomePath } from "./os-jank.ts";
 import * as ProcessRunner from "./processRunner.ts";
@@ -711,6 +715,29 @@ const makeWsRpcLayer = (
           projectCwd: worktree.projectRoot,
           worktreePath: worktree.root,
         });
+      // The tasks folder may live on an external disk through a link; without it no task can start.
+      const ensureTasksFolder = <E>(fail: (message: string) => E) =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          if (yield* fs.exists(config.worktreesDir).pipe(Effect.orElseSucceed(() => false))) return;
+          return yield* Effect.fail(
+            fail(
+              `La carpeta de tareas (${config.worktreesDir}) no está disponible. Si está en un disco externo, conéctalo.`,
+            ),
+          );
+        }).pipe(Effect.provideContext(normalizerContext));
+      // A new task gets its dependencies cloned from a checkout with the same lockfiles.
+      const cloneTaskDependencies = (projectCwd: string, worktreePath: string) =>
+        cloneDependencies({ projectCwd, worktreePath }).pipe(
+          Effect.provide(ProcessRunner.layer),
+          Effect.provideContext(normalizerContext),
+          Effect.tap((cloned) =>
+            cloned.length > 0
+              ? Effect.logInfo("cloned task dependencies", { worktreePath, cloned })
+              : Effect.void,
+          ),
+          Effect.orElseSucceed((): ReadonlyArray<string> => []),
+        );
       // Work just brought into a task can change its lockfiles; its setup script runs again then.
       const refreshTaskDependencies = (cwd: string) =>
         withTaskWorktreeServices(refreshWorktreeDependencies(cwd, taskSetupScript));
@@ -725,21 +752,30 @@ const makeWsRpcLayer = (
         readonly threadId: ThreadId;
         readonly projectCwd: string;
         readonly worktreePath: string;
+        readonly dependenciesReady?: boolean;
       }) =>
-        projectSetupScriptRunner.runForThread({ ...input, observeCompletion: {} }).pipe(
-          Effect.flatMap((result) =>
-            result.status === "started" && result.completion
-              ? result.completion.pipe(
-                  Effect.flatMap(({ exitCode }) =>
-                    exitCode === 0 ? recordTaskSetup(input.worktreePath) : Effect.void,
-                  ),
-                  Effect.forkDetach,
-                  Effect.asVoid,
-                )
-              : Effect.void,
-          ),
-          Effect.ignoreCause({ log: true }),
-        );
+        projectSetupScriptRunner
+          .runForThread({
+            threadId: input.threadId,
+            projectCwd: input.projectCwd,
+            worktreePath: input.worktreePath,
+            observeCompletion: {},
+            ...(input.dependenciesReady ? { extraEnv: DEPENDENCIES_READY_ENV } : {}),
+          })
+          .pipe(
+            Effect.flatMap((result) =>
+              result.status === "started" && result.completion
+                ? result.completion.pipe(
+                    Effect.flatMap(({ exitCode }) =>
+                      exitCode === 0 ? recordTaskSetup(input.worktreePath) : Effect.void,
+                    ),
+                    Effect.forkDetach,
+                    Effect.asVoid,
+                  )
+                : Effect.void,
+            ),
+            Effect.ignoreCause({ log: true }),
+          );
       const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
@@ -1197,6 +1233,8 @@ const makeWsRpcLayer = (
           let targetProjectId = bootstrap?.createThread?.projectId;
           let targetProjectCwd = bootstrap?.prepareWorktree?.projectCwd;
           let targetWorktreePath = bootstrap?.createThread?.worktreePath ?? null;
+          // Set when the new folder got its dependencies cloned, so the setup script can skip installing.
+          let dependenciesReady = false;
           // The setup script's terminal, once started. Cancel closes only this
           // one so terminals the user opened meanwhile survive.
           let setupTerminalId: string | null = null;
@@ -1340,6 +1378,7 @@ const makeWsRpcLayer = (
                   ...(targetProjectId ? { projectId: targetProjectId } : {}),
                   ...(targetProjectCwd ? { projectCwd: targetProjectCwd } : {}),
                   worktreePath,
+                  ...(dependenciesReady ? { extraEnv: DEPENDENCIES_READY_ENV } : {}),
                   ...(tracked
                     ? {
                         observeCompletion: {
@@ -1615,6 +1654,9 @@ const makeWsRpcLayer = (
                 preparingSessionSet = true;
               }
               yield* worktreeSetupTracker.stageStatus(threadId, "checkout", "running");
+              yield* ensureTasksFolder(
+                (message) => new OrchestrationDispatchCommandError({ message }),
+              );
               let checkoutTotal: number | null = null;
               const submodules = yield* resolveBootstrapWorktreeSubmodules({
                 threadId,
@@ -1722,6 +1764,16 @@ const makeWsRpcLayer = (
                 }),
               }));
               targetWorktreePath = worktree.worktree.path;
+              const clonedDependencies = yield* cloneTaskDependencies(
+                prepareWorktree.projectCwd,
+                targetWorktreePath,
+              );
+              if (clonedDependencies.length > 0) {
+                dependenciesReady = true;
+                yield* worktreeSetupTracker.stage(threadId, "checkout", {
+                  detail: `dependencies cloned (${clonedDependencies.join(", ")})`,
+                });
+              }
               yield* dispatchFromClient({
                 type: "thread.meta.update",
                 commandId: yield* serverCommandId("bootstrap-thread-meta-update"),
@@ -2047,6 +2099,7 @@ const makeWsRpcLayer = (
                 })).commitSha
               : input.targetRef;
           }
+          yield* ensureTasksFolder((message) => taskError(input.projectCwd, message));
           const task = yield* resolveTaskWorktree({
             projectCwd: input.projectCwd,
             worktreesDir: config.worktreesDir,
@@ -2064,7 +2117,12 @@ const makeWsRpcLayer = (
             baseRefName: input.targetRef,
             path: task.worktreePath,
           });
-          return { branch: created.worktree.refName, worktreePath: created.worktree.path };
+          const cloned = yield* cloneTaskDependencies(input.projectCwd, created.worktree.path);
+          return {
+            branch: created.worktree.refName,
+            worktreePath: created.worktree.path,
+            dependenciesReady: cloned.length > 0,
+          };
         });
 
       /** The branch tasks start from and merge into, resolved the way the branch menu does. */
@@ -3929,7 +3987,7 @@ const makeWsRpcLayer = (
                   }
                 }
               }
-              const { branch, worktreePath } = yield* prepareTaskWorktree({
+              const { branch, worktreePath, dependenciesReady } = yield* prepareTaskWorktree({
                 projectCwd: input.projectCwd,
                 targetRef: input.targetRef,
                 taskName: input.taskName,
@@ -3965,6 +4023,7 @@ const makeWsRpcLayer = (
                 threadId: input.threadId,
                 projectCwd: input.projectCwd,
                 worktreePath,
+                dependenciesReady,
               });
               yield* refreshGitStatus(input.projectCwd);
               return { branch, worktreePath };
@@ -4037,7 +4096,7 @@ const makeWsRpcLayer = (
                   fallbackRemoteName: "origin",
                 })).commitSha;
               }
-              const { branch, worktreePath } = yield* prepareTaskWorktree({
+              const { branch, worktreePath, dependenciesReady } = yield* prepareTaskWorktree({
                 projectCwd,
                 targetRef,
                 taskName: input.taskName,
@@ -4136,7 +4195,7 @@ const makeWsRpcLayer = (
                 }).pipe(Effect.ignoreCause({ log: true }));
               yield* note(threadId, `Duplicado de «${title}» · ${branch}`);
               if (local) yield* note(local.id, `Duplicado en un hilo paralelo · ${branch}`);
-              yield* runTaskSetup({ threadId, projectCwd, worktreePath });
+              yield* runTaskSetup({ threadId, projectCwd, worktreePath, dependenciesReady });
               yield* refreshGitStatus(projectCwd);
               return { threadId, branch, forked: resumeCursor !== null };
             }).pipe(

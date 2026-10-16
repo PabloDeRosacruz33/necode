@@ -177,7 +177,21 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
       fs.makeDirectory(derivedPaths.providerLogsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.terminalLogsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.attachmentsDir, { recursive: true }),
-      fs.makeDirectory(derivedPaths.worktreesDir, { recursive: true }),
+      // The tasks folder may be a link to an external disk; when that disk is not connected the
+      // server still starts, and creating a task says what is missing.
+      fs.makeDirectory(derivedPaths.worktreesDir, { recursive: true }).pipe(
+        Effect.catch((error) =>
+          fs.readLink(derivedPaths.worktreesDir).pipe(
+            Effect.flatMap((target) =>
+              Effect.logWarning("The tasks folder is not available; is its disk connected?", {
+                path: derivedPaths.worktreesDir,
+                target,
+              }),
+            ),
+            Effect.orElse(() => Effect.fail(error)),
+          ),
+        ),
+      ),
       fs.makeDirectory(path.dirname(derivedPaths.keybindingsConfigPath), { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true }),
       fs.makeDirectory(derivedPaths.providerStatusCacheDir, { recursive: true }),

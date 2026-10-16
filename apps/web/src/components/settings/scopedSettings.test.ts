@@ -155,6 +155,7 @@ describe("scoped settings writes", () => {
           mode: "custom",
           rules: {
             worktreeAfterDays: 12,
+            worktreeHibernateAfterDays: 3,
             worktreeOnDelete: true,
             worktreeOnMerge: true,
             worktreeUnchanged: false,
@@ -178,12 +179,14 @@ describe("scoped settings writes", () => {
     expect(policies).toEqual([
       {
         worktreeAfterDays: 12,
+        worktreeHibernateAfterDays: 3,
         worktreeOnDelete: false,
         worktreeOnMerge: true,
         worktreeUnchanged: false,
       },
       {
         worktreeAfterDays: null,
+        worktreeHibernateAfterDays: null,
         worktreeOnDelete: false,
         worktreeOnMerge: false,
         worktreeUnchanged: false,
@@ -290,6 +293,7 @@ describe("scoped settings writes", () => {
               mode: "custom",
               rules: {
                 worktreeAfterDays: 8,
+                worktreeHibernateAfterDays: 3,
                 worktreeOnDelete: false,
                 worktreeOnMerge: true,
                 worktreeUnchanged: false,
@@ -310,6 +314,7 @@ describe("scoped settings writes", () => {
             mode: "custom",
             rules: {
               worktreeAfterDays: 8,
+              worktreeHibernateAfterDays: 3,
               worktreeOnDelete: true,
               worktreeOnMerge: true,
               worktreeUnchanged: false,
@@ -323,8 +328,9 @@ describe("scoped settings writes", () => {
             mode: "custom",
             rules: {
               worktreeAfterDays: 30,
+              worktreeHibernateAfterDays: 3,
               worktreeOnDelete: true,
-              worktreeOnMerge: false,
+              worktreeOnMerge: true,
               worktreeUnchanged: false,
             },
           },

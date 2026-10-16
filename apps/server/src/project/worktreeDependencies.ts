@@ -17,8 +17,16 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as ProcessRunner from "../processRunner.ts";
 
-const LOCKFILES = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb"];
+export const LOCKFILES = [
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  "bun.lock",
+  "bun.lockb",
+] as const;
 const RECORD_FILE = "necode-setup-lockfiles";
+/** Left by storage cleanup when it empties a task's installs; the next turn reinstalls first. */
+const HIBERNATED_FILE = "necode-hibernated";
 const OUTPUT_TAIL_LENGTH = 4_000;
 
 export interface WorktreeSetupScript {
@@ -103,6 +111,33 @@ export const recordWorktreeDependencies = Effect.fn("recordWorktreeDependencies"
   yield* fs
     .writeFileString(path.join(worktree.gitDir, RECORD_FILE), `${current}\n`)
     .pipe(Effect.ignore({ log: true }));
+});
+
+/**
+ * Storage cleanup removed this task's installs and build output: the setup record goes, so a
+ * merge reinstalls, and a marker stays for the next turn to run the setup script first.
+ */
+export const markWorktreeHibernated = Effect.fn("markWorktreeHibernated")(function* (
+  gitDir: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  yield* fs.remove(path.join(gitDir, RECORD_FILE)).pipe(Effect.ignore);
+  yield* fs
+    .writeFileString(path.join(gitDir, HIBERNATED_FILE), "")
+    .pipe(Effect.ignore({ log: true }));
+});
+
+/** Whether the task was hibernated since its last setup; clears the marker when it was. */
+export const takeWorktreeHibernated = Effect.fn("takeWorktreeHibernated")(function* (
+  gitDir: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const marker = path.join(gitDir, HIBERNATED_FILE);
+  if (!(yield* fs.exists(marker).pipe(Effect.orElseSucceed(() => false)))) return false;
+  yield* fs.remove(marker).pipe(Effect.ignore);
+  return true;
 });
 
 export type WorktreeSetupEvent =

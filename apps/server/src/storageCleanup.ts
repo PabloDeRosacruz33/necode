@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off -- Activity ids come from the platform's UUID generator.
+import * as NodeCrypto from "node:crypto";
+
 import type {
   OrchestrationThreadShell,
   ProjectId,
@@ -6,12 +9,13 @@ import type {
   TerminalSummary,
   WorktreeCleanupRules,
 } from "@t3tools/contracts";
-import { T3_PROJECT_FILE_NAME } from "@t3tools/contracts";
+import { CommandId, EventId, T3_PROJECT_FILE_NAME, type ThreadId } from "@t3tools/contracts";
 import {
   configuredIntegrationBranch,
   resolveWorktreeCleanup,
 } from "@t3tools/shared/projectSettings";
 import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
+import { markWorktreeHibernated } from "./project/worktreeDependencies.ts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -51,12 +55,17 @@ export class StorageCleanup extends Context.Service<
 
 const DAY_MS = 86_400_000;
 
-/** Ignored paths a task folder can always rebuild: installs, build output, setup links. */
+/**
+ * Ignored paths a task folder can always rebuild: installs, build output, setup links. The one
+ * rule for what may go with a folder and what hibernation empties; anything else ignored
+ * (secrets, local data) keeps a folder whole.
+ */
 export const REGENERABLE_IGNORED =
-  /(^|\/)(node_modules|build|dist|out|\.next|\.turbo|\.expo|\.cache|\.vercel|\.temp|ios|android|Pods|DerivedData|target|coverage)\/?$/;
+  /(^|\/)(node_modules|build|dist|dist-electron|out|\.next|\.turbo|\.expo|\.vite|\.vite-plus|\.cache|\.vercel|\.temp|ios|android|Pods|DerivedData|target|coverage)\/?$|\.tsbuildinfo$/;
 
 const worktreeCleanupEnabled = (rules: WorktreeCleanupRules) =>
   rules.worktreeAfterDays !== null ||
+  rules.worktreeHibernateAfterDays !== null ||
   rules.worktreeOnMerge ||
   rules.worktreeOnDelete ||
   rules.worktreeUnchanged;
@@ -87,12 +96,19 @@ function sameProjectWorktreePolicies(left: ServerSettings, right: ServerSettings
   );
 }
 
-/** Live sessions keep their cwd even when no turn is currently running. */
+/**
+ * Nothing is happening in the thread. A `ready` session is a provider process waiting between
+ * turns: it is stopped before its folder is removed, and a folder emptied under it is rebuilt
+ * before its next turn.
+ */
 function storageCleanupThreadIdle(thread: OrchestrationThreadShell, now: number): boolean {
   return (
     thread.branch !== null &&
     thread.worktreePath !== null &&
-    (thread.session === null || thread.session.status === "stopped") &&
+    (thread.session === null ||
+      thread.session.status === "stopped" ||
+      thread.session.status === "ready" ||
+      thread.session.status === "error") &&
     thread.latestTurn?.state !== "running" &&
     thread.backgroundLiveness == null &&
     !thread.hasPendingApprovals &&
@@ -179,6 +195,58 @@ export const make = Effect.gen(function* () {
         );
       });
 
+  /**
+   * A folder under the tasks root, which may itself be a link to another disk: the folder's
+   * real path must differ from the recorded one only by that root. Threads, terminals and
+   * provider sessions keep the recorded path, so that is what every comparison uses.
+   */
+  const isTaskFolder = Effect.fn("StorageCleanup.isTaskFolder")(function* (
+    realRoot: string,
+    worktreePath: string,
+  ) {
+    const configuredRoot = path.resolve(config.worktreesDir);
+    if (!inside(configuredRoot, worktreePath) || !(yield* fs.exists(worktreePath))) return false;
+    const real = yield* fs.realPath(worktreePath).pipe(Effect.orElseSucceed(() => null));
+    return real === path.join(realRoot, path.relative(configuredRoot, worktreePath));
+  });
+
+  const sessionsIn = (threadId: string, worktreePath: string) =>
+    providers
+      .listSessions()
+      .pipe(
+        Effect.map((sessions) =>
+          sessions.filter(
+            (session) =>
+              session.status !== "closed" &&
+              (session.threadId === threadId ||
+                (session.cwd !== undefined &&
+                  (path.resolve(session.cwd) === worktreePath ||
+                    inside(worktreePath, path.resolve(session.cwd))))),
+          ),
+        ),
+      );
+
+  /**
+   * Stops a thread's idle provider session so its folder can go; false when a session is busy
+   * or did not stop in time. ProviderRuntimeIngestion records the stop on the thread.
+   */
+  const releaseIdleSessions = Effect.fn("StorageCleanup.releaseIdleSessions")(function* (
+    threadId: ThreadId,
+    worktreePath: string,
+  ) {
+    const live = yield* sessionsIn(threadId, worktreePath);
+    if (live.length === 0) return true;
+    if (live.some((session) => session.status !== "ready" && session.status !== "error")) {
+      return false;
+    }
+    yield* providers.stopSession({ threadId }).pipe(Effect.orElseSucceed(() => undefined));
+    for (let attempt = 0; attempt < 20; attempt++) {
+      if ((yield* sessionsIn(threadId, worktreePath)).length === 0) return true;
+      yield* Effect.sleep("250 millis");
+    }
+    return false;
+  });
+
   const readThreads = Effect.fn("StorageCleanup.readThreads")(function* () {
     const active = yield* snapshots.getShellSnapshot();
     const archived = yield* snapshots.getArchivedShellSnapshot();
@@ -245,8 +313,7 @@ export const make = Effect.gen(function* () {
       )
         continue;
       yield* Effect.gen(function* () {
-        if (!inside(root, worktreePath) || !(yield* fs.exists(worktreePath))) return;
-        if ((yield* fs.realPath(worktreePath)) !== worktreePath) return;
+        if (!(yield* isTaskFolder(root, worktreePath))) return;
         if (yield* containsProjectRoot(worktreePath, [project, ...snapshot.projects])) return;
         // A linked worktree has a .git file. Never remove a main checkout.
         if ((yield* fs.stat(path.join(worktreePath, ".git"))).type !== "File") return;
@@ -380,7 +447,7 @@ export const make = Effect.gen(function* () {
           finalIgnored.stdoutTruncated ||
           finalIgnored.stdout
             .split("\0")
-            .some((entry) => entry !== "" && !/(^|\/)node_modules\/$/.test(entry))
+            .some((entry) => entry !== "" && !REGENERABLE_IGNORED.test(entry))
         )
           return;
         const current = resolveWorktreeCleanup(
@@ -394,6 +461,9 @@ export const make = Effect.gen(function* () {
           )
         )
           return;
+        // A provider process idling in the folder would resume into a deleted directory. It is
+        // stopped first; the thread's next turn starts it again in the recreated checkout.
+        if (!deleted && !(yield* releaseIdleSessions(thread.id, worktreePath))) return;
         yield* git.removeWorktree({ cwd: project.workspaceRoot, path: worktreePath, force: false });
         yield* gitManager.invalidateStatus(project.workspaceRoot);
         // Preserve branch and path: ProviderCommandReactor recreates the checkout
@@ -403,6 +473,110 @@ export const make = Effect.gen(function* () {
         (effect) => withWorkspaceLease(worktreePath, effect),
         Effect.catch((error) =>
           Effect.logDebug("storage cleanup skipped worktree", { threadId: thread.id, error }),
+        ),
+      );
+    }
+  });
+
+  /**
+   * Tasks nobody has touched for a while keep their code, commits and uncommitted changes but
+   * lose what any checkout rebuilds: installs, build output, setup links, the bulk of a task
+   * folder. The thread's next turn runs the setup script again first (ProviderCommandReactor).
+   */
+  const hibernateWorktrees = Effect.fn("StorageCleanup.hibernateWorktrees")(function* (
+    serverSettings: ServerSettings,
+    now: number,
+  ) {
+    if (
+      !anyWorktreePolicy(serverSettings, (rules) => rules.worktreeHibernateAfterDays !== null) ||
+      !(yield* fs.exists(config.worktreesDir))
+    )
+      return;
+    const snapshot = yield* readThreads();
+    const root = yield* fs.realPath(config.worktreesDir);
+    const groups = Map.groupBy(
+      snapshot.threads.filter((thread) => thread.worktreePath !== null),
+      (thread) => path.resolve(thread.worktreePath!),
+    );
+    for (const [worktreePath, threads] of groups) {
+      const days = resolveWorktreeCleanup(
+        serverSettings,
+        threads[0]!.projectId,
+      ).worktreeHibernateAfterDays;
+      if (days === null) continue;
+      const quietSince = now - days * DAY_MS;
+      if (
+        !threads.every(
+          (thread) =>
+            storageCleanupThreadIdle(thread, now) && storageCleanupActivityAt(thread) < quietSince,
+        ) ||
+        hasTerminal(worktreePath)
+      )
+        continue;
+      yield* Effect.gen(function* () {
+        if (!(yield* isTaskFolder(root, worktreePath))) return;
+        if (yield* containsProjectRoot(worktreePath, snapshot.projects)) return;
+        if ((yield* fs.stat(path.join(worktreePath, ".git"))).type !== "File") return;
+        for (const thread of threads) {
+          // A provider idling in the folder keeps running; it only reads code it asks for.
+          if (
+            (yield* sessionsIn(thread.id, worktreePath)).some(
+              (session) => session.status !== "ready" && session.status !== "error",
+            )
+          )
+            return;
+        }
+        const ignored = yield* git.execute({
+          operation: "StorageCleanup.ignoredFiles",
+          cwd: worktreePath,
+          args: ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"],
+          maxOutputBytes: 256 * 1024,
+        });
+        if (ignored.stdoutTruncated) return;
+        const removable = ignored.stdout
+          .split("\0")
+          .filter((entry) => entry !== "" && REGENERABLE_IGNORED.test(entry))
+          .map((entry) => entry.replace(/\/$/, ""))
+          .filter((entry) => inside(worktreePath, path.resolve(worktreePath, entry)));
+        if (removable.length === 0) return;
+        const gitDir = yield* git.execute({
+          operation: "StorageCleanup.gitDir",
+          cwd: worktreePath,
+          args: ["rev-parse", "--absolute-git-dir"],
+        });
+        for (const entry of removable) {
+          yield* fs.remove(path.resolve(worktreePath, entry), { recursive: true });
+        }
+        yield* markWorktreeHibernated(gitDir.stdout.trim());
+        const createdAt = DateTime.formatIso(yield* DateTime.now);
+        const shown = removable.slice(0, 4).join(", ") + (removable.length > 4 ? "…" : "");
+        for (const thread of threads) {
+          yield* engine
+            .dispatch({
+              type: "thread.activity.append",
+              commandId: CommandId.make(`server:worktree-hibernated:${thread.id}:${createdAt}`),
+              threadId: thread.id,
+              activity: {
+                id: EventId.make(NodeCrypto.randomUUID()),
+                tone: "info",
+                kind: "task.hibernated",
+                summary: `Tarea en reposo tras ${days} ${days === 1 ? "día" : "días"} sin actividad: se han retirado ${shown}. Se reinstalan al continuar.`,
+                payload: { worktreePath, removed: removable },
+                turnId: null,
+                createdAt,
+              },
+              createdAt,
+            })
+            .pipe(Effect.ignoreCause({ log: true }));
+        }
+        yield* Effect.logInfo("storage cleanup hibernated worktree", {
+          worktreePath,
+          removed: removable,
+        });
+      }).pipe(
+        (effect) => withWorkspaceLease(worktreePath, effect),
+        Effect.catch((error) =>
+          Effect.logDebug("storage cleanup skipped hibernating worktree", { worktreePath, error }),
         ),
       );
     }
@@ -446,6 +620,9 @@ export const make = Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis;
     yield* cleanWorktrees(serverSettings, now).pipe(
       Effect.catch((error) => Effect.logWarning("worktree cleanup failed", { error })),
+    );
+    yield* hibernateWorktrees(serverSettings, now).pipe(
+      Effect.catch((error) => Effect.logWarning("worktree hibernation failed", { error })),
     );
     yield* cleanFiles(
       config.browserArtifactsDir,

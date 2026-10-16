@@ -1003,6 +1003,12 @@ const StorageRetentionDays = Schema.NullOr(
 
 export const WorktreeCleanupRules = Schema.Struct({
   worktreeAfterDays: StorageRetentionDays,
+  /**
+   * Days without activity after which a task folder keeps its code and changes but loses what
+   * any checkout rebuilds (installs, build output); the setup script runs again when the thread
+   * continues. Null keeps task folders whole.
+   */
+  worktreeHibernateAfterDays: StorageRetentionDays,
   worktreeOnMerge: Schema.Boolean,
   worktreeOnDelete: Schema.Boolean,
   worktreeUnchanged: Schema.Boolean,
@@ -1088,6 +1094,9 @@ const NULLABLE_PROJECT_SETTINGS_OVERRIDES: ReadonlySet<ProjectScopedServerSettin
 
 export const StorageCleanupSettings = Schema.Struct({
   worktreeAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  worktreeHibernateAfterDays: StorageRetentionDays.pipe(
+    Schema.withDecodingDefault(Effect.succeed(3)),
+  ),
   worktreeOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   worktreeOnDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   worktreeUnchanged: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -1472,6 +1481,7 @@ export const ServerSettingsPatch = Schema.Struct({
           mode: Schema.Literal("custom"),
           rules: Schema.Struct({
             worktreeAfterDays: Schema.optionalKey(StorageRetentionDays),
+            worktreeHibernateAfterDays: Schema.optionalKey(StorageRetentionDays),
             worktreeOnMerge: Schema.optionalKey(Schema.Boolean),
             worktreeOnDelete: Schema.optionalKey(Schema.Boolean),
             worktreeUnchanged: Schema.optionalKey(Schema.Boolean),
@@ -1483,6 +1493,7 @@ export const ServerSettingsPatch = Schema.Struct({
   storageCleanup: Schema.optionalKey(
     Schema.Struct({
       worktreeAfterDays: Schema.optionalKey(StorageRetentionDays),
+      worktreeHibernateAfterDays: Schema.optionalKey(StorageRetentionDays),
       worktreeOnMerge: Schema.optionalKey(Schema.Boolean),
       worktreeOnDelete: Schema.optionalKey(Schema.Boolean),
       worktreeUnchanged: Schema.optionalKey(Schema.Boolean),

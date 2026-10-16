@@ -83,6 +83,17 @@ whose commits are all in the integration branch (`staging` when it exists), merg
 without a pull request, once their thread has been quiet for a day; squash merges are recognized
 through their merged pull request.
 
+**Hibernate inactive tasks** (3 days by default) keeps a task folder's code, commits and local
+changes but removes what any checkout rebuilds: installed dependencies, build output and the
+links its setup script made. The thread says so, and its next turn runs the setup script again in
+its terminal while the agent starts. New tasks start with their dependencies cloned from a
+checkout with the same lockfiles when the environment is a Mac (an APFS copy that takes no space
+until a file changes); the setup script sees `T3CODE_DEPENDENCIES_READY=1` then and can skip its
+install.
+
+The tasks folder (`~/.necode/worktrees`) can be a link to another disk. When that disk is not
+connected, the server starts anyway and creating a task says what is missing.
+
 Enable **Delete worktrees with deleted threads** to remove safe worktrees after their last
 thread is deleted, including archived threads and worktrees left by earlier deletions. The
 server waits for sessions and terminals to stop and retries skipped worktrees after restart.

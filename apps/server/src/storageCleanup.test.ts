@@ -27,3 +27,20 @@ describe("REGENERABLE_IGNORED", () => {
     }
   });
 });
+
+describe("REGENERABLE_IGNORED for hibernation", () => {
+  it("covers every build output a task rebuilds, including loose build records", () => {
+    for (const entry of [
+      "apps/desktop/dist-electron/",
+      "packages/web/.vite/",
+      "tsconfig.tsbuildinfo",
+      "apps/web/tsconfig.app.tsbuildinfo",
+      "apps/mobile/ios/Pods/",
+    ]) {
+      assert.isTrue(REGENERABLE_IGNORED.test(entry), entry);
+    }
+    for (const entry of ["docs/plans/", "apps/web/.env.local", "instaladores/"]) {
+      assert.isFalse(REGENERABLE_IGNORED.test(entry), entry);
+    }
+  });
+});
