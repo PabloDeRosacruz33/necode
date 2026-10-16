@@ -108,6 +108,12 @@ export interface DeviceStreamTarget {
   readonly preferMjpeg?: boolean;
   /** Internal fixed-panel feeds share their parent's input session. */
   readonly panelId?: 1 | 3;
+  /**
+   * iOS: deliver keystrokes as an attached hardware keyboard. Desktop clients type with the
+   * Mac's keyboard (with it detached, iOS ignores those keys); touch clients leave it off so
+   * the on-screen keyboard shows.
+   */
+  readonly hardwareKeyboard?: boolean;
   readonly videoOnly?: boolean;
 }
 
@@ -273,6 +279,8 @@ export interface DeviceStreamClient {
   /** Normalized 0..1 coordinates in the displayed frame. */
   readonly sendTouch: (phase: "begin" | "move" | "end", x: number, y: number) => void;
   readonly sendKey: (event: KeyboardEvent, phase: "down" | "up") => void;
+  /** Types text into the focused field, e.g. a paste from the client's clipboard. */
+  readonly typeText: (text: string) => void;
   readonly pressButton: (button: DeviceHardwareButton) => void;
   readonly rotate: () => void;
   readonly setOrientation: (orientation: DeviceScreenSize["orientation"]) => void;
@@ -314,6 +322,25 @@ const HID_USAGE_BY_CODE: Readonly<Record<string, number>> = {
   AltRight: 0xe6,
   MetaRight: 0xe7,
 };
+
+/** US-layout HID keystrokes for a character: usage plus whether Shift is held. */
+const SHIFTED_SYMBOLS = '~!@#$%^&*()_+{}|:"<>?';
+const UNSHIFTED_SYMBOLS = "`1234567890-=[]\\;',./";
+function hidKeystrokeForChar(char: string): { usage: number; shift: boolean } | null {
+  if (/^[a-z]$/.test(char)) return { usage: 0x04 + char.charCodeAt(0) - 97, shift: false };
+  if (/^[A-Z]$/.test(char)) return { usage: 0x04 + char.charCodeAt(0) - 65, shift: true };
+  if (char === " ") return { usage: 0x2c, shift: false };
+  if (char === "\n") return { usage: 0x28, shift: false };
+  if (char === "\t") return { usage: 0x2b, shift: false };
+  const usages = [0x35, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x2d, 0x2e];
+  const rest = [0x2f, 0x30, 0x31, 0x33, 0x34, 0x36, 0x37, 0x38];
+  const order = [...usages, ...rest];
+  const plain = UNSHIFTED_SYMBOLS.indexOf(char);
+  if (plain !== -1) return { usage: order[plain]!, shift: false };
+  const shifted = SHIFTED_SYMBOLS.indexOf(char);
+  if (shifted !== -1) return { usage: order[shifted]!, shift: true };
+  return null;
+}
 
 function hidUsageForCode(code: string): number | null {
   if (/^Key[A-Z]$/.test(code)) return 0x04 + (code.charCodeAt(3) - 65);
@@ -798,7 +825,7 @@ export function createDeviceStreamClient(
     socket = ws;
     ws.onopen = () => {
       if (stopped || socket !== ws) return;
-      ws.send(taggedJson(IOS_MSG_HARDWARE_KEYBOARD, { enabled: false }));
+      ws.send(taggedJson(IOS_MSG_HARDWARE_KEYBOARD, { enabled: target.hardwareKeyboard === true }));
       events.onInputConnected(true);
     };
     ws.onmessage = (event) => {
@@ -1052,6 +1079,20 @@ export function createDeviceStreamClient(
       if (keycode !== undefined) return send(JSON.stringify({ type: "key", keycode }));
       if (event.key.length === 1 && !event.metaKey && !event.ctrlKey) {
         send(JSON.stringify({ type: "text", text: event.key }));
+      }
+    },
+    typeText: (text) => {
+      if (platform !== "ios") {
+        if (text) send(JSON.stringify({ type: "text", text }));
+        return;
+      }
+      for (const char of text.replace(/\r\n?/g, "\n")) {
+        const stroke = hidKeystrokeForChar(char);
+        if (!stroke) continue;
+        if (stroke.shift) send(taggedJson(IOS_MSG_KEY, { type: "down", usage: 0xe1 }));
+        send(taggedJson(IOS_MSG_KEY, { type: "down", usage: stroke.usage }));
+        send(taggedJson(IOS_MSG_KEY, { type: "up", usage: stroke.usage }));
+        if (stroke.shift) send(taggedJson(IOS_MSG_KEY, { type: "up", usage: 0xe1 }));
       }
     },
     pressButton: (button) => {

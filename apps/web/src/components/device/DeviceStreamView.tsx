@@ -116,7 +116,8 @@ export function DeviceStreamView(props: {
       return;
     }
     const client = createDeviceStreamClient(
-      { platform: props.platform, deviceId: props.deviceId, access },
+      // Typed with the Mac's keyboard: iOS ignores keys while no hardware keyboard is attached.
+      { platform: props.platform, deviceId: props.deviceId, access, hardwareKeyboard: true },
       createCanvasFrameSink(canvas, () => frameListenerRef.current?.()),
       {
         onDuoControl: setDuoControl,
@@ -398,6 +399,15 @@ export function DeviceStreamView(props: {
         aria-label={`${props.platform === "ios" ? "iOS Simulator" : "Android Emulator"} screen`}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
+          // ⌘V types this computer's clipboard into the focused field on the device.
+          if (event.metaKey && (event.key === "v" || event.key === "V")) {
+            event.preventDefault();
+            void navigator.clipboard
+              .readText()
+              .then((text) => clientRef.current?.typeText(text))
+              .catch(() => undefined);
+            return;
+          }
           if (event.metaKey && !["r", "R"].includes(event.key)) return;
           event.preventDefault();
           clientRef.current?.sendKey(event.nativeEvent, "down");
