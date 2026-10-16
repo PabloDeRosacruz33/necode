@@ -35,6 +35,7 @@ import { usePendingThreadOrder } from "../../state/thread-order";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { usePendingNewTasks } from "../../state/use-pending-new-tasks";
 import { useQueuedThreadKeys } from "../../state/use-thread-outbox";
+import { useThreadVisits } from "./use-thread-visits";
 import { useWorkspaceState } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
@@ -159,6 +160,7 @@ function ThreadNavigationSidebarPane(
   } = useThreadListActions();
   const pendingTasks = usePendingNewTasks();
   const queuedThreadKeys = useQueuedThreadKeys();
+  const threadVisits = useThreadVisits();
   const { openPendingTask, confirmDeletePendingTask } = usePendingTaskListActions();
   const environments = useMemo(
     () =>
@@ -506,6 +508,7 @@ function ThreadNavigationSidebarPane(
       queuedThreadKeys,
       moveAvailability: threadMoveAvailability,
       shelfPreferencesLoading: !shelfPreferencesLoaded,
+      threadLastVisitedAtById: threadVisits.lastVisitedAtById,
     });
     if (settledShelfExpanded && threadListV2Layout.hiddenSettledCount > 0) {
       items.push({
@@ -528,6 +531,7 @@ function ThreadNavigationSidebarPane(
     snoozedShelfExpanded,
     snoozeEnvironmentIds,
     threadListV2Layout,
+    threadVisits.lastVisitedAtById,
   ]);
   const listMenuActions = useMemo<MenuAction[]>(
     () => [
@@ -742,6 +746,9 @@ function ThreadNavigationSidebarPane(
               thread={thread}
               variant={item.item.variant}
               hasQueuedMessages={item.hasQueuedMessages}
+              isUnread={item.isUnread}
+              planReady={item.planReady}
+              onMarkThreadUnread={threadVisits.markUnread}
               snoozed={item.item.snoozed}
               pinned={item.item.pinned}
               snoozePresetMinute={item.snoozePresetMinute ?? ""}

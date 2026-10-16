@@ -251,6 +251,10 @@
       "types": "./src/state/threadSort.ts",
       "default": "./src/state/threadSort.ts"
     },
+    "./state/thread-status": {
+      "types": "./src/state/threadStatus.ts",
+      "default": "./src/state/threadStatus.ts"
+    },
     "./state/thread-settled": {
       "types": "./src/state/threadSettled.ts",
       "default": "./src/state/threadSettled.ts"

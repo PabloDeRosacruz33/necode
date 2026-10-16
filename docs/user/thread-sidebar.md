@@ -84,6 +84,15 @@ If dragging is unavailable for one environment, update the Necode server running
 environment. Pinned and active reordering require server support. Threads from older servers keep
 their default order until the server is updated.
 
+## Know where each thread stands
+
+Each thread row says what it needs from you, on web, desktop and mobile alike: **Working** or
+**Monitoring** while the agent is busy, **Approval** or **Input** when it is waiting for you,
+**Failed** when its session broke, and **Plan ready** when a plan is waiting for your go-ahead.
+A quiet thread whose latest reply you have not opened yet says **Done** with a bold title, like an
+unread message; opening it clears the mark, and **Mark unread** in the thread menu brings it back.
+Read state belongs to each device, so a reply you read on the Mac still shows as Done on the phone.
+
 ## Settle finished work
 
 Choose **Settle thread** from its menu to move finished work out of the active list

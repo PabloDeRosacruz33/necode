@@ -65,7 +65,17 @@ const STATUS_LABEL_BY_STATUS: Partial<
   approval: { label: "Approval", className: "text-warning-foreground" },
   input: { label: "Input", className: "text-adaptive-indigo-600-300" },
   working: { label: "Working", className: "text-adaptive-sky-600-400" },
+  monitoring: { label: "Monitoring", className: "text-adaptive-sky-600-400" },
   failed: { label: "Failed", className: "text-danger-foreground" },
+};
+// A finished reply the user has not seen yet, and a plan waiting for a go-ahead, read like the
+// web sidebar's Done and Plan Ready: they only show while the thread is otherwise quiet.
+const PLAN_READY_LABEL = { label: "Plan ready", className: "text-adaptive-indigo-600-300" };
+const DONE_LABEL = { label: "Done", className: "text-adaptive-emerald-700-300" };
+const MARK_UNREAD_ACTION: MenuAction = {
+  id: "mark-unread",
+  title: "Mark unread",
+  image: "envelope.badge",
 };
 
 // Menus keep lifecycle and title regeneration together. Archive keeps its
@@ -442,6 +452,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly variant: "card" | "slim";
   /** A message for this thread is waiting in the outbox. */
   readonly hasQueuedMessages?: boolean;
+  /** The latest reply finished after this device last opened the thread. */
+  readonly isUnread?: boolean;
+  /** A plan is waiting for the user's go-ahead. */
+  readonly planReady?: boolean;
+  readonly onMarkThreadUnread?: (thread: EnvironmentThreadShell) => void;
   /** Snoozed-shelf row: shows its wake time and offers Wake. */
   readonly snoozed?: boolean;
   /** Pinned-block row: shows the pin glyph and offers Unpin. */
@@ -558,7 +573,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const rowAppearance = getThreadListV2RowAppearance(theme, sidebarPane, selected);
 
   const status = resolveThreadListV2Status(thread);
-  const statusLabel = STATUS_LABEL_BY_STATUS[status];
+  const statusLabel =
+    STATUS_LABEL_BY_STATUS[status] ??
+    (props.planReady ? PLAN_READY_LABEL : props.isUnread ? DONE_LABEL : undefined);
+  const attention = status === "ready" && (props.planReady === true || props.isUnread === true);
   // The timestamp is precomputed on the list item (same stamps the settled
   // tail sorts by) so a minute tick only re-renders rows that draw it.
   const timeLabel = props.timeLabel;
@@ -711,6 +729,14 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     ],
     [props.titleRegenerationSupported, thread.titleRegeneration],
   );
+  // The way back once a thread was opened: only a finished, already-read reply can be unread.
+  const markUnreadMenuItems = useMemo<MenuAction[]>(
+    () =>
+      props.onMarkThreadUnread && !props.isUnread && thread.latestTurn?.completedAt
+        ? [MARK_UNREAD_ACTION]
+        : [],
+    [props.isUnread, props.onMarkThreadUnread, thread.latestTurn?.completedAt],
+  );
   const snoozableCardMenuActions = useMemo<MenuAction[]>(
     () => [
       { id: "settle", title: "Settle", image: "checkmark" },
@@ -720,22 +746,30 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         image: "clock",
         subactions: snoozePresetActions,
       },
+      ...markUnreadMenuItems,
       ...arrangementMenuItems,
       ...titleMenuItems,
       ...autoSettleMenuItems,
       { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
     ],
-    [arrangementMenuItems, autoSettleMenuItems, snoozePresetActions, titleMenuItems],
+    [
+      arrangementMenuItems,
+      autoSettleMenuItems,
+      markUnreadMenuItems,
+      snoozePresetActions,
+      titleMenuItems,
+    ],
   );
   const cardMenuActions = useMemo<MenuAction[]>(
     () => [
       CARD_MENU_ACTIONS[0]!,
+      ...markUnreadMenuItems,
       ...arrangementMenuItems,
       ...titleMenuItems,
       ...autoSettleMenuItems,
       ...CARD_MENU_ACTIONS.slice(1),
     ],
-    [arrangementMenuItems, autoSettleMenuItems, titleMenuItems],
+    [arrangementMenuItems, autoSettleMenuItems, markUnreadMenuItems, titleMenuItems],
   );
   // Settled and snoozed rows keep the setting too, matching web where every
   // row shares one menu builder.
@@ -773,6 +807,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
       if (nativeEvent.event === "new-thread-on-branch") onNewThreadOnBranch(thread);
       if (nativeEvent.event === "settle") handleSettle();
+      if (nativeEvent.event === "mark-unread") props.onMarkThreadUnread?.(thread);
       if (nativeEvent.event === "unsettle") handleUnsettle();
       if (nativeEvent.event === "unsnooze") handleUnsnooze();
       if (nativeEvent.event === "pin") handlePin();
@@ -935,7 +970,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       </View>
       <Text
         className={cn(
-          "mt-1 text-base font-t3-medium",
+          "mt-1 text-base",
+          attention ? "font-t3-bold" : "font-t3-medium",
           selected
             ? selectedThreadRowColors.foregroundClassName
             : rowAppearance.foregroundClassName,

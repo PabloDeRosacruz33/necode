@@ -58,6 +58,7 @@ import {
 import { useKnownTerminalSessions } from "../../state/use-terminal-session";
 import { useSelectedThreadDetailState } from "../../state/use-thread-detail";
 import { useThreadSelection } from "../../state/use-thread-selection";
+import { useThreadVisits } from "./use-thread-visits";
 import { GitActionProgressOverlay } from "./GitActionProgressOverlay";
 import {
   buildTerminalMenuSessions,
@@ -352,6 +353,14 @@ function ThreadRouteContent(
   }, [selectedThread, selectedThreadDetailState]);
   const { selectedThreadCwd } = useSelectedThreadWorktree();
   const composer = useThreadComposerState();
+  // Reading a finished thread clears its Done label in the list. The visit is stamped at the
+  // completion on screen, not now, so a reply that lands later still reads as new.
+  const { markVisited } = useThreadVisits();
+  const latestTurnCompletedAt = selectedThread?.latestTurn?.completedAt ?? null;
+  useEffect(() => {
+    if (selectedThread === null || latestTurnCompletedAt === null) return;
+    markVisited(selectedThread, latestTurnCompletedAt);
+  }, [latestTurnCompletedAt, markVisited, selectedThread]);
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
   const requests = useSelectedThreadRequests();

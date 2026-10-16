@@ -42,6 +42,11 @@ export interface Preferences {
   }>;
   /** Fresh keys reset both shelves to collapsed when users update. */
   readonly threadListSettledShelfExpanded?: boolean;
+  /**
+   * When this device last opened each thread (`environmentId:threadId` → ISO), stamped at the
+   * completion the user saw. A later completion then reads as unread, like the web sidebar.
+   */
+  readonly threadLastVisitedAtById?: Readonly<Record<string, string>>;
   readonly threadListSnoozedShelfExpanded?: boolean;
 }
 

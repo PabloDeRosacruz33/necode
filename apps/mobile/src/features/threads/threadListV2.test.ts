@@ -148,6 +148,58 @@ describe("resolveThreadListV2Status", () => {
       "ready",
     );
   });
+
+  it("reads background work like the web sidebar", () => {
+    expect(
+      resolveThreadListV2Status(
+        makeThread({ id: ThreadId.make("t"), title: "t", backgroundLiveness: "monitoring" }),
+      ),
+    ).toBe("monitoring");
+  });
+});
+
+describe("unread completions on list items", () => {
+  const completedAt = "2026-03-09T10:05:00.000Z";
+  const finished = makeThread({
+    id: ThreadId.make("finished"),
+    title: "finished",
+    latestTurn: {
+      turnId: TurnId.make("turn-1"),
+      state: "completed",
+      requestedAt: "2026-03-09T10:00:00.000Z",
+      startedAt: "2026-03-09T10:00:00.000Z",
+      completedAt,
+      assistantMessageId: null,
+    },
+  });
+  const layout = buildThreadListV2Items({
+    threads: [finished],
+    environmentId: null,
+    searchQuery: "",
+    now: NOW,
+  });
+
+  it("marks a card unread only when the device saw an earlier completion, and hides its time", () => {
+    const unread = buildThreadListV2ListItems({
+      items: layout.items,
+      pendingTasks: [],
+      threadLastVisitedAtById: { [`${environmentId}:finished`]: "2026-03-09T10:04:00.000Z" },
+    })[0]!;
+    expect(unread.type === "v2-thread" && unread.isUnread).toBe(true);
+    expect(unread.type === "v2-thread" && unread.timeLabel).toBe("");
+
+    const read = buildThreadListV2ListItems({
+      items: layout.items,
+      pendingTasks: [],
+      threadLastVisitedAtById: { [`${environmentId}:finished`]: completedAt },
+    })[0]!;
+    expect(read.type === "v2-thread" && read.isUnread).toBe(false);
+    expect(read.type === "v2-thread" && read.timeLabel).not.toBe("");
+
+    const neverVisited = buildThreadListV2ListItems({ items: layout.items, pendingTasks: [] })[0]!;
+    expect(neverVisited.type === "v2-thread" && neverVisited.isUnread).toBe(false);
+    expect(threadListV2ListItemsAreEqual(read, unread)).toBe(false);
+  });
 });
 
 describe("queued messages keep a settled thread active", () => {

@@ -42,6 +42,7 @@ import { usePendingThreadOrder } from "../../state/thread-order";
 import { environmentServerConfigsAtom } from "../../state/server";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { useQueuedThreadKeys } from "../../state/use-thread-outbox";
+import { useThreadVisits } from "../threads/use-thread-visits";
 import {
   ThreadListV2PendingRow,
   ThreadListV2Row,
@@ -225,6 +226,7 @@ function HomeTopContentSpacer() {
 
 export function HomeScreen(props: HomeScreenProps) {
   const queuedThreadKeys = useQueuedThreadKeys();
+  const threadVisits = useThreadVisits();
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const insets = useSafeAreaInsets();
   const { fabClearance } = useAndroidControlSizing();
@@ -691,11 +693,13 @@ export function HomeScreen(props: HomeScreenProps) {
         queuedThreadKeys,
         moveAvailability: threadMoveAvailability,
         shelfPreferencesLoading: !shelfPreferencesLoaded,
+        threadLastVisitedAtById: threadVisits.lastVisitedAtById,
       }),
     [
       nowMinute,
       queuedThreadKeys,
       threadMoveAvailability,
+      threadVisits.lastVisitedAtById,
       settledShelfExpanded,
       shelfPreferencesLoaded,
       snoozedShelfExpanded,
@@ -763,6 +767,9 @@ export function HomeScreen(props: HomeScreenProps) {
           thread={thread}
           variant={item.item.variant}
           hasQueuedMessages={item.hasQueuedMessages}
+          isUnread={item.isUnread}
+          planReady={item.planReady}
+          onMarkThreadUnread={threadVisits.markUnread}
           snoozed={item.item.snoozed}
           pinned={item.item.pinned}
           snoozePresetMinute={item.snoozePresetMinute ?? ""}
