@@ -3765,7 +3765,17 @@ export default function ChatView(props: ChatViewProps) {
   // this session answers from memory, so a non-Git project does not mount the
   // branch strip and then drop it. A never-seen checkout assumes Git, which
   // is what nearly every project is.
-  const liveIsGitRepo = gitStatusQuery.data?.isRepo;
+  // A merged task's folder is gone until the thread's next turn recreates it; the project's
+  // checkout answers for Git meanwhile, so the branch menu stays.
+  const worktreeGone = activeThread?.worktreePath != null && gitStatusQuery.data?.isRepo === false;
+  const projectGitStatusQuery = useEnvironmentQuery(
+    worktreeGone && activeProject
+      ? vcsEnvironment.status({ environmentId, input: { cwd: activeProject.workspaceRoot } })
+      : null,
+  );
+  const liveIsGitRepo = worktreeGone
+    ? projectGitStatusQuery.data?.isRepo
+    : gitStatusQuery.data?.isRepo;
   useEffect(() => {
     if (gitStatusCwd !== null && liveIsGitRepo !== undefined) {
       rememberCheckoutIsRepo(environmentId, gitStatusCwd, liveIsGitRepo);

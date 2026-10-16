@@ -196,9 +196,18 @@ export function BranchToolbarBranchSelector({
     activeThreadBranchOverride !== undefined
       ? activeThreadBranchOverride
       : (serverThread?.branch ?? draftThread?.branch ?? null);
-  const activeWorktreePath = forceNewWorktree
+  const recordedWorktreePath = forceNewWorktree
     ? null
     : (serverThread?.worktreePath ?? draftThread?.worktreePath ?? null);
+  // A merged task's folder is deleted ("Fusionar", storage cleanup) and comes back on the
+  // thread's next turn. Until then the menu works on the project's folder instead of hiding.
+  const recordedWorktreeStatus = useEnvironmentQuery(
+    recordedWorktreePath === null
+      ? null
+      : vcsEnvironment.status({ environmentId, input: { cwd: recordedWorktreePath } }),
+  );
+  const activeWorktreePath =
+    recordedWorktreeStatus.data?.isRepo === false ? null : recordedWorktreePath;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const branchCwd = activeWorktreePath ?? activeProjectCwd;
   const hasServerThread = serverThread !== null;
