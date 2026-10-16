@@ -228,7 +228,9 @@ const detectIosSimulatorPlan = Effect.fn("iosSimulatorPlan.detect")(function* (c
       scheme,
       "-configuration",
       configuration,
-      "-sdk iphonesimulator -destination 'generic/platform=iOS Simulator'",
+      // One architecture, like a build for a chosen device: the generic destination would also
+      // build x86_64, which doubles the time and fails on arm64-only vendored frameworks.
+      "-sdk iphonesimulator -destination 'generic/platform=iOS Simulator' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES",
       `-derivedDataPath "${derivedData}"`,
       // Signed to run locally: the simulator needs no Apple account, but apps with entitlements
       // (keychain, app groups) only launch with a signature.
