@@ -79,6 +79,22 @@ async function simulatorDevice(): Promise<SimulatorDevice> {
   return pick;
 }
 
+/**
+ * Xcode's Simulator app by path: a Mac that never opened it has it unregistered, so
+ * `open -a Simulator` fails with "Unable to find application named 'Simulator'".
+ */
+async function simulatorApp(): Promise<string> {
+  const developer = (await execOutput("/usr/bin/xcode-select", ["-p"]).catch(() => "")).trim();
+  const candidates = [
+    developer ? NodePath.join(developer, "Applications", "Simulator.app") : null,
+    "/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app",
+  ];
+  for (const candidate of candidates) {
+    if (candidate && (await NodeFSP.stat(candidate).catch(() => null))) return candidate;
+  }
+  return "Simulator";
+}
+
 const attempt = <A>(message: string, run: () => Promise<A>) =>
   Effect.tryPromise({
     try: run,
@@ -237,7 +253,7 @@ export const finishSimulatorAppInstall = DesktopIpc.makeIpcMethod({
         const device = await simulatorDevice();
         await exec("/usr/bin/open", [
           "-a",
-          "Simulator",
+          await simulatorApp(),
           "--args",
           "-CurrentDeviceUDID",
           device.udid,
