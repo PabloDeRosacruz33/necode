@@ -14,7 +14,10 @@ final class T3LayoutMetricsView: ExpoView {
     registerForTraitChanges([UITraitHorizontalSizeClass.self, UITraitVerticalSizeClass.self]) { (view: T3LayoutMetricsView, _: UITraitCollection) in
       view.publishMetrics()
     }
-    #if compiler(>=6.4)
+    // The iOS 27.0 SDK (Xcode 27.0, Swift 6.4.0) lacks the iOS 27.1 hinge APIs, so we
+    // require a later compiler; on Xcode 27.0 the app builds without Duo hinge detection.
+    // Necode change by Pablo, 2026-10-17. If upstream fixes this, take their version.
+    #if compiler(>=6.4.1)
     if #available(iOS 27.1, *) {
       hasHinge = nil
       addInteraction(UIHingeInteraction { [weak self] _, update in
@@ -67,7 +70,7 @@ final class T3LayoutMetricsView: ExpoView {
     }
     var verticalBarEdge = "none"
     var regions: [[String: Any]] = []
-    #if compiler(>=6.4)
+    #if compiler(>=6.4.1)
     if #available(iOS 27.1, *) {
       let rtl = effectiveUserInterfaceLayoutDirection == .rightToLeft
       switch traitCollection.verticalBarEdge {
