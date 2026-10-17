@@ -26,6 +26,8 @@ export interface IosSimulatorPlan {
   readonly dev?: { readonly build: string; readonly server: string };
   /** An Expo app: Expo Go can run it from the dev server, with no build. */
   readonly expo?: boolean;
+  /** The Expo app's folder, where its Expo SDK is installed. */
+  readonly expoDir?: string;
 }
 
 /**
@@ -206,7 +208,7 @@ export const resolveIosSimulatorPlan = Effect.fn("iosSimulatorPlan.resolve")(fun
 ) {
   const loader = yield* T3ProjectFileLoader.T3ProjectFileLoader;
   const configured = Option.getOrNull(yield* loader.load(cwd))?.iosSimulator;
-  const detected =
+  const detected: IosSimulatorPlan | null =
     (yield* HostProcessPlatform) === "darwin" && !(configured?.devBuild && configured.devServer)
       ? yield* detectIosSimulatorPlan(cwd)
       : null;
@@ -219,6 +221,7 @@ export const resolveIosSimulatorPlan = Effect.fn("iosSimulatorPlan.resolve")(fun
     ...(configured?.appPath ? { appPath: configured.appPath } : {}),
     ...(devBuild && devServer ? { dev: { build: devBuild, server: devServer } } : {}),
     ...(detected?.expo ? { expo: true } : {}),
+    ...(detected?.expoDir ? { expoDir: detected.expoDir } : {}),
   } satisfies IosSimulatorPlan;
 }, Effect.provide(T3ProjectFileLoader.layer));
 
@@ -298,7 +301,7 @@ const detectIosSimulatorPlan = Effect.fn("iosSimulatorPlan.detect")(function* (c
           found.expo ? "npx expo start --lan --port 8081" : "npx react-native start --port 8081",
         ].join(" && "),
       },
-      ...(found.expo ? { expo: true } : {}),
+      ...(found.expo ? { expo: true, expoDir: found.dir } : {}),
     } satisfies IosSimulatorPlan;
   }
 

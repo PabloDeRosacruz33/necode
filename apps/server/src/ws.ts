@@ -169,6 +169,7 @@ import {
   worktreeDependenciesStale,
 } from "./project/worktreeDependencies.ts";
 import { archiveMacApp, openMacApp, quitMacApp, runMacAppBuild } from "./macApp/macApp.ts";
+import { expoGoSimulatorUrl } from "./macApp/expoGo.ts";
 import { expoGoUrl, resolveIosSimulatorPlan } from "./macApp/iosSimulatorPlan.ts";
 import { resolveTaskWorktree, slugifyTaskName } from "./vcs/taskBranch.ts";
 import { cloneDependencies } from "./project/dependencyClone.ts";
@@ -3843,17 +3844,23 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.macAppIosSimulatorPlan,
             resolveIosSimulatorPlan(input.cwd).pipe(
-              Effect.map((plan) =>
+              Effect.flatMap((plan) =>
                 plan
-                  ? (() => {
+                  ? Effect.promise(async () => {
                       const expoGo = plan.dev && plan.expo ? expoGoUrl() : null;
+                      // Unknown when offline: Simular then asks to install Expo Go by hand.
+                      const simulatorApp =
+                        expoGo && plan.expoDir
+                          ? await expoGoSimulatorUrl(plan.expoDir).catch(() => null)
+                          : null;
                       return {
                         build: plan.build,
                         ...(plan.dev ? { devServer: plan.dev.server } : {}),
                         ...(expoGo ? { expoGoUrl: expoGo } : {}),
+                        ...(simulatorApp ? { expoGoSimulatorUrl: simulatorApp } : {}),
                       };
-                    })()
-                  : null,
+                    })
+                  : Effect.succeed(null),
               ),
             ),
             { "rpc.aggregate": "mac-app" },

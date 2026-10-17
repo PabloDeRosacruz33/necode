@@ -66,11 +66,17 @@ interface ListedSimulator {
   readonly state: string;
 }
 
+const EXPO_GO_BUNDLE_ID = "host.exp.Exponent";
+
 /**
- * Opens `url` in Expo Go on this Mac's simulator, through the desktop app's device host: the
+ * Opens the app in Expo Go on this Mac's simulator, through the desktop app's device host: the
  * booted iPhone (or the newest one, booted now), shown in Simulator, or DeviceHub on Xcode 27.
+ * The address is this Mac's localhost: the desktop app forwards Metro's port to the environment,
+ * which a laptop away from the environment's network reaches when its LAN address does not.
+ * Expo Go is installed first when the simulator lacks it (`expoGoApp`, the build for the app's SDK).
  */
-async function openInExpoGoHere(url: string): Promise<string> {
+async function openInExpoGoHere(expoGoApp: string | null): Promise<string> {
+  const url = `exp://127.0.0.1:${METRO_PORT}`;
   const host = window.desktopBridge?.deviceHost;
   if (!host) throw new Error("Solo la app de escritorio puede abrir el simulador de este Mac.");
   const run = (command: string, args: ReadonlyArray<string>) =>
@@ -101,12 +107,31 @@ async function openInExpoGoHere(url: string): Promise<string> {
   ]) {
     if ((await run("/usr/bin/open", args)).code === 0) break;
   }
-  const opened = await run("/usr/bin/xcrun", ["simctl", "openurl", device.udid, url]);
-  if (opened.code !== 0) {
-    throw new Error(
-      `${device.name} no tiene Expo Go. Instálalo una vez (en una terminal de este Mac: npx expo start y la tecla i) y vuelve a intentarlo.`,
-    );
+  const installed = await run("/usr/bin/xcrun", [
+    "simctl",
+    "get_app_container",
+    device.udid,
+    EXPO_GO_BUNDLE_ID,
+  ]);
+  if (installed.code !== 0) {
+    if (!expoGoApp)
+      throw new Error(
+        `${device.name} no tiene Expo Go y no se ha podido saber qué versión instalar.`,
+      );
+    // Expo's simulator build is a tarball of the app's contents.
+    const install = await run("/bin/sh", [
+      "-c",
+      'set -e; dir=$(mktemp -d); mkdir "$dir/Exponent.app"; curl -fsSL "$1" | tar -xz -C "$dir/Exponent.app"; xcrun simctl install "$2" "$dir/Exponent.app"; rm -rf "$dir"',
+      "install-expo-go",
+      expoGoApp,
+      device.udid,
+    ]);
+    if (install.code !== 0)
+      throw new Error(`No se pudo instalar Expo Go en ${device.name}: ${install.stderr.trim()}`);
   }
+  const opened = await run("/usr/bin/xcrun", ["simctl", "openurl", device.udid, url]);
+  if (opened.code !== 0)
+    throw new Error(`Expo Go no abrió la app en ${device.name}: ${opened.stderr.trim()}`);
   return device.name;
 }
 
@@ -145,6 +170,7 @@ export function SimulatorControl({
   const buildCommand = plan.data?.build ?? projectFile.file?.iosSimulator?.build ?? null;
   const devServer = plan.data?.devServer ?? null;
   const expoGoUrl = plan.data?.expoGoUrl ?? null;
+  const expoGoSimulatorUrl = plan.data?.expoGoSimulatorUrl ?? null;
   // Expo Go: where it is being opened while Metro starts, and the phone's QR code.
   const [expoGo, setExpoGo] = useState<"here" | null>(null);
   const [phoneOpen, setPhoneOpen] = useState(false);
@@ -338,7 +364,7 @@ export function SimulatorControl({
     if (expoGo !== "here" || !expoGoUrl) return;
     const open = () => {
       setExpoGo(null);
-      openInExpoGoHere(expoGoUrl).then(
+      openInExpoGoHere(expoGoSimulatorUrl).then(
         (name) =>
           toastManager.add(
             stackedThreadToast({
@@ -361,7 +387,7 @@ export function SimulatorControl({
     }
     const timeout = setTimeout(open, METRO_WAIT_MS);
     return () => clearTimeout(timeout);
-  }, [expoGo, metroRunning, expoGoUrl]);
+  }, [expoGo, metroRunning, expoGoUrl, expoGoSimulatorUrl]);
   useEffect(() => {
     if (build.error && phase.kind === "building") {
       // The build's stream broke (dropped connection, server restart): say why, not just that.

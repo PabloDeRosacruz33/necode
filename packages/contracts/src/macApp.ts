@@ -50,6 +50,8 @@ export const MacAppIosSimulatorPlan = Schema.NullOr(
      * environment's local network (exp://<its LAN address>:8081).
      */
     expoGoUrl: Schema.optional(TrimmedNonEmptyString),
+    /** Expo apps: the Expo Go build for the simulator that matches the app's Expo SDK. */
+    expoGoSimulatorUrl: Schema.optional(TrimmedNonEmptyString),
   }),
 );
 export type MacAppIosSimulatorPlan = typeof MacAppIosSimulatorPlan.Type;
