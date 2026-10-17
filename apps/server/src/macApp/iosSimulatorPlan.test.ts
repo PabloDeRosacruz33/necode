@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -7,7 +7,11 @@ import * as Schema from "effect/Schema";
 
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
-import { pickIosScheme, resolveIosSimulatorPlan as resolve } from "./iosSimulatorPlan.ts";
+import {
+  expoGoUrl,
+  pickIosScheme,
+  resolveIosSimulatorPlan as resolve,
+} from "./iosSimulatorPlan.ts";
 
 /** Detection only runs on a Mac (where Xcode builds); tests pretend to be one. */
 const resolveIosSimulatorPlan = (cwd: string) =>
@@ -51,7 +55,9 @@ it.layer(NodeServices.layer)("resolveIosSimulatorPlan", (it) => {
         assert.include(plan?.dev?.build, "-configuration Debug");
         assert.include(plan?.dev?.build, `cd '${cwd}/apps/mobile'`);
         assert.include(plan?.dev?.server, `cd '${cwd}/apps/mobile'`);
-        assert.include(plan?.dev?.server, "npx expo start --port 8081");
+        assert.include(plan?.dev?.server, "npx expo start --lan --port 8081");
+        // Expo Go can open it, with no build (Simular → Expo Go).
+        assert.isTrue(plan?.expo);
       }),
     ),
   );
@@ -151,4 +157,16 @@ it.layer(NodeServices.layer)("resolveIosSimulatorPlan", (it) => {
       }),
     ),
   );
+});
+
+describe("expoGoUrl", () => {
+  it("is an exp:// address on the local network, on Metro's port", () => {
+    const url = expoGoUrl();
+    // A CI machine may have no network; with one, the address is IPv4 and never loopback.
+    if (url !== null) {
+      assert.match(url, /^exp:\/\/\d+\.\d+\.\d+\.\d+:8081$/);
+      assert.notInclude(url, "127.0.0.1");
+    }
+    assert.match(expoGoUrl(8090) ?? "exp://0.0.0.0:8090", /:8090$/);
+  });
 });

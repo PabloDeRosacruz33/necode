@@ -10,6 +10,9 @@
  *   (preview/PortForwards.tsx), so saved changes appear at once with native touch and typing.
  * - On the environment, live: its agent starts the app with the dev server on the environment's
  *   simulator, so saved changes appear at once, watched through the Device panel.
+ * - Expo apps replace both live ways with Expo Go, the simple one: the environment runs Metro on
+ *   its local network and Expo Go opens it, in this Mac's simulator or on a phone (a QR code).
+ *   No build, and every saved change appears at once.
  */
 import type { EnvironmentId, MacAppBuilt, ScopedThreadRef } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -36,6 +39,7 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Menu, MenuItem, MenuItemLabel, MenuPopup, MenuTrigger } from "../ui/menu";
+import { QRCodeSvg } from "../ui/qr-code";
 import { Spinner } from "../ui/spinner";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 
@@ -54,6 +58,56 @@ type Phase =
 function failureMessage(result: { readonly cause: Cause.Cause<unknown> }): string {
   const error = Cause.squash(result.cause);
   return error instanceof Error && error.message ? error.message : "Algo ha fallado.";
+}
+
+interface ListedSimulator {
+  readonly udid: string;
+  readonly name: string;
+  readonly state: string;
+}
+
+/**
+ * Opens `url` in Expo Go on this Mac's simulator, through the desktop app's device host: the
+ * booted iPhone (or the newest one, booted now), shown in Simulator, or DeviceHub on Xcode 27.
+ */
+async function openInExpoGoHere(url: string): Promise<string> {
+  const host = window.desktopBridge?.deviceHost;
+  if (!host) throw new Error("Solo la app de escritorio puede abrir el simulador de este Mac.");
+  const run = (command: string, args: ReadonlyArray<string>) =>
+    host.exec({ command, args, timeoutMs: 120_000 });
+  const listed = await run("/usr/bin/xcrun", ["simctl", "list", "devices", "available", "-j"]);
+  if (listed.code !== 0) throw new Error("Este Mac no tiene Xcode con simuladores de iOS.");
+  const runtimes = Object.entries(
+    (JSON.parse(listed.stdout) as { devices: Record<string, ReadonlyArray<ListedSimulator>> })
+      .devices,
+  )
+    .filter(([runtime]) => runtime.includes("iOS"))
+    .sort(([a], [b]) => b.localeCompare(a, undefined, { numeric: true }));
+  const devices = runtimes.flatMap(([, entries]) => entries);
+  let device =
+    devices.find(
+      (candidate) => candidate.state === "Booted" && candidate.name.includes("iPhone"),
+    ) ?? devices.find((candidate) => candidate.state === "Booted");
+  if (!device) {
+    device = devices.find((candidate) => candidate.name.includes("iPhone")) ?? devices[0];
+    if (!device) throw new Error("Este Mac no tiene simuladores de iOS; instala uno en Xcode.");
+    await run("/usr/bin/xcrun", ["simctl", "boot", device.udid]);
+  }
+  // The window: Simulator up to Xcode 26; Xcode 27 replaced it with DeviceHub.
+  for (const args of [
+    ["-b", "com.apple.iphonesimulator"],
+    ["-b", "com.apple.dt.Devices"],
+    ["-a", "/Applications/Xcode.app/Contents/Applications/DeviceHub.app"],
+  ]) {
+    if ((await run("/usr/bin/open", args)).code === 0) break;
+  }
+  const opened = await run("/usr/bin/xcrun", ["simctl", "openurl", device.udid, url]);
+  if (opened.code !== 0) {
+    throw new Error(
+      `${device.name} no tiene Expo Go. Instálalo una vez (en una terminal de este Mac: npx expo start y la tecla i) y vuelve a intentarlo.`,
+    );
+  }
+  return device.name;
 }
 
 const livePrompt = (environmentLabel: string) =>
@@ -90,7 +144,15 @@ export function SimulatorControl({
   // Environments from before the plan request only know t3.json's.
   const buildCommand = plan.data?.build ?? projectFile.file?.iosSimulator?.build ?? null;
   const devServer = plan.data?.devServer ?? null;
-  const live = (phase.kind === "building" && phase.live) || phase.kind === "waiting-metro";
+  const expoGoUrl = plan.data?.expoGoUrl ?? null;
+  // Expo Go: where it is being opened while Metro starts, and the phone's QR code.
+  const [expoGo, setExpoGo] = useState<"here" | null>(null);
+  const [phoneOpen, setPhoneOpen] = useState(false);
+  const live =
+    (phase.kind === "building" && phase.live) ||
+    phase.kind === "waiting-metro" ||
+    expoGo !== null ||
+    phoneOpen;
   // Watched only during a live run: the scan has a cost and nothing else here needs it.
   const { servers } = useDiscoveredPortsState(live ? environmentId : null);
   const metroRunning = servers.some((server) => server.port === METRO_PORT);
@@ -271,6 +333,35 @@ export function SimulatorControl({
     const timeout = setTimeout(() => void install(phase.app, true), METRO_WAIT_MS);
     return () => clearTimeout(timeout);
   }, [phase, metroRunning]);
+  // Expo Go needs Metro answering, or it opens on an error; after two minutes it opens anyway.
+  useEffect(() => {
+    if (expoGo !== "here" || !expoGoUrl) return;
+    const open = () => {
+      setExpoGo(null);
+      openInExpoGoHere(expoGoUrl).then(
+        (name) =>
+          toastManager.add(
+            stackedThreadToast({
+              type: "success",
+              title: `Expo Go abierto en ${name}`,
+              description: "Los cambios que guardes se ven al momento.",
+            }),
+          ),
+        (error: unknown) =>
+          toastManager.add({
+            type: "error",
+            title: "No se pudo abrir Expo Go",
+            description: error instanceof Error ? error.message : String(error),
+          }),
+      );
+    };
+    if (metroRunning) {
+      open();
+      return;
+    }
+    const timeout = setTimeout(open, METRO_WAIT_MS);
+    return () => clearTimeout(timeout);
+  }, [expoGo, metroRunning, expoGoUrl]);
   useEffect(() => {
     if (build.error && phase.kind === "building") {
       // The build's stream broke (dropped connection, server restart): say why, not just that.
@@ -282,49 +373,90 @@ export function SimulatorControl({
   if (buildCommand === null) return null;
 
   const busy =
-    phase.kind === "building" || phase.kind === "waiting-metro" || phase.kind === "installing";
+    phase.kind === "building" ||
+    phase.kind === "waiting-metro" ||
+    phase.kind === "installing" ||
+    expoGo !== null;
   const runHere = () => {
     if (busy) return;
     setPhase({ kind: "building", runId: randomUUID(), live: false });
   };
   // Leaving the building phase drops the build subscription, which ends the build on the
   // environment; a download or install in flight is simply forgotten.
-  const cancel = () => setPhase({ kind: "idle" });
-  const runHereLive = () => {
-    if (busy || devServer === null) return;
-    // A Metro left running from before keeps serving; a second one would ask for another port.
+  const cancel = () => {
+    setPhase({ kind: "idle" });
+    setExpoGo(null);
+  };
+  // A Metro left running from before keeps serving; a second one would ask for another port.
+  const startMetro = () => {
+    if (devServer === null) return;
     onRunCommand(
       `lsof -nP -iTCP:${METRO_PORT} -sTCP:LISTEN >/dev/null 2>&1 && echo "Metro ya está en marcha en el puerto ${METRO_PORT}." || (${devServer})`,
     );
+  };
+  const runHereLive = () => {
+    if (busy || devServer === null) return;
+    startMetro();
     setPhase({ kind: "building", runId: randomUUID(), live: true });
+  };
+  const runExpoGoHere = () => {
+    if (busy || expoGoUrl === null) return;
+    startMetro();
+    setExpoGo("here");
+  };
+  const runExpoGoPhone = () => {
+    if (expoGoUrl === null) return;
+    startMetro();
+    setPhoneOpen(true);
   };
   const runLive = () => onAskAgent(livePrompt(environmentLabel));
   const label =
-    phase.kind === "building"
-      ? "Compilando…"
-      : phase.kind === "waiting-metro"
-        ? "Esperando a Metro…"
-        : phase.kind === "installing"
-          ? "Abriendo…"
-          : "Simular";
+    expoGo === "here"
+      ? metroRunning
+        ? "Abriendo Expo Go…"
+        : "Esperando a Metro…"
+      : phase.kind === "building"
+        ? "Compilando…"
+        : phase.kind === "waiting-metro"
+          ? "Esperando a Metro…"
+          : phase.kind === "installing"
+            ? "Abriendo…"
+            : "Simular";
 
   const items = (density: "touch" | undefined) => (
     <>
       <MenuItem {...(density ? { density } : {})} disabled={busy || !canRunHere} onClick={runHere}>
         <MenuItemLabel>En este Mac</MenuItemLabel>
       </MenuItem>
-      {devServer !== null ? (
-        <MenuItem
-          {...(density ? { density } : {})}
-          disabled={busy || !canRunHere}
-          onClick={runHereLive}
-        >
-          <MenuItemLabel>En este Mac, con cambios en directo</MenuItemLabel>
-        </MenuItem>
-      ) : null}
-      <MenuItem {...(density ? { density } : {})} onClick={runLive}>
-        <MenuItemLabel>En {environmentLabel}, con cambios en directo</MenuItemLabel>
-      </MenuItem>
+      {expoGoUrl !== null ? (
+        <>
+          <MenuItem
+            {...(density ? { density } : {})}
+            disabled={busy || bridge?.deviceHost === undefined}
+            onClick={runExpoGoHere}
+          >
+            <MenuItemLabel>Expo Go en este Mac</MenuItemLabel>
+          </MenuItem>
+          <MenuItem {...(density ? { density } : {})} onClick={runExpoGoPhone}>
+            <MenuItemLabel>Expo Go en el móvil</MenuItemLabel>
+          </MenuItem>
+        </>
+      ) : (
+        <>
+          {devServer !== null ? (
+            <MenuItem
+              {...(density ? { density } : {})}
+              disabled={busy || !canRunHere}
+              onClick={runHereLive}
+            >
+              <MenuItemLabel>En este Mac, con cambios en directo</MenuItemLabel>
+            </MenuItem>
+          ) : null}
+          <MenuItem {...(density ? { density } : {})} onClick={runLive}>
+            <MenuItemLabel>En {environmentLabel}, con cambios en directo</MenuItemLabel>
+          </MenuItem>
+        </>
+      )}
       <MenuItem {...(density ? { density } : {})} onClick={() => setLogOpen(true)}>
         <MenuItemLabel>Ver log de la compilación</MenuItemLabel>
       </MenuItem>
@@ -389,11 +521,51 @@ export function SimulatorControl({
     </Dialog>
   );
 
+  const phoneDialog =
+    expoGoUrl !== null ? (
+      <Dialog open={phoneOpen} onOpenChange={setPhoneOpen}>
+        <DialogPopup className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Expo Go en el móvil</DialogTitle>
+            <DialogDescription>
+              Escanea el código con la cámara del móvil o con Expo Go. El móvil tiene que estar en
+              la misma red que {environmentLabel}.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            <div className="grid justify-items-center gap-3">
+              <div className="rounded-md bg-white p-3">
+                <QRCodeSvg value={expoGoUrl} size={200} />
+              </div>
+              <p className="flex items-center gap-2 text-muted-foreground text-xs">
+                {metroRunning ? null : <Spinner className="size-3.5" />}
+                {metroRunning ? "Metro está en marcha." : "Arrancando Metro…"}
+              </p>
+              <code className="select-all font-mono text-xs">{expoGoUrl}</code>
+            </div>
+          </DialogPanel>
+          <DialogFooter>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void navigator.clipboard.writeText(expoGoUrl)}
+            >
+              Copiar dirección
+            </Button>
+            <Button size="sm" onClick={() => setPhoneOpen(false)}>
+              Hecho
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+    ) : null;
+
   if (presentation === "menu") {
     return (
       <>
         {items("touch")}
         {dialog}
+        {phoneDialog}
       </>
     );
   }
@@ -417,6 +589,7 @@ export function SimulatorControl({
         <MenuPopup align="end">{items(undefined)}</MenuPopup>
       </Menu>
       {dialog}
+      {phoneDialog}
     </>
   );
 }

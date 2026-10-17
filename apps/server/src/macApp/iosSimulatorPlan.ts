@@ -5,6 +5,8 @@
  * command prints the built `.app` last, which is how the build finds it (see macApp.ts).
  * A t3.json `iosSimulator` always wins, for projects that need their own steps.
  */
+import * as NodeOS from "node:os";
+
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -22,6 +24,25 @@ export interface IosSimulatorPlan {
    * development build that loads it from localhost:8081, and the command that serves it there.
    */
   readonly dev?: { readonly build: string; readonly server: string };
+  /** An Expo app: Expo Go can run it from the dev server, with no build. */
+  readonly expo?: boolean;
+}
+
+/**
+ * Where Expo Go reaches the dev server of this Mac: its address on the local network, the one
+ * `expo start --lan` announces. Wired before Wi-Fi; null when the Mac has no network.
+ */
+export function expoGoUrl(port = 8081): string | null {
+  const interfaces = NodeOS.networkInterfaces();
+  const names = Object.keys(interfaces).sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true }),
+  );
+  for (const name of names) {
+    for (const address of interfaces[name] ?? []) {
+      if (address.family === "IPv4" && !address.internal) return `exp://${address.address}:${port}`;
+    }
+  }
+  return null;
 }
 
 /** Deep enough for monorepos (`apps/mobile/ios`), shallow enough to stay instant. */
@@ -197,6 +218,7 @@ export const resolveIosSimulatorPlan = Effect.fn("iosSimulatorPlan.resolve")(fun
     build,
     ...(configured?.appPath ? { appPath: configured.appPath } : {}),
     ...(devBuild && devServer ? { dev: { build: devBuild, server: devServer } } : {}),
+    ...(detected?.expo ? { expo: true } : {}),
   } satisfies IosSimulatorPlan;
 }, Effect.provide(T3ProjectFileLoader.layer));
 
@@ -272,9 +294,11 @@ const detectIosSimulatorPlan = Effect.fn("iosSimulatorPlan.detect")(function* (c
         build: steps("Debug").join("\n"),
         server: [
           ...prepare,
-          found.expo ? "npx expo start --port 8081" : "npx react-native start --port 8081",
+          // On the local network, so Expo Go on a phone or another Mac's simulator reaches it.
+          found.expo ? "npx expo start --lan --port 8081" : "npx react-native start --port 8081",
         ].join(" && "),
       },
+      ...(found.expo ? { expo: true } : {}),
     } satisfies IosSimulatorPlan;
   }
 

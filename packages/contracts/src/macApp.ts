@@ -45,6 +45,11 @@ export const MacAppIosSimulatorPlan = Schema.NullOr(
     build: TrimmedNonEmptyString,
     /** Starts the dev server; present when the app can also run live (Expo, React Native). */
     devServer: Schema.optional(TrimmedNonEmptyString),
+    /**
+     * Expo apps: the address Expo Go opens to load the app from that dev server, on the
+     * environment's local network (exp://<its LAN address>:8081).
+     */
+    expoGoUrl: Schema.optional(TrimmedNonEmptyString),
   }),
 );
 export type MacAppIosSimulatorPlan = typeof MacAppIosSimulatorPlan.Type;

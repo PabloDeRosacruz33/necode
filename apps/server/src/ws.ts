@@ -169,7 +169,7 @@ import {
   worktreeDependenciesStale,
 } from "./project/worktreeDependencies.ts";
 import { archiveMacApp, openMacApp, quitMacApp, runMacAppBuild } from "./macApp/macApp.ts";
-import { resolveIosSimulatorPlan } from "./macApp/iosSimulatorPlan.ts";
+import { expoGoUrl, resolveIosSimulatorPlan } from "./macApp/iosSimulatorPlan.ts";
 import { resolveTaskWorktree, slugifyTaskName } from "./vcs/taskBranch.ts";
 import { cloneDependencies } from "./project/dependencyClone.ts";
 
@@ -3845,7 +3845,14 @@ const makeWsRpcLayer = (
             resolveIosSimulatorPlan(input.cwd).pipe(
               Effect.map((plan) =>
                 plan
-                  ? { build: plan.build, ...(plan.dev ? { devServer: plan.dev.server } : {}) }
+                  ? (() => {
+                      const expoGo = plan.dev && plan.expo ? expoGoUrl() : null;
+                      return {
+                        build: plan.build,
+                        ...(plan.dev ? { devServer: plan.dev.server } : {}),
+                        ...(expoGo ? { expoGoUrl: expoGo } : {}),
+                      };
+                    })()
                   : null,
               ),
             ),
