@@ -44,6 +44,8 @@ it.layer(NodeServices.layer)("resolveIosSimulatorPlan", (it) => {
         assert.include(plan?.build, "[ -f ios/Podfile ] || CI=1 npx expo prebuild --platform ios");
         // A half-made Pods folder must not skip the install.
         assert.include(plan?.build, "cmp -s ios/Podfile.lock ios/Pods/Manifest.lock");
+        // Pods that point at another folder are reinstalled.
+        assert.include(plan?.build, 'grep -rqsF "$(pwd -P)/" "ios/Pods/Target Support Files"');
         assert.include(plan?.build, "-configuration Release");
         // The live variant builds in Debug and serves the code from Metro on 8081.
         assert.include(plan?.dev?.build, "-configuration Debug");

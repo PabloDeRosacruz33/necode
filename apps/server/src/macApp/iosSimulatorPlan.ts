@@ -255,6 +255,9 @@ const detectIosSimulatorPlan = Effect.fn("iosSimulatorPlan.detect")(function* (c
         : []),
       // CocoaPods' own staleness check: a Pods folder left half-made, or older than the
       // Podfile.lock, installs again.
+      // Pods record this folder's absolute path. Pods made in another task folder (copied,
+      // or left from before a rename) still point there and fail once it is deleted.
+      '[ ! -d ios/Pods ] || grep -rqsF "$(pwd -P)/" "ios/Pods/Target Support Files" || rm -rf ios/Pods',
       "[ ! -f ios/Podfile ] || cmp -s ios/Podfile.lock ios/Pods/Manifest.lock || (cd ios && pod install)",
       "WORKSPACE=$(ls -d ios/*.xcworkspace 2>/dev/null | head -1)",
       '[ -n "$WORKSPACE" ] || { echo "No .xcworkspace in ios/ after pod install." >&2; exit 1; }',
