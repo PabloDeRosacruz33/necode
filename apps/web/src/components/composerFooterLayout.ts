@@ -44,10 +44,10 @@ export function shouldUseRestingComposerLayout(input: {
 /**
  * How much taller the empty expanded composer is than its resting row on
  * desktop widths, from the layout classes in ChatComposer: the body loses
- * 8px of top padding, the prompt clamps from min-h-17.5 (70px) to 32px, and
- * the 48px footer leaves flow.
+ * 8px of top padding, the prompt keeps its one-line min-h-8 (32px), and the
+ * 48px footer leaves flow.
  */
-export const COMPOSER_RESTING_EXPANSION_MIN_PX = 94;
+export const COMPOSER_RESTING_EXPANSION_MIN_PX = 56;
 
 /**
  * Reserving only the resting height lets a scroll to the end land flush against the short
