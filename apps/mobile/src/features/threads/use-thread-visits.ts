@@ -1,7 +1,7 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { markThreadUnread, markThreadVisited } from "@t3tools/client-runtime/state/thread-status";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useCallback, useMemo, useRef } from "react";
 
 import { scopedThreadKey } from "../../lib/scopedEntities";
@@ -47,13 +47,13 @@ export function useThreadVisits() {
     [loaded, save],
   );
   const markUnread = useCallback(
-    (thread: Pick<EnvironmentThreadShell, "environmentId" | "id" | "latestTurn">) => {
+    (thread: Pick<EnvironmentThreadShell, "environmentId" | "id" | "latestRun">) => {
       if (!loaded) return;
       save(
         markThreadUnread(
           visitsRef.current,
           scopedThreadKey(thread.environmentId, thread.id),
-          thread.latestTurn?.completedAt,
+          thread.latestRun?.completedAt,
         ),
       );
     },

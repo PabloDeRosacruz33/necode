@@ -12,8 +12,8 @@ import * as NodeNet from "node:net";
 
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import * as Socket from "effect/unstable/socket/Socket";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import * as Socket from "effect/socket/Socket";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";

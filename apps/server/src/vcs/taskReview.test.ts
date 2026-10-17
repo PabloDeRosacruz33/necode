@@ -32,6 +32,7 @@ const textGeneration = (
     generatePrContent,
     generateBranchName: () => Effect.die("not used"),
     generateThreadTitle: () => Effect.die("not used"),
+    generateReviewGuide: () => Effect.die("not used"),
   });
 
 const commitFile = (

@@ -7,10 +7,11 @@ import * as Option from "effect/Option";
 import { useMemo, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 
-import { AppText as Text, AppTextInput as TextInput } from "../../../components/AppText";
+import { AppText as Text, AppTextInput as TextInput } from "../../../components/ui/AppText";
 import { scopedThreadKey } from "../../../lib/scopedEntities";
 import { useAtomCommand } from "../../../state/use-atom-command";
 import { setComposerDraftText } from "../../../state/use-composer-drafts";
+import { useEnvironmentThread } from "../../../state/threads";
 import { useThreadSelection } from "../../../state/use-thread-selection";
 import { showGitActionResult } from "../../../state/use-vcs-action-state";
 import { vcsEnvironment } from "../../../state/vcs";
@@ -27,8 +28,12 @@ export function GitDuplicateThreadSheet(
   props: StaticScreenProps<{ readonly environmentId: string; readonly threadId: string }>,
 ) {
   const navigation = useNavigation();
-  const { selectedThread, selectedThreadDetailState, selectedEnvironmentRuntime } =
-    useThreadSelection();
+  const { selectedThread, selectedEnvironmentRuntime } = useThreadSelection();
+  // The conversation, for a written handoff when the agent's own memory cannot come along.
+  const sourceDetail = useEnvironmentThread(
+    selectedThread?.environmentId ?? null,
+    selectedThread?.id ?? null,
+  );
   const duplicate = useAtomCommand(vcsEnvironment.duplicateThread, { reportFailure: false });
   const providers = selectedEnvironmentRuntime?.serverConfig?.providers ?? [];
   const sourceSelection = selectedThread?.modelSelection ?? null;
@@ -73,7 +78,7 @@ export function GitDuplicateThreadSheet(
       setError(commandFailureMessage(result));
       return;
     }
-    const messages = Option.getOrNull(selectedThreadDetailState.data)?.messages ?? [];
+    const messages = Option.getOrNull(sourceDetail.data)?.messages ?? [];
     if (!result.value.forked && messages.length > 0) {
       // The agent's own memory could not come along; hand it a written summary instead.
       setComposerDraftText(

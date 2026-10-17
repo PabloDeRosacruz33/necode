@@ -23,7 +23,6 @@ export function command(button: "home" | "back" | "appSwitcher" | "rotate") {
   else activeClient?.pressButton(button);
 }
 
-/** Bundled into the existing native WebView without React or Expo's web runtime. */
 export function start(configuration: DeviceStreamConfiguration) {
   stop();
   // oxlint-disable-next-line unicorn/require-post-message-target-origin -- The native WebView bridge takes one string.
@@ -132,7 +131,7 @@ export function start(configuration: DeviceStreamConfiguration) {
     if (activeClient === client) post({ type: "unauthorized" });
   };
   const client = createDeviceStreamClient(
-    { ...configuration, preferMjpeg: platform === "ios" },
+    { ...configuration, preferMjpeg: platform === "ios", hardwareKeyboard: false },
     canvas,
     {
       onStatus: reportStatus,

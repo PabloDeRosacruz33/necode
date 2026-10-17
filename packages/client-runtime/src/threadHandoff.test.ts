@@ -1,7 +1,11 @@
-import type { OrchestrationMessage, ServerProvider } from "@t3tools/contracts";
+import type { ServerProvider } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildThreadHandoffPrompt, resolveThreadHandoffTargets } from "./threadHandoff.ts";
+import {
+  buildThreadHandoffPrompt,
+  resolveThreadHandoffTargets,
+  type ThreadHandoffMessage,
+} from "./threadHandoff.ts";
 
 const provider = (overrides: Partial<Record<keyof ServerProvider, unknown>>): ServerProvider =>
   ({
@@ -18,20 +22,15 @@ const provider = (overrides: Partial<Record<keyof ServerProvider, unknown>>): Se
   }) as unknown as ServerProvider;
 
 const message = (
-  role: OrchestrationMessage["role"],
+  role: ThreadHandoffMessage["role"],
   text: string,
-  overrides: Partial<OrchestrationMessage> = {},
-): OrchestrationMessage =>
-  ({
-    id: `${role}-${text.length}`,
-    role,
-    text,
-    turnId: null,
-    streaming: false,
-    createdAt: "2026-09-29T10:00:00.000Z",
-    updatedAt: "2026-09-29T10:00:00.000Z",
-    ...overrides,
-  }) as OrchestrationMessage;
+  overrides: Partial<ThreadHandoffMessage> = {},
+): ThreadHandoffMessage => ({
+  role,
+  text,
+  streaming: false,
+  ...overrides,
+});
 
 describe("resolveThreadHandoffTargets", () => {
   it("offers ready providers other than the current one, with their default model", () => {

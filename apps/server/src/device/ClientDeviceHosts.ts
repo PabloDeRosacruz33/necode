@@ -24,7 +24,7 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import * as Socket from "effect/unstable/socket/Socket";
+import * as Socket from "effect/socket/Socket";
 import { decodeMuxFrame, encodeMuxFrame } from "@t3tools/shared/streamMux";
 
 import * as DeviceService from "./DeviceService.ts";

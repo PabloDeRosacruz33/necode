@@ -1,6 +1,6 @@
 import type { TeamMember, TeamSnapshot, ThreadId } from "@t3tools/contracts";
 import { WS_METHODS } from "@t3tools/contracts";
-import type { Atom } from "effect/unstable/reactivity";
+import type { Atom } from "effect/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
@@ -58,7 +58,7 @@ export function onlineTeamMembers(snapshot: TeamSnapshot): ReadonlyArray<TeamMem
   const online = new Set(snapshot.presence.map((entry) => entry.memberId));
   return snapshot.members
     .filter((member) => online.has(member.memberId))
-    .toSorted((left, right) =>
+    .sort((left, right) =>
       left.memberId === snapshot.selfMemberId
         ? -1
         : right.memberId === snapshot.selfMemberId

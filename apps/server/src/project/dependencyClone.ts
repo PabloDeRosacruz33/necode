@@ -5,7 +5,7 @@
  * matching lockfile is copied, only from a checkout on the same volume, and the setup script is
  * told through T3CODE_DEPENDENCIES_READY=1 so it can skip its install.
  */
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -53,7 +53,7 @@ export const cloneDependencies = Effect.fn("cloneDependencies")(function* (input
   readonly projectCwd: string;
   readonly worktreePath: string;
 }) {
-  if ((yield* HostProcessPlatform) !== "darwin") return [];
+  if ((yield* HostProcess.Platform) !== "darwin") return [];
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const runner = yield* ProcessRunner.ProcessRunner;

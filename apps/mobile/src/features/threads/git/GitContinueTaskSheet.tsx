@@ -3,7 +3,7 @@ import { StackActions, useNavigation, type StaticScreenProps } from "@react-navi
 import { useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 
-import { AppText as Text, AppTextInput as TextInput } from "../../../components/AppText";
+import { AppText as Text, AppTextInput as TextInput } from "../../../components/ui/AppText";
 import { useAtomCommand } from "../../../state/use-atom-command";
 import { useEnvironmentQuery } from "../../../state/query";
 import { useSelectedThreadWorktree } from "../../../state/use-selected-thread-worktree";

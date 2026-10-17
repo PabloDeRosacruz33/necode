@@ -7,7 +7,7 @@ import { useNavigation } from "@react-navigation/native";
 import { useState } from "react";
 import { Alert, Platform, View } from "react-native";
 
-import { AppText as Text } from "../../../components/AppText";
+import { AppText as Text } from "../../../components/ui/AppText";
 import { threadEnvironment } from "../../../state/threads";
 import { useAtomCommand } from "../../../state/use-atom-command";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
@@ -223,7 +223,7 @@ export function GitTaskSection(props: {
         })
       }
     />,
-    selectedThread.latestTurn ? (
+    selectedThread.latestRun ? (
       <SheetListRow
         key="duplicate"
         icon="square.on.square"

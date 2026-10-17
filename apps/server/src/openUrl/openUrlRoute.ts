@@ -5,7 +5,7 @@
  * the stand-in to open it on this machine instead.
  */
 import * as Effect from "effect/Effect";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import * as ServerConfig from "../config.ts";
 import * as TeamService from "../team/TeamService.ts";

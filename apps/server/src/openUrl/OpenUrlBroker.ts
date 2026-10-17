@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off
 /**
  * Delivers a web page opened on this machine to one connected device: the desktop app or the
  * phone of whoever the work belongs to. Devices subscribe with `openUrl.connect`; the server

@@ -11,21 +11,21 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as TeamService from "./TeamService.ts";
 
 const TeamTestLayer = TeamService.layer.pipe(
   Layer.provideMerge(
     EnvironmentAuth.layer.pipe(
-      Layer.provideMerge(SqlitePersistenceMemory),
+      Layer.provideMerge(SqlitePersistence.layerMemory),
       Layer.provide(ServerSecretStore.layer),
-      Layer.provide(ServerEnvironment.identityLayer),
+      Layer.provide(ServerEnvironment.layerIdentity),
       Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "necode-team-test-" })),
     ),
   ),

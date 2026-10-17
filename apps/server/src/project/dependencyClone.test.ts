@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -45,7 +45,7 @@ it.layer(TestLayer)("cloneDependencies", (it) => {
         });
         yield* fs.writeFileString(path.join(project, "node_modules", "left-pad", "index.js"), "1");
         const cloned = yield* cloneDependencies({ projectCwd: project, worktreePath: task }).pipe(
-          Effect.provideService(HostProcessPlatform, "darwin"),
+          Effect.provideService(HostProcess.Platform, "darwin"),
         );
         assert.deepStrictEqual(cloned, ["."]);
         assert.equal(
@@ -67,12 +67,12 @@ it.layer(TestLayer)("cloneDependencies", (it) => {
         const differing = yield* cloneDependencies({
           projectCwd: project,
           worktreePath: task,
-        }).pipe(Effect.provideService(HostProcessPlatform, "darwin"));
+        }).pipe(Effect.provideService(HostProcess.Platform, "darwin"));
         assert.deepStrictEqual(differing, []);
         assert.isFalse(yield* fs.exists(path.join(task, "node_modules")));
         yield* fs.writeFileString(path.join(task, "package-lock.json"), "{ lock: 1 }");
         const linux = yield* cloneDependencies({ projectCwd: project, worktreePath: task }).pipe(
-          Effect.provideService(HostProcessPlatform, "linux"),
+          Effect.provideService(HostProcess.Platform, "linux"),
         );
         assert.deepStrictEqual(linux, []);
       }),

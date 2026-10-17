@@ -11,7 +11,7 @@ import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import * as Socket from "effect/unstable/socket/Socket";
+import * as Socket from "effect/socket/Socket";
 
 import * as ClientDeviceHosts from "./ClientDeviceHosts.ts";
 import * as DeviceService from "./DeviceService.ts";

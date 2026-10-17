@@ -5,7 +5,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import {
   expoGoUrl,
@@ -15,7 +15,7 @@ import {
 
 /** Detection only runs on a Mac (where Xcode builds); tests pretend to be one. */
 const resolveIosSimulatorPlan = (cwd: string) =>
-  resolve(cwd).pipe(Effect.provideService(HostProcessPlatform, "darwin"));
+  resolve(cwd).pipe(Effect.provideService(HostProcess.Platform, "darwin"));
 
 /** A temporary project with the given files (path → contents). */
 const project = (files: Record<string, string>) =>
@@ -123,7 +123,7 @@ it.layer(NodeServices.layer)("resolveIosSimulatorPlan", (it) => {
     Effect.scoped(
       Effect.gen(function* () {
         const cwd = yield* project({ "Demo.xcodeproj/project.pbxproj": IOS_PBXPROJ });
-        const plan = yield* resolve(cwd).pipe(Effect.provideService(HostProcessPlatform, "linux"));
+        const plan = yield* resolve(cwd).pipe(Effect.provideService(HostProcess.Platform, "linux"));
         assert.isNull(plan);
       }),
     ),

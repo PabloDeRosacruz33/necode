@@ -10,16 +10,16 @@
  * @module provider/ClaudeAuth
  */
 import { ProviderSetupError, type ProviderInstanceId } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-import * as ProviderAuthFlow from "./ProviderAuthFlow.ts";
+import * as ProviderAuthFlow from "@t3tools/provider-core/server/providerAuthFlow";
 
 const METHOD_ID = "claudeai";
 const MAX_CODE_LENGTH = 4_096;
@@ -50,7 +50,7 @@ export const makeClaudeAuth = Effect.fn("makeClaudeAuth")(function* (options: {
   readonly prepare: Effect.Effect<void>;
 }) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const platform = yield* HostProcessPlatform;
+  const platform = yield* HostProcess.Platform;
   const failure = (operation: string, detail: string) =>
     new ProviderSetupError({ instanceId: options.instanceId, operation, detail });
 

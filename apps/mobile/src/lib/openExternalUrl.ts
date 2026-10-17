@@ -7,6 +7,8 @@ const ExternalUrlTarget = Schema.Literals([
   "pull-request",
   "provider-auth",
   "open-url-request",
+  "html-render",
+  "mcp-app",
 ]);
 
 export type ExternalUrlTarget = typeof ExternalUrlTarget.Type;

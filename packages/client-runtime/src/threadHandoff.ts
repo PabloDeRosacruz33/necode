@@ -1,9 +1,4 @@
-import {
-  isProviderAvailable,
-  type ModelSelection,
-  type OrchestrationMessage,
-  type ServerProvider,
-} from "@t3tools/contracts";
+import { isProviderAvailable, type ModelSelection, type ServerProvider } from "@t3tools/contracts";
 
 /**
  * "Continue with…" moves a conversation to another provider. Providers keep
@@ -50,10 +45,17 @@ function clip(text: string, max: number): string {
  * fit, oldest first, and asks the new agent to check the workspace itself
  * because earlier tool output is not carried over.
  */
+/** The parts of a chat message a handoff transcript reads. */
+export interface ThreadHandoffMessage {
+  readonly role: string;
+  readonly text: string;
+  readonly streaming?: boolean | undefined;
+}
+
 export function buildThreadHandoffPrompt(input: {
   readonly title: string;
   readonly sourceLabel: string;
-  readonly messages: ReadonlyArray<OrchestrationMessage>;
+  readonly messages: ReadonlyArray<ThreadHandoffMessage>;
 }): string {
   const turns = input.messages
     .filter(

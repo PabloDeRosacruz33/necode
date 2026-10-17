@@ -13,7 +13,7 @@ import {
 import { WS_METHODS } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useEffect } from "react";
 
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";

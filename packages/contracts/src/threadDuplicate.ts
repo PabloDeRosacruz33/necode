@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 
 import { IsoDateTime, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
-import { ModelSelection } from "./orchestration.ts";
+import { ModelSelection } from "./modelSelection.ts";
 
 /**
  * Where a parallel copy of a thread comes from: a thread on this same environment, whose agent

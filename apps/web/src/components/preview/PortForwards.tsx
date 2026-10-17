@@ -9,8 +9,8 @@ import { resolveDeviceHubAccess } from "@t3tools/client-runtime/state/deviceHubA
 import type { EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
-import { useEffect, useMemo } from "react";
+import { AsyncResult, Atom } from "effect/reactivity";
+import { useEffect } from "react";
 
 import { setForwardedPorts } from "~/browser/portForwardState";
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
@@ -91,10 +91,9 @@ function EnvironmentPortForwards({ environmentId }: { readonly environmentId: En
   const { servers } = useDiscoveredPortsState(environmentId);
   const accessResult = useAtomValue(portForwardAccessAtom(environmentId));
   const access = AsyncResult.isSuccess(accessResult) ? accessResult.value : null;
-  const portsKey = useMemo(
-    () => [...new Set(servers.map((server) => server.port))].sort((a, b) => a - b).join(","),
-    [servers],
-  );
+  const portsKey = [...new Set(servers.map((server) => server.port))]
+    .sort((a, b) => a - b)
+    .join(",");
 
   useEffect(() => {
     if (!access) return;

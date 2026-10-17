@@ -7,7 +7,7 @@
  */
 import * as NodeOS from "node:os";
 
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -209,7 +209,7 @@ export const resolveIosSimulatorPlan = Effect.fn("iosSimulatorPlan.resolve")(fun
   const loader = yield* T3ProjectFileLoader.T3ProjectFileLoader;
   const configured = Option.getOrNull(yield* loader.load(cwd))?.iosSimulator;
   const detected: IosSimulatorPlan | null =
-    (yield* HostProcessPlatform) === "darwin" && !(configured?.devBuild && configured.devServer)
+    (yield* HostProcess.Platform) === "darwin" && !(configured?.devBuild && configured.devServer)
       ? yield* detectIosSimulatorPlan(cwd)
       : null;
   const build = configured?.build ?? detected?.build;

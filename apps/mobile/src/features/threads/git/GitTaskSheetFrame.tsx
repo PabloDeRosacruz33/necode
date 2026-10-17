@@ -3,10 +3,10 @@ import type { ReactNode } from "react";
 import { Platform, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AndroidSheetHeader } from "../../../components/AndroidScreenHeader";
-import { SymbolView } from "../../../components/AppSymbol";
-import { AppText as Text } from "../../../components/AppText";
-import { MaterialScreenContent } from "../../../components/MaterialScreenContent";
+import { AndroidSheetHeader } from "../../../components/ui/AndroidScreenHeader";
+import { SymbolView } from "../../../components/ui/AppSymbol";
+import { AppText as Text } from "../../../components/ui/AppText";
+import { ScreenContent } from "../../../components/ui/ScreenContent";
 import { cn } from "../../../lib/cn";
 import { NativeStackScreenOptions } from "../../../native/StackHeader";
 
@@ -37,7 +37,7 @@ export function GitTaskSheetFrame(props: {
           hideBottomBorder
         />
       ) : null}
-      <MaterialScreenContent fitToContents>
+      <ScreenContent fitToContents>
         <ScrollView
           className="android:shrink android:grow-0 ios:flex-1"
           keyboardShouldPersistTaps="handled"
@@ -53,7 +53,7 @@ export function GitTaskSheetFrame(props: {
           </Text>
           {props.children}
         </ScrollView>
-      </MaterialScreenContent>
+      </ScreenContent>
     </View>
   );
 }

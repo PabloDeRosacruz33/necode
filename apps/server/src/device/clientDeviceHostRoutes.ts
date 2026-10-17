@@ -6,9 +6,9 @@
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import * as ChildProcess from "effect/unstable/process/ChildProcess";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import * as ChildProcess from "effect/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
@@ -74,11 +74,12 @@ const tools = Effect.gen(function* () {
     },
   });
 }).pipe(
-  Effect.catchTag("DeviceToolchainInstallError", () =>
-    Effect.succeed(
-      HttpServerResponse.text("The server could not install the tool", { status: 503 }),
-    ),
-  ),
+  Effect.catchTags({
+    DeviceToolchainInstallError: () =>
+      Effect.succeed(
+        HttpServerResponse.text("The server could not install the tool", { status: 503 }),
+      ),
+  }),
 );
 
 export const clientDeviceHostLinkRouteLayer = HttpRouter.add("GET", `${linkPrefix}*`, link);

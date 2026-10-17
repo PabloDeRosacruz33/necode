@@ -6,7 +6,7 @@
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { createOpenUrlEnvironmentAtoms } from "@t3tools/client-runtime/state/open-url";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useEffect } from "react";
 
 import { connectionAtomRuntime } from "~/connection/runtime";

@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off
 /**
  * Keeps a task worktree's installed dependencies in step with its lockfiles. Each time the
  * project's setup script (the one marked `runOnWorktreeCreate`) succeeds in a worktree, the
@@ -13,7 +14,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import * as ProcessRunner from "../processRunner.ts";
 

@@ -12,11 +12,11 @@ import {
   type VcsMergeTaskReviewResult,
 } from "@t3tools/contracts";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { useEffect, useRef, useState } from "react";
+import { type ComponentRef, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 
-import { SymbolView } from "../../../components/AppSymbol";
-import { AppText as Text, AppTextInput as TextInput } from "../../../components/AppText";
+import { SymbolView } from "../../../components/ui/AppSymbol";
+import { AppText as Text, AppTextInput as TextInput } from "../../../components/ui/AppText";
 import { uuidv4 } from "../../../lib/uuid";
 import { useEnvironmentQuery } from "../../../state/query";
 import { useAtomCommand } from "../../../state/use-atom-command";
@@ -530,7 +530,7 @@ function FileList(props: { readonly files: ReadonlyArray<string> }) {
 }
 
 function LogView(props: { readonly text: string }) {
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
   return (
     <ScrollView
       ref={scrollRef}

@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off
 /**
  * Web pages that agents, terminals and scripts open on this machine go to the device the person
  * is working from. Their processes get a PATH entry holding `open` and `xdg-open` stand-ins, and
@@ -12,7 +13,7 @@
  * The secret behind the tokens lives in the state directory so terminals that outlive a server
  * restart keep working.
  */
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NodeCrypto from "node:crypto";
 
 import * as Effect from "effect/Effect";
@@ -130,7 +131,7 @@ export const openUrlEnvironment = Effect.fn("openUrlEnvironment")(function* (inp
   readonly host: string | undefined;
   readonly threadId: string;
 }) {
-  if ((yield* HostProcessPlatform) === "win32") return null;
+  if ((yield* HostProcess.Platform) === "win32") return null;
   const { binDir, secret } = yield* ensureOpenUrlShim(input.stateDir);
   const host =
     !input.host || input.host === "0.0.0.0" || input.host === "::"

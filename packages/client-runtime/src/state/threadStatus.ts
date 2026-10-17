@@ -3,84 +3,76 @@
  * thread reads the same on every device: whether it is working, waiting on the user, or has
  * finished something the user has not looked at yet.
  */
-import type { OrchestrationThreadShell } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
 export type ThreadActivityStatus =
   | "approval"
   | "input"
   | "working"
-  | "monitoring"
+  | "waiting"
   | "failed"
+  | "limited"
   | "ready";
 
-type ActivityInput = Pick<
-  OrchestrationThreadShell,
-  "hasPendingApprovals" | "hasPendingUserInput" | "session" | "backgroundLiveness"
->;
+interface ThreadRuntimeLike {
+  readonly status: string;
+  readonly lastErrorClass?: string | null | undefined;
+}
+
+interface ActivityInput {
+  readonly hasPendingApprovals: boolean;
+  readonly hasPendingUserInput: boolean;
+  readonly pendingSubagentRequest?: string | null | undefined;
+  readonly runtime: ThreadRuntimeLike | null;
+}
+
+const ACTIVE_RUNTIME_STATUSES = new Set(["preparing", "queued", "starting", "running", "waiting"]);
 
 export function resolveThreadActivityStatus(thread: ActivityInput): ThreadActivityStatus {
-  if (thread.hasPendingApprovals) return "approval";
-  if (thread.hasPendingUserInput) return "input";
-  if (thread.session?.status === "running" || thread.session?.status === "starting") {
+  if (thread.hasPendingApprovals || thread.pendingSubagentRequest === "approval") return "approval";
+  if (thread.hasPendingUserInput || thread.pendingSubagentRequest === "user_input") return "input";
+  if (thread.runtime !== null && ACTIVE_RUNTIME_STATUSES.has(thread.runtime.status)) {
     return "working";
   }
-  // A failed session outranks lingering background liveness: the user must see the failure,
-  // not a stale Working.
-  if (thread.session?.status === "error") return "failed";
-  // Background work outlives the turn: fleets read as working; monitoring only when watch
-  // loops are the sole live work.
-  if (thread.backgroundLiveness === "working") return "working";
-  if (thread.backgroundLiveness === "monitoring") return "monitoring";
+  if (thread.runtime?.status === "idle") return "waiting";
+  if (thread.runtime?.status === "failed") {
+    return thread.runtime.lastErrorClass === "usage_limit" ? "limited" : "failed";
+  }
   return "ready";
 }
 
-type LatestTurnTiming = Pick<
-  NonNullable<OrchestrationThreadShell["latestTurn"]>,
-  "startedAt" | "completedAt"
->;
-
-export function isLatestTurnSettled(
-  latestTurn: LatestTurnTiming | null | undefined,
-  session: Pick<NonNullable<OrchestrationThreadShell["session"]>, "status"> | null | undefined,
-): boolean {
-  if (!latestTurn?.startedAt || !latestTurn.completedAt) return false;
-  return session?.status !== "running";
+interface LatestRunTiming {
+  readonly startedAt?: string | null | undefined;
+  readonly completedAt?: string | null | undefined;
 }
 
 /** A plan the agent wrote is waiting for the user to approve it. */
-export function isPlanReady(
-  thread: Pick<
-    OrchestrationThreadShell,
-    | "hasPendingUserInput"
-    | "interactionMode"
-    | "latestTurn"
-    | "session"
-    | "hasActionableProposedPlan"
-  >,
-): boolean {
+export function isPlanReady(thread: {
+  readonly hasPendingUserInput: boolean;
+  readonly interactionMode: string;
+  readonly latestRun: LatestRunTiming | null | undefined;
+  readonly runtime: ThreadRuntimeLike | null;
+  readonly hasActionableProposedPlan: boolean;
+}): boolean {
   return (
     !thread.hasPendingUserInput &&
     thread.interactionMode === "plan" &&
-    isLatestTurnSettled(thread.latestTurn, thread.session) &&
+    Boolean(thread.latestRun?.startedAt && thread.latestRun.completedAt) &&
+    thread.runtime?.status !== "running" &&
     thread.hasActionableProposedPlan
   );
 }
 
 /**
- * The latest turn finished after the user last opened the thread on this device. A thread the
- * device never recorded a visit for counts as read, so old threads do not all light up when a
- * device first gets this.
+ * The latest run finished after the user last opened the thread. A thread with no recorded
+ * visit counts as read, so old threads do not all light up when a device first gets this.
  */
 export function hasUnseenCompletion(thread: {
-  readonly latestTurn:
-    | Pick<NonNullable<OrchestrationThreadShell["latestTurn"]>, "completedAt">
-    | null
-    | undefined;
+  readonly latestRun: Pick<LatestRunTiming, "completedAt"> | null | undefined;
   readonly lastVisitedAt?: string | null | undefined;
 }): boolean {
-  if (!thread.latestTurn?.completedAt) return false;
-  const completedAt = Date.parse(thread.latestTurn.completedAt);
+  if (!thread.latestRun?.completedAt) return false;
+  const completedAt = Date.parse(thread.latestRun.completedAt);
   if (Number.isNaN(completedAt)) return false;
   if (!thread.lastVisitedAt) return false;
   const lastVisitedAt = Date.parse(thread.lastVisitedAt);
@@ -109,9 +101,9 @@ export function markThreadVisited<T extends Readonly<Record<string, string>>>(
 export function markThreadUnread<T extends Readonly<Record<string, string>>>(
   visits: T,
   threadKey: string,
-  latestTurnCompletedAt: string | null | undefined,
+  latestRunCompletedAt: string | null | undefined,
 ): T {
-  const completedAtMs = Date.parse(latestTurnCompletedAt ?? "");
+  const completedAtMs = Date.parse(latestRunCompletedAt ?? "");
   if (!Number.isFinite(completedAtMs)) return visits;
   const unreadVisitedAt = DateTime.formatIso(DateTime.makeUnsafe(completedAtMs - 1));
   if (visits[threadKey] === unreadVisitedAt) return visits;

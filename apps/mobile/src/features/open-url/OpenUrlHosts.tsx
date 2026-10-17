@@ -6,7 +6,7 @@
 import { createOpenUrlEnvironmentAtoms } from "@t3tools/client-runtime/state/open-url";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { isLocalLoopbackHost } from "@t3tools/shared/hostClassification";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useEffect } from "react";
 import { AppState } from "react-native";
 

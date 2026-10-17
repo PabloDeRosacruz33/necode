@@ -1,8 +1,10 @@
 import * as Schema from "effect/Schema";
 
 import {
-  AuthAdministrativeScopes,
+  AuthAccessReadScope,
+  AuthAccessWriteScope,
   AuthOrchestrationReadScope,
+  AuthRelayWriteScope,
   AuthPairingCredentialResult,
   AuthStandardClientScopes,
   type AuthEnvironmentScope,
@@ -50,8 +52,14 @@ export function teamMemberIdFromSubject(subject: string): string | null {
 export const TEAM_ROLE_SCOPES: Readonly<
   Record<TeamMemberRole, ReadonlyArray<AuthEnvironmentScope>>
 > = {
-  owner: AuthAdministrativeScopes,
-  member: AuthStandardClientScopes,
+  owner: AuthStandardClientScopes,
+  // Members work in threads but do not manage who has access or the relay.
+  member: AuthStandardClientScopes.filter(
+    (scope) =>
+      scope !== AuthAccessReadScope &&
+      scope !== AuthAccessWriteScope &&
+      scope !== AuthRelayWriteScope,
+  ),
   viewer: [AuthOrchestrationReadScope],
 };
 

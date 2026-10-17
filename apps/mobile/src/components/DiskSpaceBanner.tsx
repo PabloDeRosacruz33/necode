@@ -4,7 +4,7 @@ import { View } from "react-native";
 
 import { cn } from "../lib/cn";
 import { useServerDiskSpace } from "../state/diskSpace";
-import { AppText as Text } from "./AppText";
+import { AppText as Text } from "./ui/AppText";
 
 /** Shown above the composer while the environment's disk is running out of room. */
 export function DiskSpaceBanner(props: {

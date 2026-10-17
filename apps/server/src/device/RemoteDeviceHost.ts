@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off
 /**
  * A device host on another machine, reached through a transport: SSH to a Mac the server can log
  * into, or the Necode desktop app of a person working remotely (their own Mac's simulators).
@@ -19,7 +20,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Schema from "effect/Schema";
-import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClient from "effect/http/HttpClient";
 import * as ServerConfig from "../config.ts";
 import * as DeviceHost from "./DeviceHost.ts";
 import { remoteDeviceScript } from "./sshDeviceScript.ts";
