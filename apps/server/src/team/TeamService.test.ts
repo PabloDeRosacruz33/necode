@@ -195,6 +195,17 @@ it.layer(NodeServices.layer)("TeamService", (it) => {
         GIT_COMMITTER_EMAIL: "roi@necora.pro",
       });
 
+      // A message sent since the v2 engine outranks the legacy projection's author.
+      yield* team.recordThreadAuthor("thread-1", TEAM_OWNER_MEMBER_ID);
+      expect(yield* team.latestAuthorForThread("thread-1")).toBe(TEAM_OWNER_MEMBER_ID);
+      yield* team.recordThreadAuthor("thread-2", roi.memberId);
+      yield* team.recordThreadAuthor("thread-1", roi.memberId);
+      expect(yield* team.gitIdentityForThread("thread-2")).toEqual({
+        name: "Roi",
+        email: "roi@necora.pro",
+      });
+      expect(yield* team.latestAuthorForThread("thread-3")).toBeNull();
+
       yield* team.updateMember({ memberId: roi.memberId, git: null });
       expect(yield* team.gitIdentityForThread("thread-1")).toBeNull();
     }).pipe(Effect.provide(TeamTestLayer)),

@@ -74,6 +74,10 @@ export interface TeamServiceShape {
   readonly invite: (input: TeamInviteInput) => Effect.Effect<TeamInviteResult, TeamError>;
   readonly revokeMember: (memberId: string) => Effect.Effect<boolean, TeamError>;
   readonly updateMember: (input: TeamUpdateMemberInput) => Effect.Effect<TeamMember, TeamError>;
+  /** Remembers `memberId` as the sender of `threadId`'s latest message. */
+  readonly recordThreadAuthor: (threadId: string, memberId: string) => Effect.Effect<void>;
+  /** Who sent a thread's latest message, or null when unattributed. */
+  readonly latestAuthorForThread: (threadId: string) => Effect.Effect<string | null>;
   /** The git identity of whoever sent a thread's latest message, when they set one. */
   readonly gitIdentityForThread: (threadId: string) => Effect.Effect<GitIdentity | null>;
   readonly gitIdentityForMember: (memberId: string) => Effect.Effect<GitIdentity | null>;
@@ -134,6 +138,14 @@ export const make = Effect.gen(function* () {
       git_email TEXT NOT NULL
     )
   `.pipe(Effect.mapError(toTeamError("Could not prepare git identities")), Effect.orDie);
+  // Orchestration v2 messages carry no team author, so the latest sender is kept beside them.
+  yield* sql`
+    CREATE TABLE IF NOT EXISTS team_thread_authors (
+      thread_id TEXT PRIMARY KEY,
+      member_id TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `.pipe(Effect.mapError(toTeamError("Could not prepare thread authors")), Effect.orDie);
 
   const memberColumns = sql`
     m.member_id AS "memberId",
@@ -349,19 +361,38 @@ export const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => null),
     );
 
-  const gitIdentityForThread: TeamServiceShape["gitIdentityForThread"] = (threadId) =>
-    sql<GitIdentity>`
-      SELECT git_name AS "name", git_email AS "email"
-      FROM team_member_git_identities
-      WHERE member_id = (
+  const recordThreadAuthor: TeamServiceShape["recordThreadAuthor"] = (threadId, memberId) =>
+    Effect.gen(function* () {
+      const now = DateTime.formatIso(yield* DateTime.now);
+      yield* sql`
+        INSERT INTO team_thread_authors (thread_id, member_id, updated_at)
+        VALUES (${threadId}, ${memberId}, ${now})
+        ON CONFLICT (thread_id) DO UPDATE SET member_id = excluded.member_id, updated_at = excluded.updated_at
+      `;
+    }).pipe(Effect.ignore);
+
+  // Threads untouched since the v2 import fall back to the author the legacy projection kept.
+  const latestAuthorForThread: TeamServiceShape["latestAuthorForThread"] = (threadId) =>
+    sql<{ readonly memberId: string }>`
+      SELECT member_id AS "memberId" FROM team_thread_authors WHERE thread_id = ${threadId}
+      UNION ALL
+      SELECT * FROM (
         SELECT author_member_id FROM projection_thread_messages
-        WHERE thread_id = ${threadId} AND role = 'user'
+        WHERE thread_id = ${threadId} AND role = 'user' AND author_member_id IS NOT NULL
         ORDER BY created_at DESC
         LIMIT 1
       )
+      LIMIT 1
     `.pipe(
-      Effect.map((rows) => rows[0] ?? null),
+      Effect.map((rows) => rows[0]?.memberId ?? null),
       Effect.orElseSucceed(() => null),
+    );
+
+  const gitIdentityForThread: TeamServiceShape["gitIdentityForThread"] = (threadId) =>
+    latestAuthorForThread(threadId).pipe(
+      Effect.flatMap((memberId) =>
+        memberId === null ? Effect.succeed(null) : gitIdentityForMember(memberId),
+      ),
     );
 
   const setOwnGitIdentity: TeamServiceShape["setOwnGitIdentity"] = (memberId, input) =>
@@ -394,6 +425,8 @@ export const make = Effect.gen(function* () {
   return TeamService.of({
     listMembers,
     setOwnGitIdentity,
+    recordThreadAuthor,
+    latestAuthorForThread,
     gitIdentityForThread,
     gitIdentityForMember,
     invite,

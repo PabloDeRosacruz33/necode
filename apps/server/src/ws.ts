@@ -2072,6 +2072,12 @@ const layerWsRpc = (
                 )
                 .pipe(
                   Effect.tap(() => recordClientCommandAnalytics(command)),
+                  // Whoever sends a message is who the thread works for: its commits and pages.
+                  Effect.tap(() =>
+                    command.type === "message.dispatch" && memberId !== null
+                      ? team.recordThreadAuthor(command.threadId, memberId)
+                      : Effect.void,
+                  ),
                   Effect.map((result) => ({ sequence: result.sequence })),
                   Effect.mapError((cause) => {
                     const detail = userFacingDispatchErrorMessage(cause);
@@ -2222,6 +2228,11 @@ const layerWsRpc = (
                         ),
                         Effect.ignore,
                       ),
+                  ),
+                  Effect.tap((result) =>
+                    input.initialMessage !== undefined && memberId !== null
+                      ? team.recordThreadAuthor(result.threadId, memberId)
+                      : Effect.void,
                   ),
                   Effect.map((result) => ({
                     ...result,
