@@ -17,6 +17,9 @@ set -a
 . "$HOME/.config/necode/asc.env"
 set +a
 
+# Necode's own features must still work (an upstream merge can unhook them) before publishing.
+"$ROOT/scripts/necode/check-necode.sh"
+
 BUILD_NUMBER="$(date -u +%Y%m%d%H%M)"
 echo "Building Necode iOS, build $BUILD_NUMBER"
 

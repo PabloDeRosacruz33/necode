@@ -18,6 +18,9 @@ set -a
 . "$HOME/.config/necode/asc.env"
 set +a
 
+# Necode's own features must still work (an upstream merge can unhook them) before publishing.
+"$ROOT/scripts/necode/check-necode.sh"
+
 if [ "${1:-}" != "" ]; then
   VERSION="$1"
 else
