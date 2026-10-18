@@ -23,6 +23,7 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FiberSet from "effect/FiberSet";
 import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
@@ -44,6 +45,8 @@ import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as ServerSettings from "../serverSettings.ts";
+import * as ServerConfig from "../config.ts";
+import { openUrlEnvironment } from "../openUrl/openUrlEnvironment.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as EventSink from "./EventSink.ts";
 import * as CommandOutputHub from "./CommandOutputHub.ts";
@@ -329,6 +332,24 @@ export const layerWithOptions = (
       const providerEventIngestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
       const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
       const agentScope = yield* AgentScope;
+      const serverConfig = yield* Effect.serviceOption(ServerConfig.ServerConfig);
+      const pathService = yield* Effect.serviceOption(Path.Path);
+      // Necode: the agent's processes get the `open`/`git` stand-ins, so pages it opens go to the
+      // person's device and each commit is signed as whoever sent the thread's latest message.
+      const threadEnvironment = (threadId: ThreadId) =>
+        Option.isNone(serverConfig) || Option.isNone(pathService)
+          ? Effect.succeed(null)
+          : openUrlEnvironment({
+              stateDir: serverConfig.value.stateDir,
+              port: serverConfig.value.port,
+              host: serverConfig.value.host,
+              threadId,
+            }).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, pathService.value),
+              Effect.tapError((cause) => Effect.logWarning("Open-url shim unavailable", { cause })),
+              Effect.orElseSucceed(() => null),
+            );
       const agentAccessSettings = Effect.fn("ProviderSessionManagerV2.agentAccessSettings")(
         function* (threadId: ThreadId) {
           if (Option.isNone(serverSettings)) return { browser: true, device: false };
@@ -491,7 +512,12 @@ export const layerWithOptions = (
                   browserToolsAvailable,
                   capabilities,
                 });
-                yield* mcpSessions.set(credential.config);
+                const environment = yield* threadEnvironment(threadId);
+                yield* mcpSessions.set(
+                  environment === null
+                    ? credential.config
+                    : { ...credential.config, threadEnvironment: environment },
+                );
                 reserveMcpCredential(threadId, credential.config.providerSessionId);
                 return { mcpCredentialId: credential.config.providerSessionId, issued: true };
               }),

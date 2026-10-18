@@ -92,7 +92,7 @@ export interface ChatMessage {
   readonly creationSource?: OrchestrationV2CreationSource;
   readonly scheduledTaskId?: ScheduledTaskId;
   readonly senderThreadId?: ThreadId;
-  /** The team member who sent it; orchestration v2 does not record it yet. */
+  /** The team member who sent it. */
   readonly authorMemberId?: string | undefined;
   readonly createdAt: string;
   readonly updatedAt: string;

@@ -410,6 +410,30 @@ it.effect("retains automation and sender attribution while a message waits in th
   }).pipe(Effect.provide(harness.layer));
 });
 
+it.effect("keeps who sent the first message on the message and its turn item", () => {
+  const harness = makeHarness({ runSetup: () => Effect.never });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const base = launchInput({
+      command: "command:authored",
+      thread: "thread:authored",
+      message: "Hola",
+    });
+    const launched = yield* launches.launch({
+      ...base,
+      initialMessage: { ...base.initialMessage!, authorMemberId: "member-roi" },
+    });
+    const projection = yield* threads.getThreadProjection(launched.threadId);
+    assert.equal(projection.messages[0]?.authorMemberId, "member-roi");
+    const turnItem = projection.turnItems.find(
+      (item): item is Extract<typeof item, { type: "user_message" }> =>
+        item.type === "user_message",
+    );
+    assert.equal(turnItem?.authorMemberId, "member-roi");
+  }).pipe(Effect.provide(harness.layer));
+});
+
 it.effect("returns a visible preparing message while provisioning is still blocked", () =>
   Effect.gen(function* () {
     const worktreeEntered = yield* Deferred.make<void>();

@@ -1347,6 +1347,13 @@ const layerWsRpc = (
       // The person behind this connection comes from the authenticated session, never the client.
       const memberId = teamMemberIdFromSubject(currentSession.subject);
       const team = yield* TeamService.TeamService;
+      // Messages carry who sent them, so the thread shows each person's name next to theirs.
+      const withAuthor = <C extends { readonly authorMemberId?: string | undefined }>(
+        command: C,
+      ): C => {
+        const { authorMemberId: _fromClient, ...rest } = command;
+        return (memberId === null ? rest : { ...rest, authorMemberId: memberId }) as C;
+      };
       const diskSpace = yield* Effect.serviceOption(DiskSpace.DiskSpace);
       const voiceTranscription = yield* VoiceTranscription.VoiceTranscription;
       const textGeneration = yield* TextGeneration;
@@ -2062,11 +2069,14 @@ const layerWsRpc = (
                   (command.type === "prepared-run.retry"
                     ? threadLaunch.retryPreparation(command)
                     : ThreadMessageIntake.dispatchCommand(
-                        ThreadManagementService.withCreationProvenance(command, {
-                          createdBy: "user",
-                          creationSource:
-                            "creationSource" in command ? command.creationSource : "web",
-                        }),
+                        ThreadManagementService.withCreationProvenance(
+                          command.type === "message.dispatch" ? withAuthor(command) : command,
+                          {
+                            createdBy: "user",
+                            creationSource:
+                              "creationSource" in command ? command.creationSource : "web",
+                          },
+                        ),
                       )
                   ).pipe(Effect.provide(intakeContext)),
                 )
@@ -2210,6 +2220,7 @@ const layerWsRpc = (
                             ...(input.initialMessage.context === undefined
                               ? {}
                               : { context: input.initialMessage.context }),
+                            ...(memberId === null ? {} : { authorMemberId: memberId }),
                           },
                         }),
                     createdBy: "user",

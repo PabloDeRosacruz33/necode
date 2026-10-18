@@ -8037,8 +8037,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           nativeThreadId: string,
         ) {
           const queryPolicy = claudeRuntimeQueryPolicyForRuntimePolicy(turnInput.runtimePolicy);
+          const mcpSession = yield* mcpSessions.read(turnInput.threadId);
           const mcpOverrides = claudeMcpQueryOverrides({
-            mcpSession: yield* mcpSessions.read(turnInput.threadId),
+            mcpSession,
             readOnlySandbox:
               sandboxPolicyKindForClaudeRuntimePolicy(turnInput.runtimePolicy) === "readOnly",
             ...(queryPolicy.allowedTools === undefined
@@ -8134,7 +8135,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             cwd: turnInput.runtimePolicy.cwd,
             attachmentsDir,
             settings: adapterOptions.settings,
-            environment: adapterOptions.environment,
+            environment: McpProviderSession.withAgentDeviceEnvironment(
+              adapterOptions.environment,
+              mcpSession,
+            ),
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
             ...(mcpOverrides.allowedTools === undefined
               ? {}

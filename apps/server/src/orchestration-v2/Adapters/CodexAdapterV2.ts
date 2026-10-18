@@ -1710,7 +1710,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           providerSessionId: input.providerSessionId,
           runtimePolicy: input.runtimePolicy,
           settings: resolvedRuntime?.config ?? adapterOptions.settings,
-          environment: resolvedRuntime?.environment ?? adapterOptions.environment,
+          // Necode: the thread's `open`/`git` stand-ins (see ProviderSessionManager).
+          environment: McpProviderSession.withAgentDeviceEnvironment(
+            resolvedRuntime?.environment ?? adapterOptions.environment,
+            yield* readMcpSession(input.threadId),
+          ),
         });
         const additionalContextByThread = yield* Ref.make(
           new Map<
