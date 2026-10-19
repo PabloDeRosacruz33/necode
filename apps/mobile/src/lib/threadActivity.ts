@@ -134,7 +134,7 @@ export interface ThreadFeedMessage {
   readonly creationSource?: OrchestrationV2CreationSource;
   readonly scheduledTaskId?: ScheduledTaskId;
   readonly senderThreadId?: ThreadId;
-  /** The team member who sent it; orchestration v2 does not record it yet. */
+  /** The team member who sent it. */
   readonly authorMemberId?: string | undefined;
   readonly visibility: OrchestrationV2ProjectedTurnItem["visibility"];
   readonly sourceThreadId: ThreadId;
@@ -1825,6 +1825,7 @@ export function buildThreadFeed(
                 creationSource: item.creationSource,
                 ...(item.scheduledTaskId ? { scheduledTaskId: item.scheduledTaskId } : {}),
                 ...(item.senderThreadId ? { senderThreadId: item.senderThreadId } : {}),
+                ...(item.authorMemberId ? { authorMemberId: item.authorMemberId } : {}),
               }
             : {}),
           visibility: row.visibility,

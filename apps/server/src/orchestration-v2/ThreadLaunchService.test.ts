@@ -1360,6 +1360,61 @@ it.effect.each(
   ),
 );
 
+it.effect("starts a new worktree as a Necode task named after the person and the work", () =>
+  Effect.gen(function* () {
+    const harness = makeHarness();
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const config = yield* ServerConfig.ServerConfig;
+      yield* launches.launch(
+        launchInput({
+          command: "command:launch:named-task",
+          thread: "thread:launch:named-task",
+          message: "Rehaz las fábulas",
+          workspace: {
+            type: "worktree",
+            baseRef: "main",
+            taskName: "Fábulas v1",
+            branchPrefix: "Roi",
+          },
+        }),
+      );
+      // Without a name, the first message names it (the model's branch, without its folder).
+      yield* launches.launch(
+        launchInput({
+          command: "command:launch:unnamed-task",
+          thread: "thread:launch:unnamed-task",
+          message: "Build the feature",
+          workspace: { type: "worktree", baseRef: "main", branchPrefix: "pablo" },
+        }),
+      );
+      // Naming runs real git, so wait in real time rather than event-loop turns.
+      for (let attempt = 0; attempt < 500; attempt += 1) {
+        if (harness.createWorktree.mock.calls.length === 2) break;
+        yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+        yield* Effect.promise(() =>
+          import("node:timers/promises").then((timers) => timers.setTimeout(10)),
+        );
+      }
+      const created = harness.createWorktree.mock.calls.map((call) => ({
+        branch: call[0]?.newRefName,
+        path: call[0]?.path,
+      }));
+      assert.deepEqual(created, [
+        { branch: "roi/fabulas-v1", path: `${config.worktreesDir}/repo/fabulas-v1` },
+        { branch: "pablo/generated-branch", path: `${config.worktreesDir}/repo/generated-branch` },
+      ]);
+      assert.equal(harness.renameBranch.mock.calls.length, 0);
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(
+    Effect.provide(
+      ServerConfig.layerTest(process.cwd(), { prefix: "launch-task-" }).pipe(
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    ),
+  ),
+);
+
 it.effect("provisions under t3-<hash> when a plain t3 branch blocks t3/*", () =>
   Effect.gen(function* () {
     const harness = makeHarness({

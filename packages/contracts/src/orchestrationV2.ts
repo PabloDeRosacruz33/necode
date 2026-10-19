@@ -510,6 +510,14 @@ export const OrchestrationV2ThreadLaunchWorkspaceStrategy = Schema.Union([
     baseRef: TrimmedNonEmptyString,
     branch: Schema.optional(TrimmedNonEmptyString),
     startFromOrigin: Schema.optional(Schema.Boolean),
+    /**
+     * Necode: a named task. Without `branch`, the branch is `<branchPrefix>/<slug>` and the folder
+     * `<worktrees>/<repo>/<slug>`, adding -2, -3… when taken. Without a name, the first message
+     * names it.
+     */
+    taskName: Schema.optional(TrimmedNonEmptyString),
+    /** e.g. "pablo"; defaults to the sender's git name, then the server's git user.name. */
+    branchPrefix: Schema.optional(TrimmedNonEmptyString),
   }),
 ]);
 export type OrchestrationV2ThreadLaunchWorkspaceStrategy =

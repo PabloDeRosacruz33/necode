@@ -74,6 +74,8 @@ interface LegacyMessageRow {
   readonly text: string;
   readonly attachments_json: string | null;
   readonly context_json?: string | null;
+  /** Necode: the team member who sent a user message (migration 63). */
+  readonly author_member_id?: string | null;
   readonly is_streaming: number;
   readonly created_at: string;
   readonly updated_at: string;
@@ -248,6 +250,7 @@ function messageEvents(row: LegacyMessageRow): ReadonlyArray<OrchestrationV2Doma
   const createdAt = dateTime(row.created_at);
   const updatedAt = dateTime(row.updated_at);
   const attachments = attachmentsFor(row);
+  const author = row.role === "user" ? row.author_member_id : null;
   const message: OrchestrationV2ConversationMessage = {
     createdBy: row.role === "user" ? "user" : "agent",
     creationSource: "server",
@@ -265,6 +268,7 @@ function messageEvents(row: LegacyMessageRow): ReadonlyArray<OrchestrationV2Doma
         }
       : {}),
     attachments,
+    ...(author ? { authorMemberId: author } : {}),
     streaming: false,
     createdAt,
     updatedAt,
@@ -303,6 +307,7 @@ function messageEvents(row: LegacyMessageRow): ReadonlyArray<OrchestrationV2Doma
               }
             : {}),
           attachments,
+          ...(author ? { authorMemberId: author } : {}),
         }
       : {
           ...baseTurnItem,
@@ -358,6 +363,7 @@ const make = Effect.gen(function* () {
         text,
         attachments_json,
         context_json,
+        author_member_id,
         is_streaming,
         created_at,
         updated_at,
@@ -381,6 +387,7 @@ const make = Effect.gen(function* () {
           message.text,
           message.attachments_json,
           message.context_json,
+          message.author_member_id,
           message.is_streaming,
           message.created_at,
           message.updated_at,
@@ -411,6 +418,7 @@ const make = Effect.gen(function* () {
           message.text,
           message.attachments_json,
           message.context_json,
+          message.author_member_id,
           message.is_streaming,
           message.created_at,
           message.updated_at,

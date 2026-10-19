@@ -20,6 +20,10 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import * as Duration from "effect/Duration";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import { ChildProcessSpawner } from "effect/process";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -36,7 +40,11 @@ import {
   WORKTREE_BRANCH_PREFIX,
 } from "@t3tools/shared/git";
 
+import * as ServerConfig from "../config.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
+import * as ProcessRunner from "../processRunner.ts";
+import { cloneDependencies } from "../project/dependencyClone.ts";
+import { resolveTaskWorktree, slugifyTaskName } from "../vcs/taskBranch.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
@@ -62,6 +70,8 @@ export type ThreadLaunchWorkspaceStrategy =
       readonly baseRef: string;
       readonly branch?: string | undefined;
       readonly startFromOrigin?: boolean | undefined;
+      readonly taskName?: string | undefined;
+      readonly branchPrefix?: string | undefined;
     };
 
 export interface ThreadLaunchInitialMessage {
@@ -209,6 +219,40 @@ const make = Effect.gen(function* () {
   const ids = yield* IdAllocator.IdAllocatorV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
+  // Necode tasks need the tasks folder and git; without them worktrees keep upstream's naming.
+  const taskServices = yield* Effect.all([
+    Effect.serviceOption(ServerConfig.ServerConfig),
+    Effect.serviceOption(FileSystem.FileSystem),
+    Effect.serviceOption(Path.Path),
+    Effect.serviceOption(ChildProcessSpawner.ChildProcessSpawner),
+  ]).pipe(
+    Effect.map(([config, fileSystem, path, spawner]) =>
+      Option.isSome(config) &&
+      Option.isSome(fileSystem) &&
+      Option.isSome(path) &&
+      Option.isSome(spawner)
+        ? Option.some({
+            worktreesDir: config.value.worktreesDir,
+            provide: <A, E>(
+              effect: Effect.Effect<
+                A,
+                E,
+                | FileSystem.FileSystem
+                | Path.Path
+                | ChildProcessSpawner.ChildProcessSpawner
+                | ProcessRunner.ProcessRunner
+              >,
+            ) =>
+              effect.pipe(
+                Effect.provide(ProcessRunner.layer),
+                Effect.provideService(FileSystem.FileSystem, fileSystem.value),
+                Effect.provideService(Path.Path, path.value),
+                Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner.value),
+              ),
+          })
+        : Option.none(),
+    ),
+  );
   const preparationScope = yield* Scope.make("sequential");
   const scheduledLaunches = yield* Ref.make<ReadonlySet<CommandId>>(new Set());
   yield* Effect.addFinalizer(() => Scope.close(preparationScope, Exit.void));
@@ -362,14 +406,59 @@ const make = Effect.gen(function* () {
             );
         });
 
+      /**
+       * Necode: a worktree started without a name is named from its first message by the source
+       * control model ("fabulas-v1" rather than the message's first words), falling back to
+       * those words when the model is slow or unavailable.
+       */
+      const suggestTaskName = (cwd: string, message: ThreadLaunchInitialMessage) => {
+        const fallback = message.text.split("\n")[0]!.trim().slice(0, 60) || "tarea";
+        return generateBranchNameFor(cwd, message).pipe(
+          // Models answer with a full branch ("feature/fabulas-v1"); only the name matters here.
+          Effect.map(({ branch: generated }) => {
+            const name = generated.slice(generated.lastIndexOf("/") + 1);
+            return slugifyTaskName(name) === "tarea" ? fallback : name;
+          }),
+          Effect.timeoutOption(Duration.seconds(8)),
+          Effect.map((name) => Option.getOrElse(name, () => fallback)),
+          Effect.orElseSucceed(() => fallback),
+        );
+      };
+
       const requestedBranch = input.workspaceStrategy.branch;
       let branch: string | null;
+      let taskWorktreePath: string | null = null;
       if (input.workspaceStrategy.type === "worktree" && requestedBranch === undefined) {
-        const uuid = yield* randomUuidV4;
-        branch = buildTemporaryWorktreeBranchName(() => uuid.replaceAll("-", ""));
+        const strategy = input.workspaceStrategy;
+        const taskName =
+          strategy.taskName ??
+          (initialMessage === undefined || Option.isNone(taskServices)
+            ? undefined
+            : yield* suggestTaskName(project.workspaceRoot, initialMessage));
+        const task =
+          taskName === undefined || Option.isNone(taskServices)
+            ? null
+            : yield* taskServices.value
+                .provide(
+                  resolveTaskWorktree({
+                    projectCwd: project.workspaceRoot,
+                    worktreesDir: taskServices.value.worktreesDir,
+                    taskName,
+                    branchPrefix: strategy.branchPrefix,
+                  }),
+                )
+                .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)));
+        if (task !== null) {
+          branch = task.branch;
+          taskWorktreePath = task.worktreePath;
+        } else {
+          const uuid = yield* randomUuidV4;
+          branch = buildTemporaryWorktreeBranchName(() => uuid.replaceAll("-", ""));
+        }
       } else {
         branch = requestedBranch ?? null;
       }
+      let dependenciesReady = false;
       let worktreePath =
         input.workspaceStrategy.type === "existing_worktree"
           ? input.workspaceStrategy.worktreePath
@@ -442,7 +531,7 @@ const make = Effect.gen(function* () {
               refName: startRef,
               newRefName: branch!,
               baseRefName: input.workspaceStrategy.baseRef,
-              path: null,
+              path: taskWorktreePath,
             },
             {
               progress: {
@@ -459,6 +548,21 @@ const make = Effect.gen(function* () {
         worktreePath = worktree.worktree.path;
         branch = worktree.worktree.refName;
         createdWorktreePath = worktreePath;
+        // A new task gets its dependencies cloned from a checkout with the same lockfiles, so
+        // the setup script can skip installing.
+        if (Option.isSome(taskServices)) {
+          const cloned = yield* taskServices.value
+            .provide(
+              cloneDependencies({ projectCwd: project.workspaceRoot, worktreePath: worktreePath }),
+            )
+            .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
+          if (cloned.length > 0) {
+            dependenciesReady = true;
+            yield* setupTracker.stage(threadId, "checkout", {
+              detail: `dependencies cloned (${cloned.join(", ")})`,
+            });
+          }
+        }
         yield* setupTracker.update(threadId, (snapshot) => ({ ...snapshot, worktreePath, branch }));
         yield* setupTracker.stageStatus(threadId, "checkout", "done");
       }
@@ -582,6 +686,7 @@ const make = Effect.gen(function* () {
           projectId: input.projectId,
           projectCwd: project.workspaceRoot,
           worktreePath: cwd,
+          ...(dependenciesReady ? { extraEnv: { T3CODE_DEPENDENCIES_READY: "1" } } : {}),
           ...(tracked
             ? {
                 observeCompletion: {

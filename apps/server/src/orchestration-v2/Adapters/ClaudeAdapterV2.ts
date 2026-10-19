@@ -45,6 +45,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk/sdk-tools";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- the SDK takes a Node ChildProcess for the CLI.
 import * as NodeChildProcess from "node:child_process";
+import * as NodeOS from "node:os";
 import { parseCliArgs } from "@t3tools/shared/cliArgs";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -121,6 +122,7 @@ import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { signalProcessGroup } from "@t3tools/provider-core/server/processGroup";
 import {
   claudeSignedOutMessage,
+  ensureClaudeTranscriptForCwd,
   makeClaudeEnvironment,
 } from "../../provider/Drivers/ClaudeHome.ts";
 import {
@@ -8156,6 +8158,22 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             onUserDialog,
             supportedDialogKinds: ["resume_return"],
           });
+          const resumeCwd = turnInput.runtimePolicy.cwd;
+          if (shouldResume && resumeCwd) {
+            // Necode: a thread that moved folders (a continued task, a relocated repository)
+            // still resumes; Claude only finds transcripts under the current folder.
+            yield* ensureClaudeTranscriptForCwd({
+              claudeHome:
+                adapterOptions.environment.CLAUDE_CONFIG_DIR ??
+                path.join(adapterOptions.environment.HOME ?? NodeOS.homedir(), ".claude"),
+              cwd: resumeCwd,
+              sessionId: nativeThreadId,
+            }).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, path),
+              Effect.ignore({ log: true }),
+            );
+          }
           const querySession = yield* queryRunner
             .open({
               threadId: turnInput.threadId,

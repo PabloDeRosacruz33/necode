@@ -67,6 +67,7 @@ import Migration0061 from "./Migrations/061_PullRequestReviewGuides.ts";
 import Migration0062 from "./Migrations/062_ThreadFailureLookupIndex.ts";
 // Necode shipped TeamMembers as 55 before upstream took 55 for OrchestrationV2.
 import Migration0063 from "./Migrations/055_TeamMembers.ts";
+import Migration0064 from "./Migrations/064_BackfillMessageAuthors.ts";
 
 export const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -133,6 +134,7 @@ export const migrationEntries = [
   [61, "PullRequestReviewGuides", Migration0061],
   [62, "ThreadFailureLookupIndex", Migration0062],
   [63, "TeamMembers", Migration0063],
+  [64, "BackfillMessageAuthors", Migration0064],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

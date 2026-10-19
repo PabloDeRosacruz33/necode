@@ -5437,16 +5437,18 @@ export default function ChatView(props: ChatViewProps) {
     })
       ? activeContextWindow.usedTokens
       : null;
-  const [fullHistoryThreadKeys, setFullHistoryThreadKeys] = useState<ReadonlySet<string>>(
+  // Necode: compacting before a send is opt-in. The chip offers it; the next send keeps the full
+  // history unless the person turns it on (Claude still compacts on its own when context fills).
+  const [compactOnSendThreadKeys, setCompactOnSendThreadKeys] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const keepFullHistory = fullHistoryThreadKeys.has(routeThreadKey);
+  const keepFullHistory = !compactOnSendThreadKeys.has(routeThreadKey);
   const setKeepFullHistory = (threadKey: string, keep: boolean) => {
-    setFullHistoryThreadKeys((current) => {
-      if (current.has(threadKey) === keep) return current;
+    setCompactOnSendThreadKeys((current) => {
+      if (current.has(threadKey) === !keep) return current;
       const next = new Set(current);
-      if (keep) next.add(threadKey);
-      else next.delete(threadKey);
+      if (keep) next.delete(threadKey);
+      else next.add(threadKey);
       return next;
     });
   };
@@ -7143,7 +7145,7 @@ export default function ChatView(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
-        setKeepFullHistory(routeThreadKey, false);
+        setKeepFullHistory(routeThreadKey, true);
         clearUsageLimitsFor(routeThreadKey);
         if (turnUsesAttachmentUploads) {
           releaseDraftAttachments(composerAttachmentsSnapshot);

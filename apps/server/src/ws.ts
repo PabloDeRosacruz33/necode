@@ -2190,7 +2190,8 @@ const layerWsRpc = (
             "orchestration_v2.command_id": input.commandId,
             "orchestration_v2.project_id": input.projectId,
           }).pipe(
-            Effect.andThen(
+            Effect.andThen(memberBranchPrefix),
+            Effect.flatMap((memberPrefix) =>
               startup
                 .enqueueCommand(
                   ThreadMessageIntake.launchThread({
@@ -2207,7 +2208,13 @@ const layerWsRpc = (
                     modelSelection: input.modelSelection,
                     runtimeMode: input.runtimeMode,
                     interactionMode: input.interactionMode,
-                    workspaceStrategy: input.workspaceStrategy,
+                    // Tasks someone starts are named after them (`roi/…`).
+                    workspaceStrategy:
+                      input.workspaceStrategy.type === "worktree" &&
+                      input.workspaceStrategy.branchPrefix === undefined &&
+                      memberPrefix
+                        ? { ...input.workspaceStrategy, branchPrefix: memberPrefix }
+                        : input.workspaceStrategy,
                     ...(input.initialMessage === undefined
                       ? {}
                       : {

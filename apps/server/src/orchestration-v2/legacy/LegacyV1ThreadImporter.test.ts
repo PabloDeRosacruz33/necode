@@ -166,7 +166,8 @@ it.layer(layerTest)("LegacyV1ThreadImporter", (it) => {
           attachments_json,
           is_streaming,
           created_at,
-          updated_at
+          updated_at,
+          author_member_id
         ) VALUES
           (
             'message:legacy:1',
@@ -177,7 +178,8 @@ it.layer(layerTest)("LegacyV1ThreadImporter", (it) => {
             '[]',
             0,
             '2026-01-01T01:00:00.000Z',
-            '2026-01-01T01:00:00.000Z'
+            '2026-01-01T01:00:00.000Z',
+            'member:roi'
           ),
           (
             'message:legacy:2',
@@ -188,7 +190,8 @@ it.layer(layerTest)("LegacyV1ThreadImporter", (it) => {
             '[]',
             0,
             '2026-01-02T01:00:00.000Z',
-            '2026-01-02T01:00:00.000Z'
+            '2026-01-02T01:00:00.000Z',
+            NULL
           ),
           (
             'message:legacy:3',
@@ -199,7 +202,8 @@ it.layer(layerTest)("LegacyV1ThreadImporter", (it) => {
             '[]',
             0,
             '2026-01-03T01:00:00.000Z',
-            '2026-01-03T01:00:00.000Z'
+            '2026-01-03T01:00:00.000Z',
+            NULL
           ),
           (
             'message:legacy:4',
@@ -210,7 +214,8 @@ it.layer(layerTest)("LegacyV1ThreadImporter", (it) => {
             '[]',
             1,
             '2026-01-04T01:00:00.000Z',
-            '2026-01-04T01:00:00.000Z'
+            '2026-01-04T01:00:00.000Z',
+            NULL
         )
       `;
 
@@ -324,6 +329,18 @@ it.layer(layerTest)("LegacyV1ThreadImporter", (it) => {
       assert.deepStrictEqual(
         projection.messages.map((message) => message.id),
         ["message:legacy:1", "message:legacy:2", "message:legacy:3", "message:legacy:4"],
+      );
+      // Necode: who sent each user message survives the import.
+      assert.deepStrictEqual(
+        projection.messages.map((message) => message.authorMemberId),
+        ["member:roi", undefined, undefined, undefined],
+      );
+      const firstUserItem = projection.turnItems.find(
+        (item) => item.type === "user_message" && item.messageId === "message:legacy:1",
+      );
+      assert.equal(
+        firstUserItem?.type === "user_message" ? firstUserItem.authorMemberId : undefined,
+        "member:roi",
       );
       assert.deepStrictEqual(
         projection.turnItems

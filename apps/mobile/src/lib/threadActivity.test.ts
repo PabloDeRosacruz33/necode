@@ -356,6 +356,14 @@ describe("buildThreadFeed", () => {
     expect(messageEntry?.message.sourceThreadId).toBe(threadId);
   });
 
+  it("keeps who sent a user message so the feed can name them", () => {
+    const feed = buildThreadFeed([
+      projected({ ...userMessage(), authorMemberId: "member-roi" }, 0),
+    ]);
+    const messageEntry = feed.find((entry) => entry.type === "message");
+    expect(messageEntry?.message.authorMemberId).toBe("member-roi");
+  });
+
   it("anchors feedback before later committed turns", () => {
     const laterUser = {
       ...userMessage("2026-08-29T00:00:05.000Z"),

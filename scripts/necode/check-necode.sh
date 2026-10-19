@@ -34,6 +34,8 @@ run apps/server \
   src/openUrl/openUrlEnvironment.test.ts \
   src/orchestration-v2/ProviderSessionManager.test.ts \
   src/orchestration-v2/ThreadLaunchService.test.ts \
+  src/orchestration-v2/legacy/LegacyV1ThreadImporter.test.ts \
+  src/persistence/Migrations/064_BackfillMessageAuthors.test.ts \
   src/device/ClientDeviceHosts.test.ts \
   src/diskSpace/DiskSpace.test.ts \
   src/macApp/iosSimulatorPlan.test.ts \
@@ -54,6 +56,9 @@ run apps/server \
 run apps/web \
   src/components/git/commitGraph.logic.test.ts \
   src/components/git/gitPanel.logic.test.ts
+
+run apps/mobile \
+  src/lib/threadActivity.test.ts
 
 run packages/client-runtime \
   src/state/team.test.ts \
