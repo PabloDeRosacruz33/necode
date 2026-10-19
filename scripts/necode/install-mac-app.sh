@@ -21,7 +21,8 @@ set -uo pipefail
 LABEL="pro.necora.necode.install-once"
 STATE="$HOME/.cache/necode-install"
 INSTALLED="/Applications/Necode.app"
-DB="$HOME/.necode/userdata/state.sqlite"
+# Orchestration v2 (since the October 2026 T3 Code merge); state.sqlite no longer tracks runs.
+DB="$HOME/.necode/userdata/statev2.sqlite"
 PORT=3773
 
 log() { echo "$(date '+%F %T') $*" >>"$STATE/install.log"; }
@@ -33,7 +34,7 @@ app_version() { /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$
 app_running() { osascript -e 'application "Necode" is running' 2>/dev/null | grep -q true; }
 port_listening() { lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; }
 server_answers() { [ "$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://127.0.0.1:$PORT/.well-known/t3/environment")" = 200 ]; }
-running_turns() { sqlite3 -readonly "$DB" "select count(*) from projection_thread_sessions where status = 'running';" 2>/dev/null || echo 0; }
+running_turns() { sqlite3 -readonly "$DB" "select count(*) from orchestration_v2_projection_runs where status = 'running';" 2>/dev/null || echo 0; }
 wait_until() { # seconds, condition...
   local deadline=$((SECONDS + $1)); shift
   until "$@"; do [ "$SECONDS" -ge "$deadline" ] && return 1; sleep 2; done
