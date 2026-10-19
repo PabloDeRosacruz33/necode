@@ -7913,7 +7913,9 @@ export default function ChatView(props: ChatViewProps) {
     keybindings,
     availableEditors,
     showOpenInPicker,
-    gitCwd,
+    // Necode: Simular and the Mac app build where the thread works; a merged task's folder is
+    // gone until its next turn, and the project's checkout already has its work then.
+    gitCwd: worktreeGone && activeProject ? activeProject.workspaceRoot : gitCwd,
     isGitRepo,
     envLocked,
     availableEnvironments: logicalProjectEnvironments,
