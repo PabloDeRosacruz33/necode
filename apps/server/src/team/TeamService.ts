@@ -3,6 +3,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeOS from "node:os";
 
 import {
+  AuthEnvironmentScopes,
   TEAM_MEMBER_COLORS,
   TEAM_OWNER_MEMBER_ID,
   TEAM_ROLE_SCOPES,
@@ -123,6 +124,8 @@ const defaultOwnerName = (): string => {
   return username.charAt(0).toUpperCase() + username.slice(1);
 };
 
+const encodeScopes = Schema.encodeSync(Schema.fromJsonString(AuthEnvironmentScopes));
+
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const auth = yield* EnvironmentAuth.EnvironmentAuth;
@@ -173,6 +176,22 @@ export const make = Effect.gen(function* () {
       ON CONFLICT (member_id) DO NOTHING
     `;
   }).pipe(Effect.mapError(toTeamError("Could not create the team owner")), Effect.orDie);
+
+  // A member's sessions carry what their role grants today. Sessions paired before a grant
+  // existed (the October 2026 merge split file reading, Git buttons and previews into their own
+  // scopes) would otherwise lose those features until paired again.
+  yield* Effect.gen(function* () {
+    const members = yield* sql<{ readonly memberId: string; readonly role: TeamMemberRole }>`
+      SELECT member_id AS "memberId", role FROM team_members WHERE revoked_at IS NULL
+    `;
+    for (const member of members) {
+      yield* sql`
+        UPDATE auth_sessions
+        SET scopes = ${encodeScopes(TEAM_ROLE_SCOPES[member.role])}
+        WHERE subject = ${teamMemberSubject(member.memberId)} AND revoked_at IS NULL
+      `;
+    }
+  }).pipe(Effect.mapError(toTeamError("Could not align member sessions")), Effect.orDie);
 
   const listMembers = selectMembers.pipe(
     Effect.map((rows) => rows.map(toMember)),

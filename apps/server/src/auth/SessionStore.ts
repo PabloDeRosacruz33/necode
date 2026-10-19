@@ -847,7 +847,9 @@ export const make = Effect.gen(function* () {
         client: toClientMetadata(row.value.client),
         expiresAt: expiresAt.value,
         subject: claims.sub,
-        scopes: claims.scopes,
+        // Necode: the stored grant, like the WebSocket path, so a team member's sessions follow
+        // their role (TeamService realigns them) instead of the scopes signed at pairing.
+        scopes: row.value.scopes,
         ...(claims.jkt ? { proofKeyThumbprint: claims.jkt } : {}),
         ...(claims.rtc ? { runtimeModeCeiling: claims.rtc } : {}),
       } satisfies VerifiedSession;

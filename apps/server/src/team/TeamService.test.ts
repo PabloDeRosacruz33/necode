@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  AuthFilesystemReadScope,
   AuthOrchestrationReadScope,
   TEAM_OWNER_MEMBER_ID,
   ThreadId,
@@ -65,6 +66,34 @@ it.layer(NodeServices.layer)("TeamService", (it) => {
       expect(verified.subject).toBe(teamMemberSubject(invited.member.memberId));
       expect([...verified.scopes]).toEqual([AuthOrchestrationReadScope]);
       expect((yield* team.listMembers).map((member) => member.name)).toContain("Ana");
+    }).pipe(Effect.provide(TeamTestLayer)),
+  );
+
+  it.effect("gives sessions paired before a scope existed what the member's role grants now", () =>
+    Effect.gen(function* () {
+      const team = yield* TeamService.TeamService;
+      const auth = yield* EnvironmentAuth.EnvironmentAuth;
+      const sql = yield* SqlClient.SqlClient;
+
+      const invited = yield* team.invite({ name: "Roi", role: "member" });
+      const exchanged = yield* auth.exchangeBootstrapCredentialForAccessToken(
+        invited.credential.credential,
+        undefined,
+        requestMetadata,
+      );
+      // What sessions paired before the October 2026 merge stored.
+      yield* sql`
+        UPDATE auth_sessions
+        SET scopes = '["orchestration:read","orchestration:operate","terminal:operate","review:write","relay:read"]'
+        WHERE subject = ${teamMemberSubject(invited.member.memberId)}
+      `;
+      const before = yield* auth.authenticateHttpRequest(bearer(exchanged.access_token));
+      expect(before.scopes).not.toContain(AuthFilesystemReadScope);
+
+      // The next server start realigns them.
+      yield* TeamService.make;
+      const after = yield* auth.authenticateHttpRequest(bearer(exchanged.access_token));
+      expect(after.scopes).toContain(AuthFilesystemReadScope);
     }).pipe(Effect.provide(TeamTestLayer)),
   );
 
