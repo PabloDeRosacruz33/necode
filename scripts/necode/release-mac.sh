@@ -42,6 +42,11 @@ fi
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 git push origin "$BRANCH"
 
+# The server reports its package version to clients, which wait for it after an update; without
+# this every build said 0.1.0 and "update everything" never saw the Mac mini come back.
+node scripts/update-release-package-versions.ts "$VERSION"
+trap 'git checkout -- apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json 2>/dev/null || true' EXIT
+
 export APPLE_API_KEY="$ASC_KEY_PATH" APPLE_API_KEY_ID="$ASC_KEY_ID" APPLE_API_ISSUER="$ASC_ISSUER_ID"
 export T3CODE_DESKTOP_SIGNED=true T3CODE_DESKTOP_UPDATE_REPOSITORY="$REPO"
 node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64 --build-version "$VERSION"

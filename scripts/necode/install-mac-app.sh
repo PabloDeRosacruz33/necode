@@ -78,6 +78,11 @@ run() {
   local staged="$1" target
   target="$(app_version "$staged")"
   log "Installing $target over $(app_version "$INSTALLED")"
+  # macOS checks a new app in full the first time it opens (Gatekeeper), which can take minutes;
+  # do it now, while Necode still runs, so the swapped app opens at once (2026-10-20: 0.1.58 did
+  # not answer within two minutes and was rolled back).
+  spctl --assess --type execute "$staged" >>"$STATE/install.log" 2>&1 \
+    || log "Gatekeeper did not accept $staged; installing anyway."
 
   # 1. Not while anyone's agent is working.
   local idle=0 deadline=$((SECONDS + 45 * 60))
@@ -108,11 +113,11 @@ run() {
   fi
   if ditto "$staged" "$INSTALLED" && codesign --verify --deep --strict "$INSTALLED"; then
     open "$INSTALLED"
-    if wait_until 120 server_answers; then
+    if wait_until 300 server_answers; then
       result "INSTALLED $target. The previous app is in $STATE/previous."
       done_job
     fi
-    log "The new version's server did not answer within two minutes; rolling back."
+    log "The new version's server did not answer within five minutes; rolling back."
     osascript -e 'tell application "Necode" to quit' >/dev/null 2>&1
     wait_until 60 not app_running
   fi
