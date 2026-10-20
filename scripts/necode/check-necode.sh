@@ -51,6 +51,7 @@ run apps/server \
   src/vcs/mergeTaskCheck.test.ts \
   src/vcs/taskBranch.test.ts \
   src/vcs/taskReview.test.ts \
+  src/vcs/taskLifecycle.test.ts \
   src/voice/VoiceTranscription.test.ts
 
 run apps/web \
@@ -66,6 +67,7 @@ run packages/client-runtime \
   src/threadHandoff.test.ts
 
 run packages/shared \
+  src/t3ProjectFile.test.ts \
   src/macApp.test.ts \
   src/streamMux.test.ts
 

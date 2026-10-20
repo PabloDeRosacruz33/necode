@@ -8,10 +8,18 @@ import {
   WorktreeMcpStatusResult,
   ThreadId,
 } from "@t3tools/contracts";
+import * as Crypto from "effect/Crypto";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import { ChildProcessSpawner } from "effect/process";
 import * as Schema from "effect/Schema";
 import * as GitWorkflowService from "../../../git/GitWorkflowService.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
+import * as ServerConfig from "../../../config.ts";
+import * as ProjectSetupScriptRunner from "../../../project/ProjectSetupScriptRunner.ts";
+import * as ServerSettings from "../../../serverSettings.ts";
+import * as VcsStatusBroadcaster from "../../../vcs/VcsStatusBroadcaster.ts";
 import { Tool, Toolkit } from "effect/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -81,8 +89,44 @@ const WorktreeListTool = Tool.make("t3_worktree_list", {
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
+// Necode: what the merge dialog does after a merge, for agents that merge (Ultra Deploy).
+const TaskFinishTool = Tool.make("t3_task_finish", {
+  description:
+    "Finish a thread's task after its branch was merged into the project's integration branch (e.g. staging) and pushed. A permanent thread (branch ending in -v<N>) continues in -v<N+1>: its folder and branch close and it gets a new branch and folder from the latest integration branch, keeping the conversation, with the setup script running. Any other task's folder and branch are closed; the thread keeps its conversation and gets a fresh folder if someone writes in it again. Fails if the branch is not in origin/<integration branch> yet. Call it for every thread whose branch you merged, never for this agent's own thread.",
+  parameters: Schema.Struct({ threadId: ThreadId }),
+  success: Schema.Struct({
+    outcome: Schema.Literals(["continued", "closed"]),
+    targetRef: Schema.String,
+    branch: Schema.String,
+    worktreePath: Schema.optional(Schema.String),
+    removedWorktree: Schema.optional(Schema.Boolean),
+  }),
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies: [
+    McpInvocationContext.McpInvocationContext,
+    ThreadManagementService.ThreadManagementService,
+    ProjectService.ProjectService,
+    GitWorkflowService.GitWorkflowService,
+    ServerConfig.ServerConfig,
+    ProjectSetupScriptRunner.ProjectSetupScriptRunner,
+    ServerSettings.ServerSettingsService,
+    VcsStatusBroadcaster.VcsStatusBroadcaster,
+    FileSystem.FileSystem,
+    Path.Path,
+    ChildProcessSpawner.ChildProcessSpawner,
+    Crypto.Crypto,
+  ],
+})
+  .annotate(Tool.Title, "Finish a merged task")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, true)
+  .annotate(Tool.Idempotent, false)
+  .annotate(Tool.OpenWorld, true);
+
 export const WorktreeToolkit = Toolkit.make(
   WorktreeHandoffTool,
   WorktreeStatusTool,
   WorktreeListTool,
+  TaskFinishTool,
 );

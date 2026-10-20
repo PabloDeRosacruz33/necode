@@ -1,6 +1,7 @@
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
+  type ModelSelection,
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -25,6 +26,7 @@ import { ThreadTeamPresence } from "./ThreadTeamPresence";
 import { toastManager } from "../ui/toast";
 import { MacAppControl } from "./MacAppControl";
 import { SimulatorControl } from "./SimulatorControl";
+import { AgentActionsControl } from "./AgentActionsControl";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
 import { readLocalApi } from "~/localApi";
 import { threadEnvironment } from "../../state/threads";
@@ -56,6 +58,8 @@ interface ChatHeaderProps {
   gitCwd: string | null;
   /** Runs a shell command in one of the thread's terminals on its environment. */
   onRunCommand: (command: string) => void;
+  /** The agent that t3.json agent actions start with; null hides them. */
+  agentActionModelSelection?: ModelSelection | null;
 }
 
 export function resolveRenameCommit(input: {
@@ -87,6 +91,7 @@ export const ChatHeader = memo(function ChatHeader({
   draftId,
   gitCwd,
   onRunCommand,
+  agentActionModelSelection = null,
 }: ChatHeaderProps) {
   const activeProjectName = activeProject?.title;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
@@ -417,6 +422,15 @@ export const ChatHeader = memo(function ChatHeader({
       ) : null}
       {activeProjectName && gitCwd ? (
         <div data-chat-header-actions className="flex shrink-0 items-center gap-2">
+          {activeProject && isServerThread ? (
+            <AgentActionsControl
+              environmentId={activeThreadEnvironmentId}
+              projectId={activeProject.id}
+              projectCwd={activeProject.workspaceRoot}
+              modelSelection={agentActionModelSelection}
+              onOpenThread={onOpenThread}
+            />
+          ) : null}
           <MacAppControl
             environmentId={activeThreadEnvironmentId}
             cwd={gitCwd}

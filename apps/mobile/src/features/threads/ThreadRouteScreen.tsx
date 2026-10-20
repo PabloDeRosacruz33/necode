@@ -2,6 +2,9 @@ import * as Dialog from "../../components/ui/Dialog";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
 import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
 import { buildProjectThreadStartTurnInput } from "../../lib/projectThreadStartTurn";
+import { buildAgentActionTurn } from "@t3tools/client-runtime/operations";
+import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
+import { projectEnvironment } from "../../state/projects";
 import { useWorktreeSetup } from "./use-worktree-setup";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import { AppBar } from "../../components/ui/AppBar";
@@ -14,13 +17,16 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as Option from "effect/Option";
 import {
+  AuthFilesystemReadScope,
   AuthOrchestrationOperateScope,
   AuthTerminalOperateScope,
   AuthTerminalReadScope,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
+  T3_PROJECT_FILE_NAME,
   ThreadId,
   type ProjectScript,
+  type T3ProjectFileAgentAction,
 } from "@t3tools/contracts";
 import {
   projectScriptCwd,
@@ -697,6 +703,52 @@ function ThreadRouteContent(
     terminalMenuSessions,
   ]);
 
+  // Necode: the project's t3.json agent actions (e.g. Ultra Deploy), each a new agent thread.
+  const canReadProjectFiles = useEnvironmentScope(
+    selectedThread?.environmentId ?? null,
+    AuthFilesystemReadScope,
+  );
+  const projectFileQuery = useEnvironmentQuery(
+    selectedThread !== null && selectedThreadProject?.workspaceRoot && canReadProjectFiles
+      ? projectEnvironment.readFile({
+          environmentId: selectedThread.environmentId,
+          input: { cwd: selectedThreadProject.workspaceRoot, relativePath: T3_PROJECT_FILE_NAME },
+        })
+      : null,
+  );
+  const agentActions = useMemo(() => {
+    const data = projectFileQuery.data;
+    return data && !data.truncated ? (parseT3ProjectFile(data.contents)?.agentActions ?? []) : [];
+  }, [projectFileQuery.data]);
+  const startAgentAction = useAtomCommand(threadEnvironment.startTurn, "start agent action");
+  const handleRunAgentAction = useCallback(
+    async (action: T3ProjectFileAgentAction) => {
+      if (!selectedThread || !selectedThreadProject) return;
+      const metadata = makeTurnCommandMetadata();
+      const started = await startAgentAction({
+        environmentId: selectedThread.environmentId,
+        input: buildAgentActionTurn({
+          action,
+          projectId: selectedThread.projectId,
+          modelSelection: selectedThread.modelSelection,
+          threadId: metadata.threadId,
+          commandId: metadata.commandId,
+          messageId: metadata.messageId,
+          createdAt: metadata.createdAt,
+          creationSource: "mobile",
+        }),
+      });
+      if (started._tag !== "Success") return;
+      navigation.dispatch(
+        StackActions.push("Thread", {
+          environmentId: String(selectedThread.environmentId),
+          threadId: metadata.threadId,
+        }),
+      );
+    },
+    [navigation, selectedThread, selectedThreadProject, startAgentAction],
+  );
+
   const handleRunProjectScript = useCallback(
     async (script: ProjectScript) => {
       terminalDebugLog("project-script:press", {
@@ -810,6 +862,8 @@ function ThreadRouteContent(
     onOpenTerminal: handleOpenTerminal,
     onOpenNewTerminal: handleOpenNewTerminal,
     onRunProjectScript: handleRunProjectScript,
+    agentActions,
+    onRunAgentAction: (action: T3ProjectFileAgentAction) => void handleRunAgentAction(action),
     onPull: gitActions.onPullSelectedThreadBranch,
     onRunAction: gitActions.onRunSelectedThreadGitAction,
   };

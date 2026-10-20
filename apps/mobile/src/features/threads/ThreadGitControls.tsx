@@ -8,6 +8,7 @@ import {
   EnvironmentId,
   type GitRunStackedActionResult,
   type ProjectScript,
+  type T3ProjectFileAgentAction,
   ThreadId,
   type VcsStatusResult,
 } from "@t3tools/contracts";
@@ -110,6 +111,9 @@ type ThreadGitControlsProps = ThreadGitMenuProps & {
   readonly onOpenTerminal: (terminalId?: string | null) => void;
   readonly onOpenNewTerminal: () => void;
   readonly onRunProjectScript: (script: ProjectScript) => Promise<void>;
+  /** Necode: t3.json agent actions; each starts a new thread on its job (e.g. Ultra Deploy). */
+  readonly agentActions?: ReadonlyArray<T3ProjectFileAgentAction>;
+  readonly onRunAgentAction?: (action: T3ProjectFileAgentAction) => void;
 };
 
 function useThreadGitControlModel(props: ThreadGitMenuProps) {
@@ -286,6 +290,14 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
         label: "Terminal",
         menu: {
           items: [
+            ...(props.agentActions ?? []).map((action) => ({
+              description: "Abre un hilo nuevo con un agente para esto",
+              disabled: !props.canOperateTerminal,
+              icon: { name: "paperplane", type: "sfSymbol" as const },
+              label: action.name,
+              onPress: () => props.onRunAgentAction?.(action),
+              type: "action" as const,
+            })),
             ...props.projectScripts.map((script) => ({
               description: script.command,
               disabled: !props.canOperateTerminal,
@@ -426,6 +438,8 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
       props.onOpenNewTerminal,
       props.onOpenTerminal,
       props.onRunProjectScript,
+      props.agentActions,
+      props.onRunAgentAction,
       props.projectScripts,
       props.terminalSessions,
     ],
@@ -473,6 +487,17 @@ export function ThreadGitControls(props: ThreadGitControlsProps) {
           disabled={!props.canOpenTerminal}
           separateBackground
         >
+          {(props.agentActions ?? []).map((action) => (
+            <Toolbar.MenuAction
+              key={`agent-action:${action.name}`}
+              icon="paperplane"
+              disabled={!props.canOperateTerminal}
+              onPress={() => props.onRunAgentAction?.(action)}
+              subtitle="Abre un hilo nuevo con un agente para esto"
+            >
+              <Toolbar.Label>{action.name}</Toolbar.Label>
+            </Toolbar.MenuAction>
+          ))}
           {props.projectScripts.length > 0 ? (
             props.projectScripts.map((script) => (
               <Toolbar.MenuAction

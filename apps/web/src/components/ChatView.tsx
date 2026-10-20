@@ -3137,6 +3137,9 @@ export default function ChatView(props: ChatViewProps) {
   // A merged task's folder is gone until the thread's next turn recreates it; the project's
   // checkout answers for Git meanwhile, so the branch menu stays.
   const worktreeGone = activeThread?.worktreePath != null && gitStatusQuery.data?.isRepo === false;
+  // Necode: Simular and the Mac app build where the thread works; a merged task's folder is
+  // gone until its next turn, and the project's checkout already has its work then.
+  const appBuildCwd = worktreeGone && activeProject ? activeProject.workspaceRoot : gitCwd;
   const projectGitStatusQuery = useEnvironmentQuery(
     worktreeGone && activeProject
       ? vcsEnvironment.status({ environmentId, input: { cwd: activeProject.workspaceRoot } })
@@ -7913,9 +7916,7 @@ export default function ChatView(props: ChatViewProps) {
     keybindings,
     availableEditors,
     showOpenInPicker,
-    // Necode: Simular and the Mac app build where the thread works; a merged task's folder is
-    // gone until its next turn, and the project's checkout already has its work then.
-    gitCwd: worktreeGone && activeProject ? activeProject.workspaceRoot : gitCwd,
+    gitCwd: appBuildCwd,
     isGitRepo,
     envLocked,
     availableEnvironments: logicalProjectEnvironments,
@@ -8090,8 +8091,9 @@ export default function ChatView(props: ChatViewProps) {
               ? { onOpenProjectSettings: handleOpenDraftProjectSettingsStable }
               : {})}
             {...(draftId ? { draftId } : {})}
-            gitCwd={gitCwd}
+            gitCwd={appBuildCwd}
             onRunCommand={runShellCommandStable}
+            agentActionModelSelection={activeThread.modelSelection ?? null}
           />
         </header>
 

@@ -33,6 +33,7 @@ describe("buildT3ProjectFileJsonSchema", () => {
 
     expect(Object.keys(schema.properties).sort()).toEqual([
       "$schema",
+      "agentActions",
       "defaultThreadEnvMode",
       "iconPath",
       "integrationBranch",
@@ -66,6 +67,15 @@ describe("buildT3ProjectFileJsonSchema", () => {
   it("stays JSON-serializable", () => {
     const schema = buildT3ProjectFileJsonSchema();
     expect(JSON.parse(JSON.stringify(schema))).toEqual(schema);
+  });
+});
+
+describe("agentActions", () => {
+  it("reads the buttons that hand a job to an agent", () => {
+    const file = parseT3ProjectFile(
+      JSON.stringify({ agentActions: [{ name: " Ultra Deploy ", prompt: "Despliega todo" }] }),
+    );
+    expect(file?.agentActions).toEqual([{ name: "Ultra Deploy", prompt: "Despliega todo" }]);
   });
 });
 

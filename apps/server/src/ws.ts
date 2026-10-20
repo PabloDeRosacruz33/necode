@@ -29,22 +29,17 @@ import { runMergeTaskCheck } from "./vcs/mergeTaskCheck.ts";
 import { readTaskReview } from "./vcs/taskReview.ts";
 import {
   locateTaskWorktree,
-  recordWorktreeDependencies,
   refreshWorktreeDependencies,
   worktreeDependenciesStale,
 } from "./project/worktreeDependencies.ts";
 import { archiveMacApp, openMacApp, quitMacApp, runMacAppBuild } from "./macApp/macApp.ts";
 import { expoGoSimulatorUrl } from "./macApp/expoGo.ts";
 import { expoGoUrl, resolveIosSimulatorPlan } from "./macApp/iosSimulatorPlan.ts";
-import { resolveTaskWorktree } from "./vcs/taskBranch.ts";
-import { cloneDependencies } from "./project/dependencyClone.ts";
 import { expandHomePath } from "./os-jank.ts";
 import * as ProcessRunner from "./processRunner.ts";
-import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
 import { TextGeneration } from "./textGeneration/TextGeneration.ts";
 
 /** Tells a setup script its dependencies were cloned from a matching checkout already. */
-const DEPENDENCIES_READY_ENV = { T3CODE_DEPENDENCIES_READY: "1" } as const;
 import { subscribeChatGptHandoff } from "./provider/CodexChatGptHandoff.ts";
 import { subscribeCodexAuthCallback } from "./provider/CodexAuthCallback.ts";
 import {
@@ -137,7 +132,6 @@ import {
   NecodeWsRpcGroup,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
-import { configuredIntegrationBranch } from "@t3tools/shared/projectSettings";
 import {
   HttpRouter,
   HttpServerRequest,
@@ -246,6 +240,7 @@ import * as ProjectService from "./project/ProjectService.ts";
 import * as ManagedProjectFolders from "./project/ManagedProjectFolders.ts";
 import { projectMutationOperation } from "./project/ProjectMutation.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
+import * as TaskLifecycle from "./vcs/taskLifecycle.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
@@ -1376,6 +1371,7 @@ const layerWsRpc = (
             ),
           ),
         );
+      const tasks = yield* TaskLifecycle.make;
       const taskContext = yield* Effect.context<
         FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
       >();
@@ -1394,65 +1390,10 @@ const layerWsRpc = (
           projectCwd: worktree.projectRoot,
           worktreePath: worktree.root,
         });
-      // The tasks folder may live on an external disk through a link; without it no task can start.
-      const ensureTasksFolder = <E>(fail: (message: string) => E) =>
-        Effect.gen(function* () {
-          const fs = yield* FileSystem.FileSystem;
-          if (yield* fs.exists(config.worktreesDir).pipe(Effect.orElseSucceed(() => false))) return;
-          return yield* Effect.fail(
-            fail(
-              `La carpeta de tareas (${config.worktreesDir}) no está disponible. Si está en un disco externo, conéctalo.`,
-            ),
-          );
-        }).pipe(Effect.provideContext(taskContext));
-      // A new task gets its dependencies cloned from a checkout with the same lockfiles.
-      const cloneTaskDependencies = (projectCwd: string, worktreePath: string) =>
-        withTaskWorktreeServices(cloneDependencies({ projectCwd, worktreePath })).pipe(
-          Effect.tap((cloned) =>
-            cloned.length > 0
-              ? Effect.logInfo("cloned task dependencies", { worktreePath, cloned })
-              : Effect.void,
-          ),
-          Effect.orElseSucceed((): ReadonlyArray<string> => []),
-        );
       // Work just brought into a task can change its lockfiles; its setup script runs again then.
       const refreshTaskDependencies = (cwd: string) =>
         withTaskWorktreeServices(refreshWorktreeDependencies(cwd, taskSetupScript));
-      // A setup that succeeded at task creation leaves its lockfiles recorded, so the first
-      // merge does not reinstall for nothing.
-      const recordTaskSetup = (worktreePath: string) =>
-        withTaskWorktreeServices(recordWorktreeDependencies(worktreePath)).pipe(
-          Effect.ignoreCause({ log: true }),
-        );
-      // Starts a new task's setup script without waiting for it; success records its lockfiles.
-      const runTaskSetup = (input: {
-        readonly threadId: ThreadId;
-        readonly projectCwd: string;
-        readonly worktreePath: string;
-        readonly dependenciesReady?: boolean;
-      }) =>
-        projectSetupScriptRunner
-          .runForThread({
-            threadId: input.threadId,
-            projectCwd: input.projectCwd,
-            worktreePath: input.worktreePath,
-            observeCompletion: {},
-            ...(input.dependenciesReady ? { extraEnv: DEPENDENCIES_READY_ENV } : {}),
-          })
-          .pipe(
-            Effect.flatMap((result) =>
-              result.status === "started" && result.completion
-                ? result.completion.pipe(
-                    Effect.flatMap(({ exitCode }) =>
-                      exitCode === 0 ? recordTaskSetup(input.worktreePath) : Effect.void,
-                    ),
-                    Effect.forkDetach,
-                    Effect.asVoid,
-                  )
-                : Effect.void,
-            ),
-            Effect.ignoreCause({ log: true }),
-          );
+      const runTaskSetup = tasks.runTaskSetup;
       // A webhook URL starts agent runs, so only sessions that may operate
       // see it; read-only sessions still see the task itself.
       const withVisibleWebhookUrls = (result: ScheduledTaskListResult): ScheduledTaskListResult =>
@@ -1960,89 +1901,17 @@ const layerWsRpc = (
           }),
         );
 
-      /** A task's own branch and folder, from `baseRef` or else the integration branch's latest. */
-      const prepareTaskWorktree = (input: {
-        readonly projectCwd: string;
-        readonly targetRef: string;
-        readonly taskName: string;
-        readonly branchPrefix?: string | undefined;
-        readonly baseRef?: string | undefined;
-      }) =>
+      /** A task's own branch and folder, named after whoever starts it unless a prefix is given. */
+      const prepareTaskWorktree = (input: Parameters<typeof tasks.prepareTaskWorktree>[0]) =>
         Effect.gen(function* () {
-          let baseRef = input.baseRef;
-          if (baseRef === undefined) {
-            yield* gitWorkflow.fetchRemote({
-              cwd: input.projectCwd,
-              remoteName: "origin",
-              refName: input.targetRef,
-            });
-            const hasRemote = yield* gitWorkflow.remoteBranchExists({
-              cwd: input.projectCwd,
-              remoteName: "origin",
-              refName: input.targetRef,
-            });
-            baseRef = hasRemote
-              ? (yield* gitWorkflow.resolveRemoteTrackingCommit({
-                  cwd: input.projectCwd,
-                  refName: input.targetRef,
-                  fallbackRemoteName: "origin",
-                })).commitSha
-              : input.targetRef;
-          }
-          yield* ensureTasksFolder((message) => taskError(input.projectCwd, message));
-          const task = yield* withTaskWorktreeServices(
-            resolveTaskWorktree({
-              projectCwd: input.projectCwd,
-              worktreesDir: config.worktreesDir,
-              taskName: input.taskName,
-              branchPrefix: input.branchPrefix ?? (yield* memberBranchPrefix),
-            }),
-          ).pipe(Effect.mapError((cause) => taskError(input.projectCwd, String(cause))));
-          const created = yield* gitWorkflow.createWorktree({
-            cwd: input.projectCwd,
-            refName: baseRef,
-            newRefName: task.branch,
-            baseRefName: input.targetRef,
-            path: task.worktreePath,
+          return yield* tasks.prepareTaskWorktree({
+            ...input,
+            branchPrefix: input.branchPrefix ?? (yield* memberBranchPrefix),
           });
-          const cloned = yield* cloneTaskDependencies(input.projectCwd, created.worktree.path);
-          return {
-            branch: created.worktree.refName,
-            worktreePath: created.worktree.path,
-            dependenciesReady: cloned.length > 0,
-          };
         });
 
       /** The branch tasks start from and merge into, resolved the way the branch menu does. */
-      const resolveIntegrationRef = (projectCwd: string, projectId: ProjectId) =>
-        Effect.gen(function* () {
-          const projectFile = yield* T3ProjectFileLoader.T3ProjectFileLoader.pipe(
-            Effect.flatMap((loader) => loader.load(projectCwd)),
-            Effect.map(Option.getOrNull),
-            Effect.provide(T3ProjectFileLoader.layer),
-            Effect.provideContext(taskContext),
-            Effect.orElseSucceed(() => null),
-          );
-          const settings = yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null));
-          const configured = configuredIntegrationBranch(settings, projectId, projectFile);
-          if (configured) return configured;
-          const hasStaging = yield* gitWorkflow
-            .remoteBranchExists({ cwd: projectCwd, remoteName: "origin", refName: "staging" })
-            .pipe(Effect.orElseSucceed(() => false));
-          if (hasStaging) return "staging";
-          const head = yield* withTaskWorktreeServices(
-            Effect.flatMap(ProcessRunner.ProcessRunner, (runner) =>
-              runner.run({
-                command: "git",
-                args: ["-C", projectCwd, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-              }),
-            ),
-          ).pipe(
-            Effect.map((output) => output.stdout.trim().replace(/^origin\//, "")),
-            Effect.orElseSucceed(() => ""),
-          );
-          return head || "main";
-        });
+      const resolveIntegrationRef = tasks.integrationRef;
 
       const handlers = ServerWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
@@ -3529,60 +3398,13 @@ const layerWsRpc = (
                 : Effect.void,
             ),
           ),
-        [WS_METHODS.vcsContinueTask]: (input) => {
-          const fail = (detail: string) =>
-            new GitCommandError({
-              operation: "GitWorkflowService.continueTask",
-              command: "continue task",
-              cwd: input.projectCwd,
-              detail,
-            });
-          return Effect.gen(function* () {
-            const previous = input.previous;
-            if (previous) {
-              const fs = yield* FileSystem.FileSystem;
-              if (yield* fs.exists(previous.worktreePath).pipe(Effect.orElseSucceed(() => false))) {
-                const closed = yield* gitWorkflow.closeTask({
-                  projectCwd: input.projectCwd,
-                  worktreePath: previous.worktreePath,
-                  branch: previous.branch,
-                  targetRef: input.targetRef,
-                  deleteRemote: true,
-                });
-                if (!closed.removedWorktree) {
-                  return yield* fail(
-                    "La carpeta de la tarea tiene cambios sin guardar o está en uso.",
-                  );
-                }
-              }
-            }
-            const { branch, worktreePath, dependenciesReady } = yield* prepareTaskWorktree({
-              projectCwd: input.projectCwd,
-              targetRef: input.targetRef,
-              taskName: input.taskName,
-              branchPrefix: input.branchPrefix,
-            });
-            yield* dispatchThreadCommand({
-              type: "thread.metadata.update",
-              commandId: yield* serverCommandId("continue-task-meta"),
-              threadId: input.threadId,
-              branch,
-              worktreePath,
-            });
-            // Installs and the like run in the thread's terminal; the agent can start meanwhile.
-            yield* runTaskSetup({
-              threadId: input.threadId,
-              projectCwd: input.projectCwd,
-              worktreePath,
-              dependenciesReady,
-            });
-            yield* refreshGitStatus(input.projectCwd);
-            return { branch, worktreePath };
-          }).pipe(
-            Effect.provideContext(taskContext),
-            Effect.mapError(asTaskError(input.projectCwd)),
-          );
-        },
+        [WS_METHODS.vcsContinueTask]: (input) =>
+          Effect.gen(function* () {
+            return yield* tasks.continueTask(
+              { ...input, branchPrefix: input.branchPrefix ?? (yield* memberBranchPrefix) },
+              "web",
+            );
+          }).pipe(Effect.mapError(asTaskError(input.projectCwd))),
         [WS_METHODS.vcsDuplicateThread]: (input) => {
           const fail = (detail: string) => taskError("", detail);
           return Effect.gen(function* () {

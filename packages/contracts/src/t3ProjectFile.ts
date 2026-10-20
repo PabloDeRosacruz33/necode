@@ -76,6 +76,19 @@ export const T3ProjectFileScript = Schema.Struct({
 });
 export type T3ProjectFileScript = typeof T3ProjectFileScript.Type;
 
+export const T3ProjectFileAgentAction = Schema.Struct({
+  name: trimmedNonEmpty({
+    description: 'Button label, e.g. "Ultra Deploy".',
+  }),
+  prompt: trimmedNonEmpty({
+    description:
+      "What the agent is asked to do. Pressing the button starts a new thread in the project's main folder with this message.",
+  }),
+}).annotate({
+  description: "A Necode button that hands a fixed job to an agent in a new thread.",
+});
+export type T3ProjectFileAgentAction = typeof T3ProjectFileAgentAction.Type;
+
 export const T3ProjectFile = Schema.Struct({
   $schema: Schema.optionalKey(
     Schema.String.annotate({
@@ -156,6 +169,14 @@ export const T3ProjectFile = Schema.Struct({
     }).annotate({
       description: "The project's iOS app as a simulator build, run on the user's own Mac.",
     }),
+  ),
+  agentActions: Schema.optionalKey(
+    Schema.Array(T3ProjectFileAgentAction)
+      .annotate({
+        description:
+          "Buttons shown in every thread of this project, on desktop, web and mobile, that start an agent on a fixed job (deploys, releases).",
+      })
+      .check(Schema.isMaxLength(10)),
   ),
   scripts: Schema.optionalKey(
     Schema.Array(T3ProjectFileScript)

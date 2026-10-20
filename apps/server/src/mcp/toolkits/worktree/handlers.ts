@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as WorktreeMcpService from "../../WorktreeMcpService.ts";
+import * as TaskLifecycle from "../../../vcs/taskLifecycle.ts";
 import { WorktreeToolkit } from "./tools.ts";
 
 const handlers = {
@@ -48,6 +49,27 @@ const handlers = {
       const scope = yield* McpInvocationContext.McpInvocationContext;
       const service = yield* WorktreeMcpService.WorktreeMcpService;
       return yield* service.status(scope);
+    }),
+  ),
+  t3_task_finish: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const context = yield* McpInvocationContext.McpInvocationContext;
+      if (!context.capabilities.has("worktree"))
+        return yield* new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message: "This credential cannot change worktrees.",
+        });
+      yield* readThread(input.threadId);
+      const tasks = yield* TaskLifecycle.make;
+      return yield* tasks.finishThreadTask(input.threadId).pipe(
+        Effect.mapError(
+          (error) =>
+            new OrchestratorMcpFailure({
+              code: "invalid_request",
+              message: "detail" in error ? String(error.detail) : error.message,
+            }),
+        ),
+      );
     }),
   ),
 } satisfies McpToolAccess.Handlers<typeof WorktreeToolkit.tools>;
