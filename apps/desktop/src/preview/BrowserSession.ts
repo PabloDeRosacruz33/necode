@@ -33,7 +33,9 @@ export type BrowserSessionPartitionNamespace = "profile";
 const ALLOWED_PREVIEW_PERMISSIONS: ReadonlySet<string> = new Set([
   "clipboard-read",
   "clipboard-sanitized-write",
-  "notifications",
+  // Necode: no "notifications". Agents leave pages they test open in background tabs, and a
+  // signed-in app (Necora staging) then filled the person's Mac with notifications that opened
+  // nothing (2026-10-20, Roi and Pablo decided). Pages still run; they just cannot notify.
   "geolocation",
   // `DesktopWindow` disables HTML fullscreen window resizing for the app window
   // and every preview guest, so a page that goes fullscreen fills its own

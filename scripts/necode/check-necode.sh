@@ -61,6 +61,9 @@ run apps/web \
 run apps/mobile \
   src/lib/threadActivity.test.ts
 
+run apps/desktop \
+  src/preview/BrowserSession.test.ts
+
 run packages/client-runtime \
   src/state/team.test.ts \
   src/state/threadStatus.test.ts \
