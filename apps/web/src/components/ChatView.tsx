@@ -401,6 +401,7 @@ import {
   resolveScrollToEndClearance,
 } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
+import { BackgroundTaskOutputDialog } from "./chat/BackgroundTaskOutputDialog";
 import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
 import { useOpenFavoriteEditorShortcut } from "./chat/OpenInPickerShortcut";
@@ -1041,6 +1042,11 @@ function makeModelDisabledReason(
     });
     return reason ? `${reason.description} Start a new thread to use this model.` : null;
   };
+}
+
+/** Necode: background work whose output can be read while it runs (commands, not subagents). */
+function hasBackgroundOutput(kind: string): boolean {
+  return kind === "command" || kind === "background_task" || kind === "monitor";
 }
 
 export default function ChatView(props: ChatViewProps) {
@@ -5136,6 +5142,11 @@ export default function ChatView(props: ChatViewProps) {
   // has background work.
   const activeBackgroundTasks = !isWorking && activeThread ? pendingBackgroundTasks : [];
   const [stoppingBackgroundWorkKey, setStoppingBackgroundWorkKey] = useState<string | null>(null);
+  // Necode: the background command whose output is open, if any.
+  const [backgroundOutputTask, setBackgroundOutputTask] = useState<{
+    readonly taskId: string;
+    readonly label: string;
+  } | null>(null);
   const isStoppingBackgroundWork =
     stoppingBackgroundWorkKey === `${environmentId}:${activeThreadId}`;
   const handleStopBackgroundWork = async () => {
@@ -5327,7 +5338,20 @@ export default function ChatView(props: ChatViewProps) {
               return (
                 <Fragment key={item.taskId}>
                   {index > 0 ? " " : null}
-                  {childThreadId === undefined ? (
+                  {childThreadId === undefined && hasBackgroundOutput(item.kind) ? (
+                    <span className="whitespace-nowrap">
+                      <InlineButton
+                        tone="muted"
+                        aria-label={`Ver la salida de ${item.label}`}
+                        onClick={() =>
+                          setBackgroundOutputTask({ taskId: item.taskId, label: item.label })
+                        }
+                      >
+                        {item.label}
+                      </InlineButton>
+                      {separator}
+                    </span>
+                  ) : childThreadId === undefined ? (
                     <>
                       {item.label}
                       {separator}
@@ -5348,14 +5372,30 @@ export default function ChatView(props: ChatViewProps) {
               );
             }),
       actions: (
-        <Button
-          size="xs"
-          variant="ghost"
-          disabled={!canOperateThread || isStoppingBackgroundWork}
-          onClick={() => void handleStopBackgroundWorkStable()}
-        >
-          {isStoppingBackgroundWork ? "Stopping..." : "Stop"}
-        </Button>
+        <>
+          {presentation.items.length === 1 &&
+          presentation.items[0] !== undefined &&
+          hasBackgroundOutput(presentation.items[0].kind) ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => {
+                const only = presentation.items[0]!;
+                setBackgroundOutputTask({ taskId: only.taskId, label: only.label });
+              }}
+            >
+              Ver salida
+            </Button>
+          ) : null}
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={!canOperateThread || isStoppingBackgroundWork}
+            onClick={() => void handleStopBackgroundWorkStable()}
+          >
+            {isStoppingBackgroundWork ? "Stopping..." : "Stop"}
+          </Button>
+        </>
       ),
     };
   })() as ComposerBannerStackItem | null;
@@ -8096,6 +8136,12 @@ export default function ChatView(props: ChatViewProps) {
             agentActionModelSelection={activeThread.modelSelection ?? null}
           />
         </header>
+        <BackgroundTaskOutputDialog
+          environmentId={activeThread.environmentId}
+          threadId={activeThread.id}
+          task={backgroundOutputTask}
+          onClose={() => setBackgroundOutputTask(null)}
+        />
 
         <div className="relative flex min-h-0 min-w-0 flex-1">
           <ThreadFindCanvas

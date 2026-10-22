@@ -121,3 +121,59 @@ export const tailClaudeTaskOutput = Effect.fn("ClaudeTaskOutputTail.tail")(funct
     last = yield* pause;
   }
 });
+
+/** How much of a background command's output a viewer gets: its end. */
+const BACKGROUND_OUTPUT_TAIL_BYTES = 64 * 1024;
+
+/**
+ * Necode: the end of a background command's output, by Claude's task id, for people watching a
+ * thread that waits on it. Claude writes it under any project and session of its temp root.
+ */
+export const readClaudeBackgroundTaskOutput = Effect.fn("ClaudeTaskOutputTail.readBackground")(
+  function* (input: { readonly root: string; readonly taskId: string }) {
+    // Task ids are short tokens; anything else could reach outside the root.
+    if (!/^[A-Za-z0-9_-]{1,80}$/.test(input.taskId)) return null;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    let filePath: string | null = null;
+    for (const project of yield* fileSystem
+      .readDirectory(input.root)
+      .pipe(Effect.orElseSucceed((): Array<string> => []))) {
+      const sessions = yield* fileSystem
+        .readDirectory(path.join(input.root, project))
+        .pipe(Effect.orElseSucceed((): Array<string> => []));
+      for (const session of sessions) {
+        const candidate = path.join(
+          input.root,
+          project,
+          session,
+          "tasks",
+          `${input.taskId}.output`,
+        );
+        if (yield* fileSystem.exists(candidate).pipe(Effect.orElseSucceed(() => false))) {
+          filePath = candidate;
+          break;
+        }
+      }
+      if (filePath !== null) break;
+    }
+    if (filePath === null) return null;
+    const found = filePath;
+    const size = yield* fileSystem.stat(found).pipe(
+      Effect.map((info) => Number(info.size)),
+      Effect.orElseSucceed(() => 0),
+    );
+    const start = Math.max(0, size - BACKGROUND_OUTPUT_TAIL_BYTES);
+    const bytes = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const handle = yield* fileSystem.open(found, { flag: "r" });
+        yield* handle.seek(BigInt(start), "start");
+        return yield* handle.readAlloc(size - start);
+      }),
+    ).pipe(Effect.orElseSucceed(() => Option.none<Uint8Array>()));
+    const text = Option.isSome(bytes)
+      ? new TextDecoder("utf-8", { fatal: false }).decode(bytes.value)
+      : "";
+    return { output: text, truncated: start > 0 };
+  },
+);

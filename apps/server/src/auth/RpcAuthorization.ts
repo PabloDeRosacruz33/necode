@@ -239,6 +239,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.teamSetGitIdentity]: AuthOrchestrationOperateScope,
   // Dictation spends the host's speech-to-text quota, so it needs operate access.
   [WS_METHODS.voiceTranscribe]: AuthOrchestrationOperateScope,
+  // Command output can hold what a terminal shows, so it needs terminal access.
+  [WS_METHODS.threadBackgroundTaskOutput]: AuthTerminalReadScope,
   [WS_METHODS.subscribeBackgroundPolicy]: AuthOrchestrationReadScope,
 } as const satisfies Readonly<Record<WsRpcMethod, AuthEnvironmentScope>>;
 

@@ -69,6 +69,7 @@ import {
   CheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
+  SquareTerminalIcon,
   CircleDashedIcon,
   CircleDotDashedIcon,
   ClockIcon,
@@ -209,6 +210,7 @@ import {
   resolveSidebarRowAccessibility,
   type SidebarDropVerb,
   resolveSidebarThreadStatus,
+  countRunningBackgroundCommands,
   resolveThreadLastVisitedAt,
   searchSidebarThreads,
   shouldCreateNewThreadInCurrentProject,
@@ -1573,6 +1575,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
 
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
   const status = resolveSidebarThreadStatus(thread);
+  // Necode: commands the agent left running (a build, a deploy) do not keep a thread working, so
+  // the row says so instead of reading as finished.
+  const backgroundCommands = countRunningBackgroundCommands(thread.pendingBackgroundTasks);
   const lastVisitedDate = lastVisitedAt === undefined ? null : parseTimestampDate(lastVisitedAt);
   const wokeAtDate = props.wokeAt === null ? null : parseTimestampDate(props.wokeAt);
   const isWoke =
@@ -1623,19 +1628,25 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     icon: "failed" as const,
                     className: "text-error",
                   }
-                : isWoke
+                : backgroundCommands > 0
                   ? {
-                      label: "Woke",
-                      icon: "woke" as const,
-                      className: "text-warning",
+                      label: "Segundo plano",
+                      icon: "background" as const,
+                      className: "text-muted-foreground",
                     }
-                  : isUnread
+                  : isWoke
                     ? {
-                        label: "Done",
-                        icon: "done" as const,
-                        className: "text-success",
+                        label: "Woke",
+                        icon: "woke" as const,
+                        className: "text-warning",
                       }
-                    : null;
+                    : isUnread
+                      ? {
+                          label: "Done",
+                          icon: "done" as const,
+                          className: "text-success",
+                        }
+                      : null;
   const isWokeStatus = topStatus?.icon === "woke";
 
   const branchMismatch = resolveLocalCheckoutBranchMismatch({
@@ -2247,6 +2258,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                             <CircleAlertIcon aria-hidden className="size-4 shrink-0" />
                           ) : topStatus.icon === "done" ? (
                             <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
+                          ) : topStatus.icon === "background" ? (
+                            <SquareTerminalIcon aria-hidden className="size-4 shrink-0" />
                           ) : null}
                           {/* The label alone is the live region: a role="status"
                             wrapper around the ticking duration would make

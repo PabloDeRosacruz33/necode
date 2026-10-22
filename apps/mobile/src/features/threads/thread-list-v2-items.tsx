@@ -52,6 +52,7 @@ import {
   type ThreadListV2Status,
 } from "./threadListV2";
 import { QueuedMessageIcon } from "./queued-message-icon";
+import { countRunningBackgroundCommands } from "@t3tools/client-runtime/state/thread-status";
 import { shouldRecedeThreadRow } from "./thread-row-emphasis";
 import { ThreadSearchMatchExcerpt } from "./thread-search-match";
 
@@ -104,6 +105,13 @@ const DONE_STATUS_LABEL: StatusLabel = {
   icon: "checkmark.circle",
   className: "text-adaptive-emerald-700-300",
   iconTintClassName: "accent-adaptive-emerald-700-300",
+};
+// Necode: commands the agent left running (a build, a deploy), like the web sidebar.
+const BACKGROUND_STATUS_LABEL: StatusLabel = {
+  label: "Segundo plano",
+  icon: "terminal",
+  className: "text-foreground-muted",
+  iconTintClassName: "accent-foreground-muted",
 };
 // A plan waiting for a go-ahead reads like the web sidebar's Plan Ready, and only shows while the
 // thread is otherwise quiet, like Done.
@@ -588,7 +596,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     (status === "working" && workingLabel !== undefined && thread.goal?.status === "active"
       ? { ...workingLabel, label: "Goal" }
       : workingLabel) ??
-    (planReady ? PLAN_READY_STATUS_LABEL : isUnread ? DONE_STATUS_LABEL : undefined);
+    (status === "ready" && countRunningBackgroundCommands(thread.pendingBackgroundTasks) > 0
+      ? BACKGROUND_STATUS_LABEL
+      : planReady
+        ? PLAN_READY_STATUS_LABEL
+        : isUnread
+          ? DONE_STATUS_LABEL
+          : undefined);
   const attention = planReady || isUnread;
   const recede = shouldRecedeThreadRow({ status, selected });
   const timeLabel = props.timeLabel;

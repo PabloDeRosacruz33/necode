@@ -336,6 +336,7 @@ import {
 } from "./device.ts";
 import {} from "./previewAutomation.ts";
 import { OpenUrlAckInput, OpenUrlConnectInput, OpenUrlRequest } from "./openUrl.ts";
+import { BackgroundTaskOutputInput, BackgroundTaskOutputResult } from "./backgroundTaskOutput.ts";
 import {
   ClientDeviceHostConnectInput,
   ClientDeviceHostRequest,
@@ -657,6 +658,7 @@ export const WS_METHODS = {
 
   // Dictation
   voiceTranscribe: "voice.transcribe",
+  threadBackgroundTaskOutput: "thread.backgroundTaskOutput",
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
 } as const;
@@ -2101,6 +2103,12 @@ const WsTeamUpdateMemberRpc = Rpc.make(WS_METHODS.teamUpdateMember, {
   error: Schema.Union([TeamError, EnvironmentAuthorizationError]),
 });
 
+const WsThreadBackgroundTaskOutputRpc = Rpc.make(WS_METHODS.threadBackgroundTaskOutput, {
+  payload: BackgroundTaskOutputInput,
+  success: BackgroundTaskOutputResult,
+  error: EnvironmentAuthorizationError,
+});
+
 const WsVoiceTranscribeRpc = Rpc.make(WS_METHODS.voiceTranscribe, {
   payload: VoiceTranscribeInput,
   success: VoiceTranscribeResult,
@@ -2359,6 +2367,7 @@ export const NecodeWsRpcGroup = RpcGroup.make(
   WsVcsMergeTaskReviewRpc,
   WsVcsSyncWithRpc,
   WsVoiceTranscribeRpc,
+  WsThreadBackgroundTaskOutputRpc,
 ).middleware(RpcScopeAuthorization);
 
 export const WsRpcGroup = CoreWsRpcGroup.merge(NecodeWsRpcGroup);

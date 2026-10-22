@@ -7,7 +7,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 
-import { tailClaudeTaskOutput } from "./ClaudeTaskOutputTail.ts";
+import { readClaudeBackgroundTaskOutput, tailClaudeTaskOutput } from "./ClaudeTaskOutputTail.ts";
 
 const SESSION_ID = "0c91bb28-9e89-4889-bd22-3de9880233d3";
 const TASK_ID = "bk6xreeye";
@@ -122,5 +122,26 @@ describe("tailClaudeTaskOutput", () => {
         yield* Fiber.join(fiber);
       }).pipe(Effect.provide(NodeServices.layer)),
     ),
+  );
+});
+
+describe("readClaudeBackgroundTaskOutput", () => {
+  it.effect("reads the end of a background command's output by its task id", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const { root, tasks, file } = yield* makeTaskFile;
+        yield* fileSystem.makeDirectory(tasks, { recursive: true });
+        yield* fileSystem.writeFileString(file, "building…\nuploaded build 41\n");
+
+        assert.deepStrictEqual(yield* readClaudeBackgroundTaskOutput({ root, taskId: TASK_ID }), {
+          output: "building…\nuploaded build 41\n",
+          truncated: false,
+        });
+        assert.isNull(yield* readClaudeBackgroundTaskOutput({ root, taskId: "missing1" }));
+        // Ids are tokens: nothing outside Claude's task folders can be read.
+        assert.isNull(yield* readClaudeBackgroundTaskOutput({ root, taskId: "../../etc/passwd" }));
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
   );
 });

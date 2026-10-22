@@ -41,6 +41,17 @@ export function resolveThreadActivityStatus(thread: ActivityInput): ThreadActivi
   return "ready";
 }
 
+/**
+ * Necode: commands an agent left running in the background (`run_in_background` builds, deploys,
+ * dev servers). They do not hold the thread in Waiting, since a dev server never ends, so rows
+ * show them apart.
+ */
+export function countRunningBackgroundCommands(
+  tasks: ReadonlyArray<{ readonly kind: string }> | undefined,
+): number {
+  return (tasks ?? []).filter((task) => task.kind === "command").length;
+}
+
 interface LatestRunTiming {
   readonly startedAt?: string | null | undefined;
   readonly completedAt?: string | null | undefined;

@@ -102,6 +102,8 @@ import { CHAT_CONTENT_MAX_WIDTH, type LayoutVariant } from "../../lib/layout";
 import { editPendingThreadMessage } from "../../state/edit-pending-thread-message";
 import { deviceEnvironment } from "../../state/device";
 import { useEnvironmentQuery } from "../../state/query";
+import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
+import { vcsEnvironment } from "../../state/vcs";
 import { threadDevicePreviews } from "../devices/threadDevicePreviews";
 import { ThreadBrowserFloat } from "../browser/ThreadBrowserFloat";
 import { useThreadServerBrowserTabs } from "../../state/preview";
@@ -463,6 +465,35 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const pendingBackgroundWork = presentPendingBackgroundWork(
     props.selectedThread.pendingBackgroundTasks,
   );
+  // Necode: a command left running in the background shows its latest output when pressed.
+  const readBackgroundOutput = useAtomQueryRunner(vcsEnvironment.backgroundTaskOutput, {
+    reportFailure: false,
+    refresh: true,
+  });
+  const backgroundCommand =
+    pendingBackgroundWork?.items.find(
+      (item) =>
+        item.kind === "command" || item.kind === "background_task" || item.kind === "monitor",
+    ) ?? null;
+  const showBackgroundOutput =
+    backgroundCommand === null
+      ? undefined
+      : () => {
+          void readBackgroundOutput({
+            environmentId: props.environmentId,
+            input: { threadId: props.selectedThread.id, taskId: backgroundCommand.taskId },
+          }).then((result) => {
+            const output = result._tag === "Success" ? result.value.output : null;
+            Dialog.alert(
+              backgroundCommand.label,
+              output === null
+                ? "Este agente no guarda la salida de sus comandos en segundo plano."
+                : output.trim() === ""
+                  ? "Todavía no ha escrito nada."
+                  : `…${output.slice(-2000)}`,
+            );
+          });
+        };
   const floatingStatus = ((): FloatingWorkingStatus | null => {
     const connectionStatus = connectionFloatingStatus({
       connectionError: props.connectionError,
@@ -518,6 +549,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
           .map((item) => item.label)
           .join(", ")}`,
         waiting: pendingBackgroundWork.waiting,
+        ...(showBackgroundOutput ? { onPress: showBackgroundOutput } : {}),
       };
     }
     if (props.selectedThread.goal !== null && contentPresentationKind === "ready") {

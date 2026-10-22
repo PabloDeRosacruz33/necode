@@ -52,6 +52,7 @@ run apps/server \
   src/vcs/taskBranch.test.ts \
   src/vcs/taskReview.test.ts \
   src/vcs/taskLifecycle.test.ts \
+  src/orchestration-v2/Adapters/ClaudeTaskOutputTail.test.ts \
   src/voice/VoiceTranscription.test.ts
 
 run apps/web \

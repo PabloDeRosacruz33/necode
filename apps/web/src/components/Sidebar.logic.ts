@@ -959,6 +959,8 @@ export function resolveSidebarV2TopStatus(input: {
   return input.isUnread ? "done" : null;
 }
 
+export { countRunningBackgroundCommands } from "@t3tools/client-runtime/state/thread-status";
+
 export function shouldShowSidebarV2Duration(status: SidebarThreadStatus): boolean {
   return status === "working";
 }

@@ -15,6 +15,8 @@ export type FloatingWorkingStatus =
       readonly label: string;
       readonly accessibilityLabel: string;
       readonly waiting: boolean;
+      /** Necode: shows what a background command is printing. */
+      readonly onPress?: () => void;
     }
   | { readonly kind: "goal"; readonly label: string; readonly accessibilityLabel: string }
   | { readonly kind: "preparing"; readonly label: string }

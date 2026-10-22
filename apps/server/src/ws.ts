@@ -241,6 +241,10 @@ import * as ManagedProjectFolders from "./project/ManagedProjectFolders.ts";
 import { projectMutationOperation } from "./project/ProjectMutation.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as TaskLifecycle from "./vcs/taskLifecycle.ts";
+import {
+  claudeTaskOutputRoot,
+  readClaudeBackgroundTaskOutput,
+} from "./orchestration-v2/Adapters/ClaudeTaskOutputTail.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
@@ -3574,6 +3578,16 @@ const layerWsRpc = (
             : team.setOwnGitIdentity(memberId, input),
         [WS_METHODS.teamUpdateMember]: (input) => team.updateMember(input),
         [WS_METHODS.voiceTranscribe]: (input) => voiceTranscription.transcribe(input),
+        [WS_METHODS.threadBackgroundTaskOutput]: (input) =>
+          Effect.gen(function* () {
+            const path = yield* Path.Path;
+            const root = claudeTaskOutputRoot(process.env, path);
+            const read =
+              root === undefined
+                ? null
+                : yield* readClaudeBackgroundTaskOutput({ root, taskId: input.taskId });
+            return read ?? { output: null, truncated: false };
+          }).pipe(Effect.provideContext(taskContext)),
       });
       return Layer.mergeAll(
         ServerWsRpcGroup.toLayer(handlers),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  countRunningBackgroundCommands,
   hasUnseenCompletion,
   isPlanReady,
   markThreadUnread,
@@ -73,5 +74,19 @@ describe("isPlanReady", () => {
     expect(isPlanReady(thread)).toBe(true);
     expect(isPlanReady({ ...thread, runtime: { status: "running" } })).toBe(false);
     expect(isPlanReady({ ...thread, interactionMode: "default" })).toBe(false);
+  });
+});
+
+describe("countRunningBackgroundCommands", () => {
+  it("counts the commands an agent left running, not subagents or monitors", () => {
+    expect(
+      countRunningBackgroundCommands([
+        { kind: "command" },
+        { kind: "subagent" },
+        { kind: "monitor" },
+        { kind: "command" },
+      ]),
+    ).toBe(2);
+    expect(countRunningBackgroundCommands(undefined)).toBe(0);
   });
 });

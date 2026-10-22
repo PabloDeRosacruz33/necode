@@ -456,6 +456,13 @@ export function createVcsEnvironmentAtoms<R, E>(
       label: "environment-data:mac-app:quit",
       tag: WS_METHODS.macAppQuit,
     }),
+    // Necode: the end of a background command's output; viewers refresh it while it runs.
+    backgroundTaskOutput: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:thread:background-task-output",
+      tag: WS_METHODS.threadBackgroundTaskOutput,
+      staleTimeMs: 0,
+      idleTtlMs: 30_000,
+    }),
     // Whether "Simular" can build an iOS app in a folder; it changes only with the project.
     iosSimulatorPlan: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:mac-app:ios-simulator-plan",
