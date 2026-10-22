@@ -128,13 +128,28 @@ export const claudeSignedOutMessage = (input: {
   return `Claude could not authenticate. Sign in to this Claude instance in Settings > Providers, or run \`claude auth login\` on this environment's machine${configuration}, then start a new thread. For API-key authentication, check this instance's configured credentials.`;
 };
 
+export class ClaudeTranscriptCopyError extends Schema.TaggedError<ClaudeTranscriptCopyError>()(
+  "ClaudeTranscriptCopyError",
+  { sessionId: Schema.String, expectedBytes: Schema.Number, copiedBytes: Schema.Number },
+) {
+  override get message(): string {
+    return `Copied ${this.copiedBytes} of ${this.expectedBytes} bytes of Claude session ${this.sessionId}.`;
+  }
+}
+
 /** Claude keeps a folder's transcripts under `projects/<path with every non-alphanumeric as ->`. */
 export const claudeProjectDirName = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
 
 /**
  * Claude only resumes a session whose transcript sits under the current folder's project
- * directory. When a thread moves to another folder (a new task, a relocated repository), copy
- * the transcript there from wherever it was written, so the conversation carries on.
+ * directory, and it names that directory after the folder's physical path: it resolves links, so
+ * a task under `~/.necode/worktrees` (a link to the external disk) lives under `-Volumes-…`. When
+ * a thread moves to another folder (a merged permanent task's next version, a continued task, a
+ * relocated repository), copy the transcript there so the conversation carries on.
+ *
+ * Every move leaves a copy behind, and a copy's date is when it was copied, so the current one is
+ * the largest (transcripts only grow), then the newest. The session's side folder (subagent
+ * transcripts, tool results) goes with it. Returns whether it copied.
  */
 export const ensureClaudeTranscriptForCwd = Effect.fn("ensureClaudeTranscriptForCwd")(
   function* (input: {
@@ -146,23 +161,48 @@ export const ensureClaudeTranscriptForCwd = Effect.fn("ensureClaudeTranscriptFor
     const path = yield* Path.Path;
     const projectsDir = path.join(input.claudeHome, "projects");
     const fileName = `${input.sessionId}.jsonl`;
-    const targetDir = path.join(projectsDir, claudeProjectDirName(input.cwd));
-    if (yield* fileSystem.exists(path.join(targetDir, fileName))) return false;
-    // A thread that moved several times leaves a copy in each folder; only the newest is current.
-    let newest: { readonly file: string; readonly mtime: number } | null = null;
+    const physicalCwd = yield* fileSystem
+      .realPath(input.cwd)
+      .pipe(Effect.orElseSucceed(() => input.cwd));
+    const targetDir = path.join(projectsDir, claudeProjectDirName(physicalCwd));
+    const target = path.join(targetDir, fileName);
+    if (yield* fileSystem.exists(target)) return false;
+    let best: { readonly dir: string; readonly size: number; readonly mtime: number } | null = null;
     for (const entry of yield* fileSystem.readDirectory(projectsDir)) {
-      const candidate = path.join(projectsDir, entry, fileName);
-      const info = yield* fileSystem.stat(candidate).pipe(Effect.option);
-      if (Option.isNone(info)) continue;
+      const dir = path.join(projectsDir, entry);
+      const info = yield* fileSystem.stat(path.join(dir, fileName)).pipe(Effect.option);
+      if (Option.isNone(info) || info.value.type !== "File") continue;
+      const size = Number(info.value.size);
       const mtime = Option.match(info.value.mtime, {
         onNone: () => 0,
         onSome: (date) => date.getTime(),
       });
-      if (newest === null || mtime > newest.mtime) newest = { file: candidate, mtime };
+      if (best === null || size > best.size || (size === best.size && mtime > best.mtime)) {
+        best = { dir, size, mtime };
+      }
     }
-    if (newest === null) return false;
+    if (best === null) return false;
     yield* fileSystem.makeDirectory(targetDir, { recursive: true });
-    yield* fileSystem.copyFile(newest.file, path.join(targetDir, fileName));
+    yield* fileSystem.copyFile(path.join(best.dir, fileName), target);
+    const sideFolder = path.join(best.dir, input.sessionId);
+    if (yield* fileSystem.exists(sideFolder)) {
+      yield* fileSystem.copy(sideFolder, path.join(targetDir, input.sessionId), {
+        overwrite: true,
+      });
+    }
+    const copied = yield* fileSystem.stat(target).pipe(
+      Effect.map((info) => Number(info.size)),
+      Effect.orElseSucceed(() => -1),
+    );
+    if (copied !== best.size) {
+      // A partial copy would resume a truncated conversation; leave Claude to report it instead.
+      yield* fileSystem.remove(target).pipe(Effect.ignore);
+      return yield* new ClaudeTranscriptCopyError({
+        sessionId: input.sessionId,
+        expectedBytes: best.size,
+        copiedBytes: copied,
+      });
+    }
     return true;
   },
 );

@@ -45,6 +45,7 @@ run apps/server \
   src/project/iconComposer.test.ts \
   src/project/worktreeDependencies.test.ts \
   src/provider/ClaudeAuth.test.ts \
+  src/provider/Drivers/ClaudeHome.test.ts \
   src/provider/forkResumeCursor.test.ts \
   src/shutdownSignals.test.ts \
   src/socketGuards.test.ts \

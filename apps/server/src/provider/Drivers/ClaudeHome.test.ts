@@ -34,14 +34,64 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
         expect(yield* fs.readFileString(copied)).toBe("{}\n");
         expect(yield* ensureClaudeTranscriptForCwd(input)).toBe(false);
 
-        // After several moves, the newest copy wins over older ones left behind.
+        // After several moves, the fullest copy wins over shorter ones left behind.
         const stale = path.join(claudeHome, "projects", "-repo-task-c");
         yield* fs.makeDirectory(stale, { recursive: true });
-        yield* fs.writeFileString(path.join(stale, "abc.jsonl"), "old\n");
+        yield* fs.writeFileString(path.join(stale, "abc.jsonl"), "\n");
         yield* fs.utimes(path.join(stale, "abc.jsonl"), 1_000, 1_000);
         yield* ensureClaudeTranscriptForCwd({ ...input, cwd: "/repo/task-d" });
         const moved = path.join(claudeHome, "projects", "-repo-task-d", "abc.jsonl");
         expect(yield* fs.readFileString(moved)).toBe("{}\n");
+      }),
+    ),
+  );
+
+  // 2026-10-22: six permanent threads lost their conversation when merging rotated them from v1
+  // to v2. Task folders are reached through a link (~/.necode/worktrees → the external disk);
+  // Claude keys sessions by the physical path, and the copy went to the linked one.
+  it.effect("keeps a rotated task's conversation when its folders are reached through a link", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const sandbox = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "rot-" }));
+        const claudeHome = path.join(sandbox, "claude");
+        const disk = path.join(sandbox, "disk", "worktrees");
+        const linked = path.join(sandbox, "home", "worktrees");
+        yield* fs.makeDirectory(path.join(disk, "app", "pablo", "fabulas-v1"), { recursive: true });
+        yield* fs.makeDirectory(path.dirname(linked), { recursive: true });
+        yield* fs.symlink(disk, linked);
+        const projects = path.join(claudeHome, "projects");
+        const key = (folder: string) => path.join(projects, claudeProjectDirName(folder));
+
+        // The live session, where Claude wrote it (physical path), with its side folder…
+        const live = key(path.join(disk, "app", "pablo", "fabulas-v1"));
+        yield* fs.makeDirectory(path.join(live, "s1", "subagents"), { recursive: true });
+        yield* fs.writeFileString(path.join(live, "s1.jsonl"), "turn 1\nturn 2\nturn 3\n");
+        yield* fs.writeFileString(path.join(live, "s1", "subagents", "a.jsonl"), "sub\n");
+        yield* fs.utimes(path.join(live, "s1.jsonl"), 1_000, 1_000);
+        // …and an older, smaller copy under the linked path whose date is newer.
+        const staleCopy = key(path.join(linked, "app", "pablo", "fabulas-v1"));
+        yield* fs.makeDirectory(staleCopy, { recursive: true });
+        yield* fs.writeFileString(path.join(staleCopy, "s1.jsonl"), "turn 1\n");
+
+        // Merging removes v1 and starts v2; the thread is pointed at v2 by its linked path.
+        yield* fs.remove(path.join(disk, "app", "pablo", "fabulas-v1"), { recursive: true });
+        yield* fs.makeDirectory(path.join(disk, "app", "fabulas-v2"), { recursive: true });
+        const cwd = path.join(linked, "app", "fabulas-v2");
+
+        expect(yield* ensureClaudeTranscriptForCwd({ claudeHome, cwd, sessionId: "s1" })).toBe(
+          true,
+        );
+        const resumed = key(path.join(disk, "app", "fabulas-v2"));
+        expect(yield* fs.readFileString(path.join(resumed, "s1.jsonl"))).toBe(
+          "turn 1\nturn 2\nturn 3\n",
+        );
+        expect(yield* fs.readFileString(path.join(resumed, "s1", "subagents", "a.jsonl"))).toBe(
+          "sub\n",
+        );
+        expect(yield* fs.exists(key(cwd))).toBe(false);
+        expect(yield* fs.exists(path.join(disk, "app", "pablo", "fabulas-v1"))).toBe(false);
       }),
     ),
   );

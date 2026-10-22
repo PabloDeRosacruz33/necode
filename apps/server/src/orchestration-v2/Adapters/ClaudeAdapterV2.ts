@@ -8129,12 +8129,21 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             turnInput.nativeThreadHasTurns ?? turnInput.providerTurnOrdinal > 1;
           const shouldResume =
             resumeSessionAt !== undefined || openedWithResume || hasPersistedProviderTurn;
+          // Necode: Claude keys its sessions by the physical folder (it resolves links), so it is
+          // launched with that same path; a task folder reached through ~/.necode/worktrees and
+          // through /Volumes/NecoraDev is then one session key, not two.
+          const physicalCwd =
+            turnInput.runtimePolicy.cwd === null
+              ? null
+              : yield* fileSystem
+                  .realPath(turnInput.runtimePolicy.cwd)
+                  .pipe(Effect.orElseSucceed(() => turnInput.runtimePolicy.cwd));
           const queryOptions = makeClaudeQueryOptions({
             modelSelection: turnInput.modelSelection,
             nativeThreadId,
             resume: shouldResume,
             ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
-            cwd: turnInput.runtimePolicy.cwd,
+            cwd: physicalCwd,
             attachmentsDir,
             settings: adapterOptions.settings,
             environment: McpProviderSession.withAgentDeviceEnvironment(
@@ -8158,7 +8167,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             onUserDialog,
             supportedDialogKinds: ["resume_return"],
           });
-          const resumeCwd = turnInput.runtimePolicy.cwd;
+          const resumeCwd = physicalCwd;
           if (shouldResume && resumeCwd) {
             // Necode: a thread that moved folders (a continued task, a relocated repository)
             // still resumes; Claude only finds transcripts under the current folder.
