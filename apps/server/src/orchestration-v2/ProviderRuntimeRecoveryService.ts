@@ -24,6 +24,7 @@ import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { restartContinuationRun } from "./RestartContinuation.ts";
 import { isBufferedProviderNotification } from "./NotificationMailbox.ts";
+import { isThreadSentMessage } from "./QueuedRunOrder.ts";
 import {
   endOrphanedNativeSubagent,
   endRunlessRootTurns,
@@ -318,12 +319,15 @@ export const make = Effect.gen(function* () {
       const bufferedMessageIds = new Set(
         queuedMessages.filter(isBufferedProviderNotification).map((message) => message.id),
       );
+      const threadSentMessageIds = new Set(
+        queuedMessages.filter(isThreadSentMessage).map((message) => message.id),
+      );
       for (const run of queuedRuns) {
         if (bufferedMessageIds.has(run.userMessageId)) {
           runs.push(run);
           continue;
         }
-        if (run.queueHeld === true) continue;
+        if (run.queueHeld === true || threadSentMessageIds.has(run.userMessageId)) continue;
         events.push({
           id: yield* allocateEventId(),
           type: "run.updated",

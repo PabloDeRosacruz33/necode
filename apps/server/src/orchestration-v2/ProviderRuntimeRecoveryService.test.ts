@@ -750,6 +750,81 @@ it.effect.each(["queued", "preparing"] as const)("recovers $0 work after restart
   }).pipe(Effect.provide(layer));
 });
 
+it.effect("keeps a message from another thread deliverable after restart", () => {
+  const threadId = ThreadId.make("thread_thread_sent_restart");
+  const runId = RunId.make("run_thread_sent_restart");
+  const messageId = MessageId.make("message_thread_sent_restart");
+  let committedInput: Parameters<EventSink.EventSinkV2["Service"]["commitCommand"]>[0] | null =
+    null;
+  const projection = {
+    thread: { id: threadId },
+    runtimeRequests: [],
+    providerSessions: [],
+    providerThreads: [],
+    providerTurns: [],
+    runs: [
+      {
+        id: runId,
+        status: "queued",
+        queuePosition: 1,
+        userMessageId: messageId,
+        providerInstanceId: ProviderInstanceId.make("codex"),
+      },
+    ],
+    attempts: [],
+    nodes: [],
+    subagents: [],
+    messages: [
+      {
+        id: messageId,
+        threadId,
+        role: "user",
+        createdBy: "agent",
+        creationSource: "mcp",
+        senderThreadId: ThreadId.make("thread_coordinator"),
+      },
+    ],
+    turnItems: [],
+  } as unknown as OrchestrationV2ThreadProjection;
+  const layer = ProviderRuntimeRecovery.layer.pipe(
+    Layer.provide(ServerSettings.layerTest()),
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getRecoveryThreadIds: () => Effect.succeed([threadId]),
+          getRuntimeRecoveryProjection: () => Effect.succeed(projection),
+          getThreadRecords: () => Effect.succeed(projection),
+        }),
+        Layer.mock(EventSink.EventSinkV2)({
+          commitCommand: (input) => {
+            committedInput = input;
+            return Effect.succeed({ committed: true, cancelledEffectCount: 0 } as never);
+          },
+        }),
+        IdAllocator.layer,
+        Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({
+          runRecoveryOnce: Effect.succeed(false),
+        }),
+        Layer.mock(EffectOutbox.EffectOutboxV2)({
+          cancelUnsettled: () => Effect.succeed([]),
+          signalCancellations: () => Effect.void,
+          reconcileAfterProcessLoss: Effect.succeed({ requeued: 0, cancelled: 0 }),
+        }),
+      ),
+    ),
+  );
+
+  return Effect.gen(function* () {
+    yield* (yield* ProviderRuntimeRecovery.ProviderRuntimeRecoveryService).reconcile("startup");
+    const command: Parameters<EventSink.EventSinkV2["Service"]["commitCommand"]>[0] | null =
+      committedInput;
+    const held = (command?.events ?? []).some(
+      (event) => event.type === "run.updated" && event.payload.queueHeld === true,
+    );
+    assert.isFalse(held);
+  }).pipe(Effect.provide(layer));
+});
+
 it.effect(
   "cancels the complete in-flight subtree and stops its persisted session without reopening it",
   () => {

@@ -1,4 +1,20 @@
-import type { OrchestrationV2Run, OrchestrationV2ThreadProjection } from "@t3tools/contracts";
+import type {
+  OrchestrationV2ConversationMessage,
+  OrchestrationV2Run,
+  OrchestrationV2ThreadProjection,
+} from "@t3tools/contracts";
+
+/**
+ * A message another thread sent (t3_thread_send). Nobody watches another
+ * thread's queue, so a stop or a restart does not hold it for a person to
+ * release: it starts once the thread is free. On 2026-10-22 a Necode update
+ * held three such messages and no one ever read them.
+ */
+export function isThreadSentMessage(
+  message: Pick<OrchestrationV2ConversationMessage, "senderThreadId" | "createdBy">,
+): boolean {
+  return message.senderThreadId !== undefined && message.createdBy === "agent";
+}
 
 export function isAutomaticCompletionRun(
   projection: Pick<OrchestrationV2ThreadProjection, "runs" | "messages">,
