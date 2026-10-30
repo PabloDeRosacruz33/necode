@@ -56,6 +56,11 @@ Claude Code holds the turn until that window reopens, so it can keep showing as
 working. Wait for the reset, or stop the turn and continue later. The warning's
 timestamp shows when the displayed wait started.
 
+When you have more than one Claude account set up, a thread stopped by one
+account's limit continues on another account that has room, with the same model,
+and the thread notes the switch. Until that limit resets, messages sent to the
+limited account go to the other one too.
+
 ## Skills
 
 Claude skills come from the config directory's `skills` folder and the project's

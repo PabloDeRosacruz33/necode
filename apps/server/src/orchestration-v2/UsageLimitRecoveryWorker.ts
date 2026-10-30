@@ -5,6 +5,7 @@ import * as Layer from "effect/Layer";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import * as ProviderAccountFailover from "./ProviderAccountFailover.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 
 export function limitRecoveryCommand(
@@ -70,13 +71,68 @@ export function limitRecoveryCommand(
   };
 }
 
+/**
+ * Necode: continues a thread its account's usage limit stopped on another account of the same
+ * provider, with the same model. The message doubles as the note in the thread.
+ */
+export function limitFailoverCommand(
+  limited: ProjectionStore.ProjectionUsageLimitedRun,
+  route: ProviderAccountFailover.FailoverRoute,
+): OrchestrationV2Command {
+  const from = ProviderAccountFailover.providerLabel(route.from);
+  const to = ProviderAccountFailover.providerLabel(route.to);
+  return {
+    type: "message.dispatch",
+    commandId: CommandId.make(`limit-failover:${limited.runId}`),
+    messageId: MessageId.make(`limit-failover:${limited.runId}`),
+    threadId: limited.threadId,
+    manualContinuationOfRunId: limited.runId,
+    modelSelection: route.selection,
+    text: `Necode: la cuenta «${from}» ha llegado a su límite, así que este hilo sigue con «${to}» y el mismo modelo. Continue where you left off.`,
+    attachments: [],
+    dispatchMode: { type: "start_immediately" },
+    createdBy: "user",
+    creationSource: "server",
+  };
+}
+
 const makeSweep = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const settings = yield* ServerSettings.ServerSettingsService;
+  const failover = yield* Effect.serviceOption(ProviderAccountFailover.ProviderAccountFailover);
   return Effect.fn("UsageLimitRecoveryWorker.sweep")(function* () {
     const preferences = yield* settings.getSettings;
     const now = yield* DateTime.now;
+    if (failover._tag === "Some") {
+      const limitedRuns = yield* projections.getUsageLimitedRuns({ now });
+      for (const limited of limitedRuns) {
+        yield* failover.value.reportLimit(limited.modelSelection.instanceId, limited.resetAt);
+      }
+      for (const limited of limitedRuns) {
+        const route = yield* failover.value.route({
+          selection: limited.modelSelection,
+          projectId: limited.projectId,
+        });
+        if (route === null) continue;
+        yield* threads.dispatch(limitFailoverCommand(limited, route)).pipe(
+          // Messages held behind the limit go on after the continuation.
+          Effect.andThen(
+            threads.dispatch({
+              type: "queue.resume",
+              commandId: CommandId.make(`limit-failover-queue:${limited.runId}`),
+              threadId: limited.threadId,
+            }),
+          ),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("orchestration-v2.limit-failover.dispatch-failed", {
+              threadId: limited.threadId,
+              cause,
+            }),
+          ),
+        );
+      }
+    }
     const candidates = yield* projections.getLimitRecoveryCandidates({
       now,
       autoResume: preferences.autoResumeLimitedThreads,

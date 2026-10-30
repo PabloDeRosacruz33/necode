@@ -1,4 +1,5 @@
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
+import * as ProviderAccountFailover from "./ProviderAccountFailover.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as Layer from "effect/Layer";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -214,6 +215,8 @@ const layerOrchestratorProvided = Orchestrator.layer.pipe(
       layerProviderSwitchServiceProvided,
       layerRunExecutionServiceProvided,
       ThreadForkService.layer,
+      // Same layer reference as the limit worker's, so both share the accounts known limited.
+      ProviderAccountFailover.layer,
     ),
   ),
 );
@@ -364,7 +367,13 @@ export const layerProduction = Layer.mergeAll(
   layerScheduledTaskProvided,
   layerSecretRequestsProvided,
   UsageLimitRecoveryWorker.layer.pipe(
-    Layer.provide(Layer.mergeAll(ProjectionStore.layer, layerThreadManagementProvided)),
+    Layer.provide(
+      Layer.mergeAll(
+        ProjectionStore.layer,
+        layerThreadManagementProvided,
+        ProviderAccountFailover.layer,
+      ),
+    ),
   ),
   layerProviderContinuationWorkerProvided,
   layerAgentSessionImporterProvided,

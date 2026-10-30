@@ -79,6 +79,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import * as ProjectStore from "./ProjectStore.ts";
+import * as ProviderAccountFailover from "./ProviderAccountFailover.ts";
 import {
   isCheckpointRestoreIsolated,
   SHARED_WORKSPACE_RESTORE_MESSAGE,
@@ -827,6 +828,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const runtimePolicy = yield* RuntimePolicyV2;
   const threadForkService = yield* ThreadForkServiceV2;
   const threadDispatch = yield* ThreadCommandExecutor.ThreadCommandExecutor;
+  const accountFailover = yield* Effect.serviceOption(
+    ProviderAccountFailover.ProviderAccountFailover,
+  );
 
   const mapDispatchError =
     (command: OrchestrationV2ServerCommand) =>
@@ -4691,7 +4695,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ]);
         projection = yield* getProjectionWithPendingEvents(command.threadId, events);
       }
-      const modelSelection = command.modelSelection ?? projection.thread.modelSelection;
+      const requestedModelSelection = command.modelSelection ?? projection.thread.modelSelection;
+      // Necode: work sent to an account at its usage limit goes to another account with room.
+      const failoverRoute =
+        accountFailover._tag === "Some"
+          ? yield* accountFailover.value.route({
+              selection: requestedModelSelection,
+              projectId: projection.thread.projectId,
+            })
+          : null;
+      const modelSelection = failoverRoute?.selection ?? requestedModelSelection;
       let dispatchMode = resolveMessageDispatchIntent(
         projection,
         command.dispatchMode,

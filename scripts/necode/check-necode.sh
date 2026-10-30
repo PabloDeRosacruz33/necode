@@ -35,6 +35,8 @@ run apps/server \
   src/orchestration-v2/ProviderSessionManager.test.ts \
   src/orchestration-v2/ThreadLaunchService.test.ts \
   src/orchestration-v2/ProviderRuntimeRecoveryService.test.ts \
+  src/orchestration-v2/ProviderAccountFailover.test.ts \
+  src/orchestration-v2/UsageLimitFailover.test.ts \
   src/orchestration-v2/legacy/LegacyV1ThreadImporter.test.ts \
   src/persistence/Migrations/064_BackfillMessageAuthors.test.ts \
   src/device/ClientDeviceHosts.test.ts \
