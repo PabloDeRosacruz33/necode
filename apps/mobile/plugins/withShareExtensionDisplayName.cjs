@@ -3,6 +3,10 @@
 // Brand the extension while leaving its initially-empty signing team intact: Expo uses that state
 // to select ios.appleTeamId and enable first-time profile provisioning. Expo runs same-type mods
 // in reverse registration order, so this executes after the extension exists.
+//
+// Necode also swaps in its own share controller (share-extension/ShareIntoViewController.swift),
+// which offers pinned threads as destinations, and declares the conversation intent that lets iOS
+// show those threads in the share sheet's suggestion row.
 
 const fs = require("fs");
 const path = require("path");
@@ -44,10 +48,24 @@ function withDisplayNamePlist(config, displayName) {
       if (!displayNamePattern.test(source)) {
         throw new Error(`Could not update CFBundleDisplayName in ${plistPath}.`);
       }
-      const next = source.replace(displayNamePattern, `$1${escapeXml(displayName)}$2`);
+      let next = source.replace(displayNamePattern, `$1${escapeXml(displayName)}$2`);
+      if (!next.includes("<key>IntentsSupported</key>")) {
+        const attributesPattern = /(<key>NSExtensionAttributes<\/key>\s*<dict>)/;
+        if (!attributesPattern.test(next)) {
+          throw new Error(`Could not find NSExtensionAttributes in ${plistPath}.`);
+        }
+        next = next.replace(
+          attributesPattern,
+          "$1\n\t\t\t<key>IntentsSupported</key>\n\t\t\t<array>\n\t\t\t\t<string>INSendMessageIntent</string>\n\t\t\t</array>",
+        );
+      }
       if (next !== source) {
         fs.writeFileSync(plistPath, next);
       }
+      fs.copyFileSync(
+        path.join(__dirname, "share-extension", "ShareIntoViewController.swift"),
+        path.join(cfg.modRequest.platformProjectRoot, TARGET_NAME, "ShareIntoViewController.swift"),
+      );
       return cfg;
     },
   ]);

@@ -47,6 +47,10 @@ import {
 } from "./components/RenderErrorBoundary";
 import { ArchivedThreadsRouteScreen } from "./features/archive/ArchivedThreadsRouteScreen";
 import { useAgentNotificationNavigation } from "./features/agent-awareness/notificationNavigation";
+import {
+  usePublishPinnedShareTargets,
+  useShareToPinnedThread,
+} from "./features/sharing/useShareToPinnedThread";
 import { ConnectOnboardingRouteScreen } from "./features/cloud/ConnectOnboardingRouteScreen";
 import { useConnectOnboardingNavigation } from "./features/cloud/connectOnboardingNavigation";
 import { AttachmentFileScreen } from "./features/files/AttachmentFileScreen";
@@ -582,6 +586,7 @@ function workspaceLocationFromState(state: NavigationState) {
 function ThreadOutboxDrainWorker() {
   useThreadOutboxDrain();
   useComposerAttachmentUploadWorker();
+  usePublishPinnedShareTargets();
   return null;
 }
 
@@ -591,6 +596,8 @@ function RootStackLayout(props: {
 }) {
   const navigation = useNavigation();
   const { pendingShare } = useIncomingShare();
+  // Declared before the presentation effect so a share aimed at a pinned thread is taken first.
+  const sharedToPinnedThread = useShareToPinnedThread();
   const sharePresentationRef = useRef(EMPTY_INCOMING_SHARE_PRESENTATION_STATE);
   const path = getPathFromState(props.state, navigationPathConfig);
   const pathname = path.startsWith("/") ? path : `/${path}`;
@@ -603,7 +610,8 @@ function RootStackLayout(props: {
     const topRouteName = props.state.routes[props.state.index]?.name;
     const transition = transitionIncomingSharePresentation(sharePresentationRef.current, {
       isShareSheetPresented: topRouteName === "NewTaskSheet",
-      pendingShareId: pendingShare?.id ?? null,
+      pendingShareId:
+        pendingShare && !sharedToPinnedThread.current.has(pendingShare.id) ? pendingShare.id : null,
     });
     sharePresentationRef.current = transition.state;
     if (!transition.shareIdToPresent) {
@@ -613,7 +621,7 @@ function RootStackLayout(props: {
       screen: "NewTask",
       params: { incomingShareId: transition.shareIdToPresent },
     });
-  }, [navigation, pendingShare, props.state]);
+  }, [navigation, pendingShare, props.state, sharedToPinnedThread]);
 
   return (
     <HardwareKeyboardCommandProvider pathname={pathname}>

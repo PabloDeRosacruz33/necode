@@ -264,6 +264,8 @@ const config: ExpoConfig = {
       NSLocalNetworkUsageDescription:
         "Allow Necode to connect to Necode servers on your local network or tailnet.",
       NSPhotoLibraryAddUsageDescription: "Allow Necode to save images to your photo library.",
+      // Pinned threads are donated as conversations so they show in the share sheet.
+      NSUserActivityTypes: ["INSendMessageIntent"],
       // "Audio, AirPlay, and Picture in Picture": the browser screen's system
       // picture in picture needs it to start and to stay up outside the app.
       UIBackgroundModes: ["audio"],

@@ -45,7 +45,9 @@ before an upload finishes requires you to attach that file again.
 You can drag or paste images into the web or desktop composer. HEIC and HEIF
 photos are converted to JPEG there and when selected from the mobile photo
 library; photos over the image limit are also resized to fit. On mobile, you can
-also send files to Necode through another app's system share sheet.
+also send files to Necode through another app's system share sheet. On iPhone,
+your pinned threads appear in the share sheet's suggestions: pick one, add a
+comment, and Necode sends it to that thread without asking for a project.
 
 See [images and videos](#images-and-videos-in-messages) for previewing and saving media.
 
