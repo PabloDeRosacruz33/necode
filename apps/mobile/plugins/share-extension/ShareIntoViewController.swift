@@ -404,79 +404,132 @@ final class ShareComposeModel: ObservableObject {
 
 struct ShareComposeView: View {
   @ObservedObject var model: ShareComposeModel
+  @FocusState private var messageFocused: Bool
 
   var body: some View {
     NavigationStack {
-      List {
-        if !model.previews.isEmpty {
-          Section {
+      ScrollView {
+        VStack(alignment: .leading, spacing: 16) {
+          if !model.previews.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
               HStack(spacing: 10) {
                 ForEach(Array(model.previews.enumerated()), id: \.offset) { _, image in
                   Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 96, height: 170)
+                    .frame(width: 72, height: 128)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                      RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.white.opacity(0.12))
+                    )
                 }
               }
-              .padding(.vertical, 4)
+              .padding(.horizontal, 16)
             }
           }
-          .listRowBackground(Color.clear)
-          .listRowInsets(EdgeInsets())
-        }
 
-        Section("Hilo") {
-          ForEach(model.threads) { thread in
-            row(id: thread.id, title: thread.title, subtitle: thread.subtitle)
+          Text("Enviar al hilo")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 20)
+
+          VStack(spacing: 6) {
+            ForEach(model.threads) { thread in
+              row(id: thread.id, title: thread.title, subtitle: thread.subtitle)
+            }
+            row(id: newTaskId, title: "Nueva tarea", subtitle: "Elegir proyecto en Necode")
           }
-          row(id: newTaskId, title: "Nueva tarea", subtitle: "Elegir proyecto en Necode")
+          .padding(.horizontal, 12)
         }
-
-        Section("Mensaje") {
-          TextField("Escribe qué quieres decirle…", text: $model.message, axis: .vertical)
-            .lineLimit(3...10)
-        }
+        .padding(.vertical, 12)
       }
-      .listStyle(.insetGrouped)
+      .scrollDismissesKeyboard(.interactively)
+      .safeAreaInset(edge: .bottom) { composer }
       .navigationTitle("Enviar a Necode")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Cancelar") { model.onCancel() }
         }
-        ToolbarItem(placement: .confirmationAction) {
-          if model.sending {
-            ProgressView()
-          } else {
-            Button("Enviar") { model.onSend() }
-              .bold()
-              .disabled(model.selectedId == nil)
-          }
-        }
       }
+      .onAppear { messageFocused = true }
     }
   }
 
+  /// Like the thread composer: the message, then send.
+  private var composer: some View {
+    HStack(alignment: .bottom, spacing: 10) {
+      TextField("Escribe tu mensaje…", text: $model.message, axis: .vertical)
+        .lineLimit(1...6)
+        .focused($messageFocused)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+      if model.sending {
+        ProgressView().frame(width: 40, height: 40)
+      } else {
+        Button {
+          model.onSend()
+        } label: {
+          Image(systemName: "arrow.up")
+            .font(.system(size: 17, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 40, height: 40)
+            .background(model.selectedId == nil ? Color.gray.opacity(0.4) : Color.accentColor, in: Circle())
+        }
+        .disabled(model.selectedId == nil)
+        .accessibilityLabel("Enviar")
+      }
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .background(.bar)
+  }
+
   private func row(id: String, title: String, subtitle: String) -> some View {
-    Button {
+    let selected = model.selectedId == id
+    return Button {
       model.selectedId = id
     } label: {
-      HStack {
-        VStack(alignment: .leading, spacing: 2) {
-          Text(title).foregroundStyle(.primary).lineLimit(1)
+      HStack(spacing: 12) {
+        monogram(id == newTaskId ? "+" : subtitle)
+        VStack(alignment: .leading, spacing: 1) {
+          Text(title).font(.body.weight(selected ? .semibold : .regular)).foregroundStyle(.primary).lineLimit(1)
           Text(subtitle).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
         }
-        Spacer()
-        if model.selectedId == id {
-          Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint)
-        } else {
-          Image(systemName: "circle").foregroundStyle(.tertiary)
+        Spacer(minLength: 8)
+        if selected {
+          Image(systemName: "checkmark.circle.fill").font(.title3).foregroundStyle(Color.accentColor)
         }
       }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 10)
+      .background(
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+          .fill(selected ? Color.accentColor.opacity(0.18) : Color(.secondarySystemBackground))
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+          .stroke(selected ? Color.accentColor : Color.clear, lineWidth: 1.5)
+      )
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+  }
+
+  /// A round badge with the project's first letter, colored per project.
+  private func monogram(_ name: String) -> some View {
+    let hues: [Double] = [0.58, 0.75, 0.95, 0.08, 0.33, 0.5]
+    let hue = hues[name.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0xFFFF } % hues.count]
+    let letter = name == "+" ? "+" : name.first.map { String($0).uppercased() } ?? "N"
+    return Text(letter)
+      .font(.system(size: 16, weight: .bold))
+      .foregroundStyle(.white)
+      .frame(width: 34, height: 34)
+      .background(
+        name == "+" ? Color.gray.opacity(0.5) : Color(hue: hue, saturation: 0.55, brightness: 0.8),
+        in: Circle()
+      )
   }
 }
