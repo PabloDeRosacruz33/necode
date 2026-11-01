@@ -1,19 +1,16 @@
 // Necode's copy of expo-sharing's share extension (plugins/withShareExtensionDisplayName.cjs puts
-// it in place of the template). When the person has pinned threads, it shows Apple's compose sheet:
-// the shared items, a comment, and the thread to send them to (preselected when they tapped a
-// pinned thread in the share sheet's suggestion row). The app then sends them to that thread.
+// it in place of the template). When the person has pinned threads, it shows a full sheet: the
+// shared screenshots, the pinned threads to pick from (preselected when they tapped one in the
+// share sheet's suggestion row) and their message. The app then sends it all to that thread.
 // Without pinned threads it hands everything to the app at once, as the template does.
-import Intents
-import UIKit
-import Social
-import MobileCoreServices
-import UniformTypeIdentifiers
 import AVFoundation
+import Intents
+import MobileCoreServices
+import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
 
-class ShareIntoViewController: SLComposeServiceViewController {
-  // Only the following two properties cause a hard-crash of the share extension, because the failure originates from
-  // plugin misconfiguration. Other errors should be handled in the view controller and preferably print a message, because it
-  // is not possible for our users to handle them at runtime.
+class ShareIntoViewController: UIViewController {
   private var hostAppScheme: String {
     guard let _hostAppScheme = Bundle.main.object(forInfoDictionaryKey: "MainTargetUrlScheme") as? String else {
       fatalError("Expo-sharing has failed to load the app scheme from `Info.plist`. Make sure the `expo-sharing` config plugin is configured correctly.")
@@ -30,9 +27,7 @@ class ShareIntoViewController: SLComposeServiceViewController {
 
   // MARK: - Necode: pinned threads
 
-  typealias PinnedThreadRow = PinnedThread
-
-  struct PinnedThread: Codable {
+  struct PinnedThread: Codable, Identifiable {
     let id: String
     let title: String
     let subtitle: String
@@ -52,64 +47,67 @@ class ShareIntoViewController: SLComposeServiceViewController {
 
   /// nil sends to a new task, as before pinned threads existed.
   private var selectedThread: PinnedThread?
-  private var composeMode = false
+  private var comment = ""
+  private var composeMode: Bool { !pinnedThreads.isEmpty }
+  private var handedOff = false
 
   // MARK: - Lifecycle
 
-  override func didSelectPost() {
-    handleShare()
-  }
-
   override func viewDidLoad() {
     super.viewDidLoad()
+    view.backgroundColor = .systemGroupedBackground
+    guard composeMode else { return }
     let suggested = (extensionContext?.intent as? INSendMessageIntent)?.conversationIdentifier
-    selectedThread = pinnedThreads.first { $0.id == suggested }
-    composeMode = selectedThread != nil || !pinnedThreads.isEmpty
-    if composeMode {
-      title = "Necode"
-      placeholder = "Añade un comentario…"
+    let model = ShareComposeModel(
+      threads: pinnedThreads,
+      selectedId: pinnedThreads.first { $0.id == suggested }?.id
+    )
+    model.onCancel = { [weak self] in
+      self?.extensionContext?.cancelRequest(
+        withError: NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError)
+      )
     }
+    model.onSend = { [weak self, weak model] in
+      guard let self, let model, !self.handedOff else { return }
+      self.handedOff = true
+      model.sending = true
+      self.selectedThread = self.pinnedThreads.first { $0.id == model.selectedId }
+      self.comment = model.message
+      self.handleShare()
+    }
+    let host = UIHostingController(rootView: ShareComposeView(model: model))
+    addChild(host)
+    host.view.frame = view.bounds
+    host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    view.addSubview(host.view)
+    host.didMove(toParent: self)
+    loadPreviews(into: model)
   }
 
   override func viewWillAppear(_ animated: Bool) {
-    if !composeMode {
+    super.viewWillAppear(animated)
+    if !composeMode && !handedOff {
+      handedOff = true
       handleShare()
     }
-    super.viewWillAppear(animated)
   }
 
-  override func presentationAnimationDidFinish() {
-    super.presentationAnimationDidFinish()
-    navigationController?.navigationBar.topItem?.rightBarButtonItem?.title = "Enviar"
-  }
-
-  override func isContentValid() -> Bool {
-    true
-  }
-
-  override func configurationItems() -> [Any]! {
-    guard composeMode, let item = SLComposeSheetConfigurationItem() else { return [] }
-    item.title = "Hilo"
-    item.value = selectedThread?.title ?? "Nueva tarea"
-    item.tapHandler = { [weak self] in
-      guard let self else { return }
-      let picker = ThreadPickerViewController(
-        threads: self.pinnedThreads,
-        selectedId: self.selectedThread?.id
-      ) { [weak self] thread in
-        guard let self else { return }
-        self.selectedThread = thread
-        self.reloadConfigurationItems()
-        self.popConfigurationViewController()
+  private func loadPreviews(into model: ShareComposeModel) {
+    let providers = (extensionContext?.inputItems as? [NSExtensionItem] ?? [])
+      .flatMap { $0.attachments ?? [] }
+      .filter { $0.canLoadObject(ofClass: UIImage.self) }
+      .prefix(6)
+    for provider in providers {
+      provider.loadObject(ofClass: UIImage.self) { image, _ in
+        guard let image = image as? UIImage else { return }
+        DispatchQueue.main.async { model.previews.append(image) }
       }
-      self.pushConfigurationViewController(picker)
     }
-    return [item]
   }
 
   private func saveShareTarget() {
     guard composeMode, let defaults = UserDefaults(suiteName: appGroupId) else { return }
-    let comment = (contentText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    let comment = self.comment.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let thread = selectedThread else {
       defaults.removeObject(forKey: "necode.shareTarget")
       return
@@ -134,7 +132,7 @@ class ShareIntoViewController: SLComposeServiceViewController {
       }.value
 
       // A comment for a new task travels as shared text; for a thread, with the target.
-      let comment = (self.contentText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      let comment = self.comment.trimmingCharacters(in: .whitespacesAndNewlines)
       if self.composeMode && self.selectedThread == nil && !comment.isEmpty {
         payload.append(SharePayload(type: .text, value: comment, mimeType: "text/plain", metadata: nil))
       }
@@ -384,49 +382,100 @@ private extension UUID {
   }
 }
 
-/// The pinned threads to send to, plus "Nueva tarea".
-private final class ThreadPickerViewController: UITableViewController {
-  private let threads: [ShareIntoViewController.PinnedThreadRow]
-  private let selectedId: String?
-  private let onSelect: (ShareIntoViewController.PinnedThreadRow?) -> Void
+// MARK: - Necode compose sheet
 
-  init(
-    threads: [ShareIntoViewController.PinnedThreadRow],
-    selectedId: String?,
-    onSelect: @escaping (ShareIntoViewController.PinnedThreadRow?) -> Void
-  ) {
+private let newTaskId = "necode.newTask"
+
+final class ShareComposeModel: ObservableObject {
+  let threads: [ShareIntoViewController.PinnedThread]
+  @Published var selectedId: String?
+  @Published var message = ""
+  @Published var previews: [UIImage] = []
+  @Published var sending = false
+  var onSend: () -> Void = {}
+  var onCancel: () -> Void = {}
+
+  init(threads: [ShareIntoViewController.PinnedThread], selectedId: String?) {
     self.threads = threads
     self.selectedId = selectedId
-    self.onSelect = onSelect
-    super.init(style: .insetGrouped)
-    title = "Hilo"
   }
+}
 
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
+struct ShareComposeView: View {
+  @ObservedObject var model: ShareComposeModel
 
-  override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-    threads.count + 1
-  }
+  var body: some View {
+    NavigationStack {
+      List {
+        if !model.previews.isEmpty {
+          Section {
+            ScrollView(.horizontal, showsIndicators: false) {
+              HStack(spacing: 10) {
+                ForEach(Array(model.previews.enumerated()), id: \.offset) { _, image in
+                  Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 96, height: 170)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+              }
+              .padding(.vertical, 4)
+            }
+          }
+          .listRowBackground(Color.clear)
+          .listRowInsets(EdgeInsets())
+        }
 
-  override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-    let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
-    cell.backgroundColor = .clear
-    if indexPath.row == 0 {
-      cell.textLabel?.text = "Nueva tarea"
-      cell.detailTextLabel?.text = "Elegir proyecto en Necode"
-      cell.accessoryType = selectedId == nil ? .checkmark : .none
-    } else {
-      let thread = threads[indexPath.row - 1]
-      cell.textLabel?.text = thread.title
-      cell.detailTextLabel?.text = thread.subtitle
-      cell.accessoryType = selectedId == thread.id ? .checkmark : .none
+        Section("Hilo") {
+          ForEach(model.threads) { thread in
+            row(id: thread.id, title: thread.title, subtitle: thread.subtitle)
+          }
+          row(id: newTaskId, title: "Nueva tarea", subtitle: "Elegir proyecto en Necode")
+        }
+
+        Section("Mensaje") {
+          TextField("Escribe qué quieres decirle…", text: $model.message, axis: .vertical)
+            .lineLimit(3...10)
+        }
+      }
+      .listStyle(.insetGrouped)
+      .navigationTitle("Enviar a Necode")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Cancelar") { model.onCancel() }
+        }
+        ToolbarItem(placement: .confirmationAction) {
+          if model.sending {
+            ProgressView()
+          } else {
+            Button("Enviar") { model.onSend() }
+              .bold()
+              .disabled(model.selectedId == nil)
+          }
+        }
+      }
     }
-    return cell
   }
 
-  override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-    onSelect(indexPath.row == 0 ? nil : threads[indexPath.row - 1])
+  private func row(id: String, title: String, subtitle: String) -> some View {
+    Button {
+      model.selectedId = id
+    } label: {
+      HStack {
+        VStack(alignment: .leading, spacing: 2) {
+          Text(title).foregroundStyle(.primary).lineLimit(1)
+          Text(subtitle).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+        }
+        Spacer()
+        if model.selectedId == id {
+          Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint)
+        } else {
+          Image(systemName: "circle").foregroundStyle(.tertiary)
+        }
+      }
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
   }
 }
