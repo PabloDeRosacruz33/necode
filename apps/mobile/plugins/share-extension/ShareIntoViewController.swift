@@ -4,6 +4,7 @@
 // share sheet's suggestion row) and their message. The app then sends it all to that thread.
 // Without pinned threads it hands everything to the app at once, as the template does.
 import AVFoundation
+import Combine
 import Intents
 import MobileCoreServices
 import SwiftUI
