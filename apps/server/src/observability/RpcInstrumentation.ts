@@ -240,6 +240,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.teamSetGitIdentity]: "team",
   [WS_METHODS.voiceTranscribe]: "voice",
   [WS_METHODS.threadBackgroundTaskOutput]: "thread",
+  [WS_METHODS.companyPanelSnapshot]: "company-panel",
+  [WS_METHODS.companyPanelAnswer]: "company-panel",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

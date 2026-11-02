@@ -241,6 +241,9 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.voiceTranscribe]: AuthOrchestrationOperateScope,
   // Command output can hold what a terminal shows, so it needs terminal access.
   [WS_METHODS.threadBackgroundTaskOutput]: AuthTerminalReadScope,
+  // Further limited to the people listed in the panel's own folder.
+  [WS_METHODS.companyPanelSnapshot]: AuthOrchestrationReadScope,
+  [WS_METHODS.companyPanelAnswer]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribeBackgroundPolicy]: AuthOrchestrationReadScope,
 } as const satisfies Readonly<Record<WsRpcMethod, AuthEnvironmentScope>>;
 

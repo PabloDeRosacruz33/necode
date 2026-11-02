@@ -20,6 +20,8 @@ import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/process";
 import { rpcInitialItems } from "./rpcInitialItems.ts";
 import * as TeamService from "./team/TeamService.ts";
+import * as CompanyPanel from "./companyPanel/CompanyPanel.ts";
+import * as NodeOS from "node:os";
 import * as DiskSpace from "./diskSpace/DiskSpace.ts";
 import * as VoiceTranscription from "./voice/VoiceTranscription.ts";
 import * as OpenUrlBroker from "./openUrl/OpenUrlBroker.ts";
@@ -47,6 +49,7 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   GitCommandError,
+  CompanyPanelError,
   TeamError,
   teamMemberIdFromSubject,
   ProjectRelocateError,
@@ -71,7 +74,7 @@ import {
   type OrchestrationV2Command,
   type GitActionProgressEvent,
   type GitManagerServiceError,
-  type MessageId,
+  MessageId,
   type AcpRegistryImportSessionInput,
   type AcpRegistryDeleteSessionInput,
   type AcpRegistryDisableProviderInput,
@@ -3587,6 +3590,55 @@ const layerWsRpc = (
                 ? null
                 : yield* readClaudeBackgroundTaskOutput({ root, taskId: input.taskId });
             return read ?? { output: null, truncated: false };
+          }).pipe(Effect.provideContext(taskContext)),
+        [WS_METHODS.companyPanelSnapshot]: () =>
+          Effect.gen(function* () {
+            const path = yield* Path.Path;
+            return yield* CompanyPanel.readCompanyPanelSnapshot({
+              dir: CompanyPanel.companyPanelDir({ env: process.env, home: NodeOS.homedir(), path }),
+              memberId,
+              threadStatus: (threadId) =>
+                threadManagement.getThreadShell(ThreadId.make(threadId)).pipe(
+                  Effect.map((shell) => shell?.status ?? null),
+                  Effect.orElseSucceed(() => null),
+                ),
+            });
+          }).pipe(Effect.provideContext(taskContext)),
+        [WS_METHODS.companyPanelAnswer]: (input) =>
+          Effect.gen(function* () {
+            const path = yield* Path.Path;
+            const prepared = yield* CompanyPanel.prepareCompanyPanelAnswer({
+              dir: CompanyPanel.companyPanelDir({ env: process.env, home: NodeOS.homedir(), path }),
+              memberId,
+              decisionId: input.decisionId,
+              answer: input.answer,
+            });
+            const threadId = ThreadId.make(prepared.informerThreadId);
+            const key = `company-panel:${input.decisionId}`;
+            // The informer gets it like anything else the person writes there.
+            yield* threadManagement
+              .dispatch({
+                type: "message.dispatch",
+                commandId: CommandId.make(key),
+                messageId: MessageId.make(key),
+                threadId,
+                text: prepared.text,
+                attachments: [],
+                dispatchMode: { type: "start_immediately" },
+                deliveryIntent: "auto",
+                createdBy: "user",
+                creationSource: "web",
+                ...(memberId === null ? {} : { authorMemberId: memberId }),
+              })
+              .pipe(
+                Effect.mapError(
+                  () =>
+                    new CompanyPanelError({
+                      message: "No se pudo pasar la respuesta al Informador.",
+                    }),
+                ),
+              );
+            yield* prepared.record;
           }).pipe(Effect.provideContext(taskContext)),
       });
       return Layer.mergeAll(

@@ -338,6 +338,11 @@ import {} from "./previewAutomation.ts";
 import { OpenUrlAckInput, OpenUrlConnectInput, OpenUrlRequest } from "./openUrl.ts";
 import { BackgroundTaskOutputInput, BackgroundTaskOutputResult } from "./backgroundTaskOutput.ts";
 import {
+  CompanyPanelAnswerInput,
+  CompanyPanelError,
+  CompanyPanelSnapshot,
+} from "./companyPanel.ts";
+import {
   ClientDeviceHostConnectInput,
   ClientDeviceHostRequest,
   ClientDeviceHostResponse,
@@ -659,6 +664,8 @@ export const WS_METHODS = {
   // Dictation
   voiceTranscribe: "voice.transcribe",
   threadBackgroundTaskOutput: "thread.backgroundTaskOutput",
+  companyPanelSnapshot: "companyPanel.snapshot",
+  companyPanelAnswer: "companyPanel.answer",
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
 } as const;
@@ -2109,6 +2116,18 @@ const WsThreadBackgroundTaskOutputRpc = Rpc.make(WS_METHODS.threadBackgroundTask
   error: EnvironmentAuthorizationError,
 });
 
+const WsCompanyPanelSnapshotRpc = Rpc.make(WS_METHODS.companyPanelSnapshot, {
+  payload: Schema.Struct({}),
+  success: CompanyPanelSnapshot,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsCompanyPanelAnswerRpc = Rpc.make(WS_METHODS.companyPanelAnswer, {
+  payload: CompanyPanelAnswerInput,
+  success: Schema.Void,
+  error: Schema.Union([CompanyPanelError, EnvironmentAuthorizationError]),
+});
+
 const WsVoiceTranscribeRpc = Rpc.make(WS_METHODS.voiceTranscribe, {
   payload: VoiceTranscribeInput,
   success: VoiceTranscribeResult,
@@ -2368,6 +2387,8 @@ export const NecodeWsRpcGroup = RpcGroup.make(
   WsVcsSyncWithRpc,
   WsVoiceTranscribeRpc,
   WsThreadBackgroundTaskOutputRpc,
+  WsCompanyPanelSnapshotRpc,
+  WsCompanyPanelAnswerRpc,
 ).middleware(RpcScopeAuthorization);
 
 export const WsRpcGroup = CoreWsRpcGroup.merge(NecodeWsRpcGroup);

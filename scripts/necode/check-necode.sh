@@ -34,6 +34,7 @@ run apps/server \
   src/openUrl/openUrlEnvironment.test.ts \
   src/orchestration-v2/ProviderSessionManager.test.ts \
   src/orchestration-v2/ThreadLaunchService.test.ts \
+  src/companyPanel/CompanyPanel.test.ts \
   src/orchestration-v2/ProviderRuntimeRecoveryService.test.ts \
   src/orchestration-v2/ProviderAccountFailover.test.ts \
   src/orchestration-v2/UsageLimitFailover.test.ts \
