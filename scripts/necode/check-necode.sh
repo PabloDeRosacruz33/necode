@@ -72,6 +72,7 @@ run apps/desktop \
 
 run packages/client-runtime \
   src/state/team.test.ts \
+  src/state/companyPanel.test.ts \
   src/state/threadStatus.test.ts \
   src/threadHandoff.test.ts
 

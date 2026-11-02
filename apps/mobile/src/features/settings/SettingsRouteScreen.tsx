@@ -179,6 +179,7 @@ function SettingsIndexSections() {
         <SettingsRow icon="text.bubble" label="Thread behavior" target="SettingsThreads" />
         <SettingsRow icon="arrow.turn.left.up" label="Follow-ups" target="SettingsFollowUp" />
         <SettingsRow icon="archivebox" label="Archived Threads" target="SettingsArchive" />
+        <SettingsRow icon="square.grid.2x2" label="Panel" target="SettingsCompanyPanel" />
       </SettingsSection>
 
       <SettingsSection title="Server settings">

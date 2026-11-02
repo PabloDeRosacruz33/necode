@@ -46,6 +46,7 @@ import {
   type RenderFailureProps,
 } from "./components/RenderErrorBoundary";
 import { ArchivedThreadsRouteScreen } from "./features/archive/ArchivedThreadsRouteScreen";
+import { CompanyPanelRouteScreen } from "./features/company/CompanyPanelRouteScreen";
 import { useAgentNotificationNavigation } from "./features/agent-awareness/notificationNavigation";
 import {
   usePublishPinnedShareTargets,
@@ -281,6 +282,13 @@ const SettingsContentStack = createV5SheetStackNavigator({
       linking: "environment-new",
       options: {
         title: "Add Environment",
+      },
+    }),
+    SettingsCompanyPanel: createNativeStackScreen({
+      screen: CompanyPanelRouteScreen,
+      linking: "panel",
+      options: {
+        title: "Panel",
       },
     }),
     SettingsArchive: createNativeStackScreen({
