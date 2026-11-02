@@ -43,7 +43,15 @@ import type {
   EnvironmentId,
 } from "@t3tools/contracts";
 import { createContext, use, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Animated, PanResponder, Pressable, ScrollView, TextInput, View } from "react-native";
+import {
+  Animated,
+  Modal,
+  PanResponder,
+  Pressable,
+  ScrollView,
+  TextInput,
+  View,
+} from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
@@ -675,6 +683,8 @@ function DecisionCard(props: {
   readonly total: number;
   readonly busy: boolean;
   readonly onAnswer: AnswerFn;
+  /** Where the card is small: pressing anywhere that is not a control opens it large. */
+  readonly onOpen?: (() => void) | undefined;
 }) {
   const { decision, onAnswer } = props;
   const [explained, setExplained] = useState(false);
@@ -715,139 +725,144 @@ function DecisionCard(props: {
     <Animated.View
       {...pan.panHandlers}
       style={{ transform: position.getTranslateTransform() }}
-      className="rounded-2xl bg-grouped-card p-4"
+      className="rounded-2xl bg-grouped-card"
     >
-      <Sub>
-        Decisión {props.position} de {props.total}
-        {decision.area ? ` · ${decision.area}` : ""} ·{" "}
-        {companyDecisionTime(decision.createdAt, fetchedAt || Date.parse(decision.createdAt))}
-      </Sub>
-      <Text className="mt-1 font-t3-medium text-xl text-foreground">{decision.title}</Text>
-      <Text className="mt-1.5 text-sm text-foreground">{decision.summary}</Text>
-      <ConsensusSeal decision={decision} />
+      <Pressable accessible={false} className="p-4" disabled={!props.onOpen} onPress={props.onOpen}>
+        <Sub>
+          Decisión {props.position} de {props.total}
+          {decision.area ? ` · ${decision.area}` : ""} ·{" "}
+          {companyDecisionTime(decision.createdAt, fetchedAt || Date.parse(decision.createdAt))}
+        </Sub>
+        <Text className="mt-1 font-t3-medium text-xl text-foreground">{decision.title}</Text>
+        <Text className="mt-1.5 text-sm text-foreground">{decision.summary}</Text>
+        <ConsensusSeal decision={decision} />
 
-      <View className="mt-3 mb-1.5">
-        <Label>Elige</Label>
-      </View>
-      <View className="gap-1.5">
-        {options.length > 0 ? (
-          options.map((option, index) => (
-            <Pressable
-              key={option.id}
-              disabled={props.busy}
-              onPress={() => onAnswer(decision.id, { type: "option", optionId: option.id })}
-              className="flex-row gap-2 rounded-xl border bg-subtle p-3"
-              style={[
-                { borderColor: option.recommended ? GREEN : "transparent" },
-                props.busy ? { opacity: 0.5 } : null,
-              ]}
-            >
-              <OptionLetter index={index} />
-              <View className="min-w-0 flex-1">
-                <Text className="font-t3-medium text-sm text-foreground">
-                  {option.label}
-                  {option.recommended ? (
-                    <Text className="text-xs" style={{ color: GREEN }}>
-                      {"  "}Recomendada
-                    </Text>
-                  ) : null}
-                </Text>
-                {option.effect ? <Sub>{option.effect}</Sub> : null}
-              </View>
-            </Pressable>
-          ))
-        ) : (
+        <View className="mt-3 mb-1.5">
+          <Label>Elige</Label>
+        </View>
+        <View className="gap-1.5">
+          {options.length > 0 ? (
+            options.map((option, index) => (
+              <Pressable
+                key={option.id}
+                disabled={props.busy}
+                onPress={() => onAnswer(decision.id, { type: "option", optionId: option.id })}
+                className="flex-row gap-2 rounded-xl border bg-subtle p-3"
+                style={[
+                  { borderColor: option.recommended ? GREEN : "transparent" },
+                  props.busy ? { opacity: 0.5 } : null,
+                ]}
+              >
+                <OptionLetter index={index} />
+                <View className="min-w-0 flex-1">
+                  <Text className="font-t3-medium text-sm text-foreground">
+                    {option.label}
+                    {option.recommended ? (
+                      <Text className="text-xs" style={{ color: GREEN }}>
+                        {"  "}Recomendada
+                      </Text>
+                    ) : null}
+                  </Text>
+                  {option.effect ? <Sub>{option.effect}</Sub> : null}
+                </View>
+              </Pressable>
+            ))
+          ) : (
+            <View className="flex-row gap-2">
+              <CardButton
+                label="← No"
+                color={RED}
+                disabled={props.busy}
+                onPress={() => onAnswer(decision.id, { type: "no" })}
+              />
+              <CardButton
+                label="Sí →"
+                color={GREEN}
+                disabled={props.busy}
+                onPress={() => onAnswer(decision.id, { type: "yes" })}
+              />
+            </View>
+          )}
           <View className="flex-row gap-2">
             <CardButton
-              label="← No"
-              color={RED}
-              disabled={props.busy}
-              onPress={() => onAnswer(decision.id, { type: "no" })}
+              label={explained ? "Ocultar" : "No lo entiendo"}
+              onPress={() => setExplained((current) => !current)}
             />
             <CardButton
-              label="Sí →"
-              color={GREEN}
-              disabled={props.busy}
-              onPress={() => onAnswer(decision.id, { type: "yes" })}
+              label="Quiero otra cosa"
+              onPress={() => setWriting((current) => !current)}
             />
           </View>
+        </View>
+
+        {explained ? (
+          <View className="mt-2 gap-1.5 rounded-xl bg-subtle p-3">
+            {decision.problem ? (
+              <Text className="text-sm text-foreground">{decision.problem}</Text>
+            ) : (
+              <Missing>Falta la explicación fácil.</Missing>
+            )}
+            {decision.example ? (
+              <Text className="text-sm text-foreground">Ejemplo: {decision.example}</Text>
+            ) : (
+              <Missing>Falta el ejemplo.</Missing>
+            )}
+          </View>
+        ) : null}
+
+        {writing ? (
+          <View className="mt-2 gap-2">
+            <TextInput
+              autoFocus
+              multiline
+              value={text}
+              onChangeText={setText}
+              placeholder="Escribe lo que quieres…"
+              className="min-h-20 rounded-xl bg-subtle p-3 text-sm text-foreground"
+            />
+            <CardButton
+              label="Enviar"
+              color={GREEN}
+              disabled={props.busy || text.trim() === ""}
+              onPress={() => onAnswer(decision.id, { type: "other", text: text.trim() })}
+            />
+          </View>
+        ) : null}
+
+        <View className="mt-3">
+          <Label>Qué opinan los hilos</Label>
+        </View>
+        {decision.opinions?.length ? (
+          decision.opinions.map((opinion) => (
+            <DecisionRow
+              key={opinion.thread}
+              name={opinion.thread}
+              letter={companyDecisionOptionIndex(decision, opinion.optionId)}
+              reason={opinion.opinion}
+              needsSource={false}
+            />
+          ))
+        ) : (
+          <Missing>Falta: ningún hilo ha dado su opinión.</Missing>
         )}
-        <View className="flex-row gap-2">
-          <CardButton
-            label={explained ? "Ocultar" : "No lo entiendo"}
-            onPress={() => setExplained((current) => !current)}
-          />
-          <CardButton label="Quiero otra cosa" onPress={() => setWriting((current) => !current)} />
+
+        <View className="mt-3">
+          <Label>Cómo lo hacen otros</Label>
         </View>
-      </View>
-
-      {explained ? (
-        <View className="mt-2 gap-1.5 rounded-xl bg-subtle p-3">
-          {decision.problem ? (
-            <Text className="text-sm text-foreground">{decision.problem}</Text>
-          ) : (
-            <Missing>Falta la explicación fácil.</Missing>
-          )}
-          {decision.example ? (
-            <Text className="text-sm text-foreground">Ejemplo: {decision.example}</Text>
-          ) : (
-            <Missing>Falta el ejemplo.</Missing>
-          )}
-        </View>
-      ) : null}
-
-      {writing ? (
-        <View className="mt-2 gap-2">
-          <TextInput
-            autoFocus
-            multiline
-            value={text}
-            onChangeText={setText}
-            placeholder="Escribe lo que quieres…"
-            className="min-h-20 rounded-xl bg-subtle p-3 text-sm text-foreground"
-          />
-          <CardButton
-            label="Enviar"
-            color={GREEN}
-            disabled={props.busy || text.trim() === ""}
-            onPress={() => onAnswer(decision.id, { type: "other", text: text.trim() })}
-          />
-        </View>
-      ) : null}
-
-      <View className="mt-3">
-        <Label>Qué opinan los hilos</Label>
-      </View>
-      {decision.opinions?.length ? (
-        decision.opinions.map((opinion) => (
-          <DecisionRow
-            key={opinion.thread}
-            name={opinion.thread}
-            letter={companyDecisionOptionIndex(decision, opinion.optionId)}
-            reason={opinion.opinion}
-            needsSource={false}
-          />
-        ))
-      ) : (
-        <Missing>Falta: ningún hilo ha dado su opinión.</Missing>
-      )}
-
-      <View className="mt-3">
-        <Label>Cómo lo hacen otros</Label>
-      </View>
-      {decision.references?.length ? (
-        decision.references.map((reference) => (
-          <DecisionRow
-            key={reference.name}
-            name={reference.name}
-            letter={companyDecisionOptionIndex(decision, reference.optionId)}
-            reason={reference.how}
-            source={reference.source}
-          />
-        ))
-      ) : (
-        <Missing>Falta: nadie ha mirado cómo lo hacen otros.</Missing>
-      )}
+        {decision.references?.length ? (
+          decision.references.map((reference) => (
+            <DecisionRow
+              key={reference.name}
+              name={reference.name}
+              letter={companyDecisionOptionIndex(decision, reference.optionId)}
+              reason={reference.how}
+              source={reference.source}
+            />
+          ))
+        ) : (
+          <Missing>Falta: nadie ha mirado cómo lo hacen otros.</Missing>
+        )}
+      </Pressable>
     </Animated.View>
   );
 }
@@ -856,6 +871,7 @@ function PendingDecision(props: {
   readonly snapshot: CompanyPanelSnapshot;
   readonly busy: boolean;
   readonly onAnswer: AnswerFn;
+  readonly onOpen?: (() => void) | undefined;
 }) {
   const section = props.snapshot.decisions;
   if (section.status !== "ok") {
@@ -880,7 +896,37 @@ function PendingDecision(props: {
       total={section.data.decisions.length}
       busy={props.busy}
       onAnswer={props.onAnswer}
+      onOpen={props.onOpen}
     />
+  );
+}
+
+/** The decision on its own full screen, opened by pressing its card. */
+function LargeDecision(props: {
+  readonly snapshot: CompanyPanelSnapshot;
+  readonly busy: boolean;
+  readonly onAnswer: AnswerFn;
+  readonly onClose: () => void;
+}) {
+  return (
+    <Modal
+      visible
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={props.onClose}
+    >
+      <View className="flex-1 bg-sheet">
+        <View className="flex-row items-center justify-between p-4">
+          <Text className="font-t3-medium text-base text-foreground">Decisión</Text>
+          <Pressable onPress={props.onClose} className="rounded-full bg-subtle px-3 py-1.5">
+            <Text className="text-sm text-foreground">Cerrar</Text>
+          </Pressable>
+        </View>
+        <ScrollView contentContainerClassName="px-4 pb-16" keyboardShouldPersistTaps="handled">
+          <PendingDecision snapshot={props.snapshot} busy={props.busy} onAnswer={props.onAnswer} />
+        </ScrollView>
+      </View>
+    </Modal>
   );
 }
 
@@ -893,13 +939,27 @@ function HomeTab(props: {
   const costs = snapshot.costs.status === "ok" ? snapshot.costs.data : null;
   const health = snapshot.health.status === "ok" ? snapshot.health.data : null;
   const tests = snapshot.tests.status === "ok" ? snapshot.tests.data : null;
+  const [decisionOpen, setDecisionOpen] = useState(false);
   return (
     <View className="gap-2">
+      {decisionOpen ? (
+        <LargeDecision
+          snapshot={snapshot}
+          busy={props.busy}
+          onAnswer={props.onAnswer}
+          onClose={() => setDecisionOpen(false)}
+        />
+      ) : null}
       <Label>
         Decisiones · {pendingCompanyDecisions(snapshot).length}
         <Stale kind="decisions" section={snapshot.decisions} />
       </Label>
-      <PendingDecision snapshot={snapshot} busy={props.busy} onAnswer={props.onAnswer} />
+      <PendingDecision
+        snapshot={snapshot}
+        busy={props.busy}
+        onAnswer={props.onAnswer}
+        onOpen={() => setDecisionOpen(true)}
+      />
       <Tile detail={costs ? <CostParts costs={costs} /> : undefined}>
         <Label>
           Coste por persona{costs ? ` · ${costs.daysPerMonth} días` : ""}

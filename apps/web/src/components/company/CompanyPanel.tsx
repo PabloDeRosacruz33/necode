@@ -62,7 +62,15 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 type Tab = "home" | "decisions" | "costs" | "health";
-type Detail = "costs" | "cache" | "versions" | "database" | "threads" | "errors" | "tests";
+type Detail =
+  | "decision"
+  | "costs"
+  | "cache"
+  | "versions"
+  | "database"
+  | "threads"
+  | "errors"
+  | "tests";
 
 const STATUS_DOT: Record<CompanyPanelSystemStatus, string> = {
   ok: "bg-success",
@@ -516,6 +524,8 @@ function DecisionCard(props: {
   readonly total: number;
   readonly busy: boolean;
   readonly onAnswer: AnswerFn;
+  /** Where the card is small: pressing anywhere that is not a control opens it large. */
+  readonly onOpen?: (() => void) | undefined;
 }) {
   const { decision } = props;
   const [explained, setExplained] = useState(false);
@@ -523,6 +533,8 @@ function DecisionCard(props: {
   const [text, setText] = useState("");
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const start = useRef<{ x: number; y: number } | null>(null);
+  // A drag ends in a click too; that click must not open the card.
+  const dragged = useRef(false);
   const fetchedAt = use(FetchedAtContext);
   const options = decision.options ?? [];
 
@@ -541,6 +553,7 @@ function DecisionCard(props: {
     start.current = null;
     setDrag(null);
     if (!moved) return;
+    if (Math.hypot(moved.x, moved.y) > 8) dragged.current = true;
     const swipe = moved.x > 90 ? "right" : moved.x < -90 ? "left" : moved.y < -70 ? "up" : null;
     if (swipe === null) return;
     const action = companyDecisionSwipeAction(decision, swipe);
@@ -550,7 +563,13 @@ function DecisionCard(props: {
 
   return (
     <div
-      onClick={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        const wasDragged = dragged.current;
+        dragged.current = false;
+        if (wasDragged || (event.target as HTMLElement).closest("button,textarea,a")) return;
+        props.onOpen?.();
+      }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -562,7 +581,7 @@ function DecisionCard(props: {
             }
           : undefined
       }
-      className="flex touch-pan-y flex-col rounded-xl border border-border bg-background p-3 text-sm"
+      className={`flex touch-pan-y flex-col rounded-xl border border-border bg-background p-3 text-sm ${props.onOpen ? "cursor-pointer transition-colors hover:border-ring" : ""}`}
     >
       <Sub>
         Decisión {props.position} de {props.total}
@@ -717,6 +736,7 @@ function PendingDecision(props: {
   readonly snapshot: CompanyPanelSnapshot;
   readonly busy: boolean;
   readonly onAnswer: AnswerFn;
+  readonly onOpen?: (() => void) | undefined;
 }) {
   const section = props.snapshot.decisions;
   if (section.status !== "ok")
@@ -739,6 +759,7 @@ function PendingDecision(props: {
         total={section.data.decisions.length}
         busy={props.busy}
         onAnswer={props.onAnswer}
+        onOpen={props.onOpen}
       />
     </div>
   );
@@ -838,14 +859,24 @@ function HomeTab(props: {
         </Label>
         {costs?.cache ? <CacheView percent={costs.cache.percent} /> : <NoData />}
       </Tile>
-      <Tile className="relative col-span-2 row-auto flex flex-col border-ring bg-accent @xl/company:col-span-1 @xl/company:col-start-4 @xl/company:row-span-3 @xl/company:row-start-1">
+      <Tile
+        className="relative col-span-2 row-auto flex flex-col border-ring bg-accent @xl/company:col-span-1 @xl/company:col-start-4 @xl/company:row-span-3 @xl/company:row-start-1"
+        {...(pendingCompanyDecisions(snapshot).length > 0
+          ? { onOpen: () => onDetail("decision") }
+          : {})}
+      >
         {/* The column keeps the height of the blocks beside it; a long card scrolls inside. */}
         <div className="@xl/company:absolute @xl/company:inset-3 @xl/company:overflow-y-auto">
           <Label>
             Decisiones <CountBadge count={pendingCompanyDecisions(snapshot).length} />
             <Stale kind="decisions" section={snapshot.decisions} />
           </Label>
-          <PendingDecision snapshot={snapshot} busy={props.busy} onAnswer={props.onAnswer} />
+          <PendingDecision
+            snapshot={snapshot}
+            busy={props.busy}
+            onAnswer={props.onAnswer}
+            onOpen={() => onDetail("decision")}
+          />
         </div>
       </Tile>
       <Tile onOpen={() => onDetail("versions")}>
@@ -1182,11 +1213,27 @@ function TechnicalDetail({ text }: { text: string | undefined }) {
   );
 }
 
-function DetailView({ detail, snapshot }: { detail: Detail; snapshot: CompanyPanelSnapshot }) {
+function DetailView({
+  detail,
+  snapshot,
+  busy,
+  onAnswer,
+}: {
+  detail: Detail;
+  snapshot: CompanyPanelSnapshot;
+  busy: boolean;
+  onAnswer: AnswerFn;
+}) {
   const costs = snapshot.costs.status === "ok" ? snapshot.costs.data : null;
   const health = snapshot.health.status === "ok" ? snapshot.health.data : null;
   const tests = snapshot.tests.status === "ok" ? snapshot.tests.data : null;
   switch (detail) {
+    case "decision":
+      return (
+        <div className="mx-auto max-w-2xl pt-6">
+          <PendingDecision snapshot={snapshot} busy={busy} onAnswer={onAnswer} />
+        </div>
+      );
     case "costs":
       return <CostsTab snapshot={snapshot} />;
     case "cache":
@@ -1351,7 +1398,7 @@ export function CompanyPanel({ environmentId }: { environmentId: EnvironmentId }
             >
               <XIcon className="size-3.5" />
             </button>
-            <DetailView detail={detail} snapshot={snapshot} />
+            <DetailView detail={detail} snapshot={snapshot} busy={busy} onAnswer={onAnswer} />
           </div>
         ) : null}
       </div>
