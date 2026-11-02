@@ -5,10 +5,13 @@
  */
 import {
   COMPANY_PANEL_REFRESH_MS,
+  companyPanelJobState,
+  companyPanelStaleLabel,
   costTrend,
   pendingCompanyDecisions,
   simulateMonthlyCost,
 } from "@t3tools/client-runtime/state/company-panel";
+import type { CompanyPanelDataKind } from "@t3tools/client-runtime/state/company-panel";
 import type {
   CompanyPanelAnswer,
   CompanyPanelCostsFile,
@@ -21,6 +24,8 @@ import type {
 } from "@t3tools/contracts";
 import { XIcon } from "lucide-react";
 import {
+  createContext,
+  use,
   useEffect,
   useRef,
   useState,
@@ -69,6 +74,17 @@ function Hint(props: { readonly text: string; readonly children: ReactElement })
       <TooltipPopup>{props.text}</TooltipPopup>
     </Tooltip>
   );
+}
+
+/** When the shown snapshot was fetched, to tell how old each file is. */
+const FetchedAtContext = createContext(0);
+
+function Stale(props: {
+  readonly kind: CompanyPanelDataKind;
+  readonly section: CompanyPanelSnapshot["health" | "costs" | "tests" | "decisions"];
+}) {
+  const label = companyPanelStaleLabel(props.kind, props.section, use(FetchedAtContext));
+  return label === null ? null : <span className="text-warning"> · {label}</span>;
 }
 
 const Label = ({ children }: { children: ReactNode }) => (
@@ -520,7 +536,10 @@ function HomeTab(props: {
   return (
     <div className="grid auto-rows-[minmax(104px,auto)] grid-cols-2 gap-2 @xl/company:grid-cols-4">
       <Tile className="col-span-2" onOpen={() => onDetail("costs")}>
-        <Label>Coste por persona{costs ? ` · ${costs.daysPerMonth} días` : ""}</Label>
+        <Label>
+          Coste por persona{costs ? ` · ${costs.daysPerMonth} días` : ""}
+          <Stale kind="costs" section={snapshot.costs} />
+        </Label>
         {costs ? (
           <>
             <CostSummary costs={costs} />
@@ -531,7 +550,10 @@ function HomeTab(props: {
         )}
       </Tile>
       <Tile onOpen={() => onDetail("cache")}>
-        <Label>Caché</Label>
+        <Label>
+          Caché
+          <Stale kind="costs" section={snapshot.costs} />
+        </Label>
         {costs?.cache ? (
           <>
             <Big>{Math.round(costs.cache.percent)} %</Big>
@@ -544,14 +566,20 @@ function HomeTab(props: {
       <Tile className="col-span-2 row-auto flex flex-col border-ring bg-accent @xl/company:col-span-1 @xl/company:col-start-4 @xl/company:row-span-3 @xl/company:row-start-1">
         <Label>
           Decisiones <CountBadge count={pendingCompanyDecisions(snapshot).length} />
+          <Stale kind="decisions" section={snapshot.decisions} />
         </Label>
         <PendingDecision snapshot={snapshot} busy={props.busy} onAnswer={props.onAnswer} />
       </Tile>
       <Tile onOpen={() => onDetail("versions")}>
-        <Label>Última versión</Label>
+        <Label>
+          Última versión
+          <Stale kind="health" section={snapshot.health} />
+        </Label>
         {staging ? (
           <>
-            <Big>{staging.version}</Big>
+            <div className="mt-1.5 truncate font-mono text-2xl leading-tight">
+              {staging.version}
+            </div>
             <Sub>{staging.environment}</Sub>
           </>
         ) : (
@@ -559,7 +587,10 @@ function HomeTab(props: {
         )}
       </Tile>
       <Tile onOpen={() => onDetail("database")}>
-        <Label>Base</Label>
+        <Label>
+          Base
+          <Stale kind="health" section={snapshot.health} />
+        </Label>
         {health?.database ? (
           <>
             <Big>{Math.round(health.database.readGbPerDay)} GB</Big>
@@ -578,7 +609,10 @@ function HomeTab(props: {
         {costs ? <Simulator costs={costs} /> : <NoData />}
       </Tile>
       <Tile className="col-span-2" onOpen={() => onDetail("errors")}>
-        <Label>Errores, último mes</Label>
+        <Label>
+          Errores, último mes
+          <Stale kind="health" section={snapshot.health} />
+        </Label>
         {health ? (
           <ErrorHeat health={health} />
         ) : (
@@ -586,7 +620,10 @@ function HomeTab(props: {
         )}
       </Tile>
       <Tile className="col-span-2" onOpen={() => onDetail("tests")}>
-        <Label>Pruebas reales</Label>
+        <Label>
+          Pruebas reales
+          <Stale kind="tests" section={snapshot.tests} />
+        </Label>
         {tests ? (
           <TestsLine tests={tests} />
         ) : (
@@ -594,7 +631,10 @@ function HomeTab(props: {
         )}
       </Tile>
       <Tile className="col-span-full" onOpen={() => onDetail("versions")}>
-        <Label>Versiones y salud del sistema</Label>
+        <Label>
+          Versiones y salud del sistema
+          <Stale kind="health" section={snapshot.health} />
+        </Label>
         {health ? (
           <VersionsAndHealth health={health} />
         ) : (
@@ -708,7 +748,10 @@ function CostsTab({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
   return (
     <div className="grid grid-cols-1 gap-2 @xl/company:grid-cols-2">
       <Tile>
-        <Label>Coste por persona · regla D205 · {costs.daysPerMonth} días</Label>
+        <Label>
+          Coste por persona · regla D205 · {costs.daysPerMonth} días
+          <Stale kind="costs" section={snapshot.costs} />
+        </Label>
         <CostSummary costs={costs} />
         <CostBars costs={costs} />
         {trend?.sinceLast ? (
@@ -760,20 +803,23 @@ function JobsLog({ tests }: { tests: CompanyPanelTestsFile }) {
         </div>
       ) : null}
       <div className="space-y-1.5 text-xs">
-        {shown.map((job) => (
-          <div
-            key={`${job.suite ?? ""}:${job.message}`}
-            className="rounded-lg border border-border bg-background p-2"
-          >
-            <div>
-              {job.result === "passed" ? "✅" : job.result === "failed" ? "❌" : "⚪"} {job.message}
+        {shown.map((job) => {
+          const state = companyPanelJobState(job);
+          return (
+            <div
+              key={`${job.suite ?? ""}:${job.message}`}
+              className="rounded-lg border border-border bg-background p-2"
+            >
+              <div>
+                {state.icon} {job.message}
+              </div>
+              {job.before ? <Sub>Antes: {job.before}</Sub> : null}
+              {state.note ? <Sub>Ahora: {state.note}</Sub> : null}
+              {job.why ? <Sub>Por qué: {job.why}</Sub> : null}
+              {job.version ? <Sub>Versión {job.version}</Sub> : null}
             </div>
-            {job.before ? <Sub>Antes: {job.before}</Sub> : null}
-            {job.now ? <Sub>Ahora: {job.now}</Sub> : null}
-            {job.why ? <Sub>Por qué: {job.why}</Sub> : null}
-            {job.version ? <Sub>Versión {job.version}</Sub> : null}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -785,7 +831,10 @@ function HealthTab({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
   return (
     <div className="grid grid-cols-1 gap-2">
       <Tile>
-        <Label>Versiones y salud del sistema</Label>
+        <Label>
+          Versiones y salud del sistema
+          <Stale kind="health" section={snapshot.health} />
+        </Label>
         {health ? (
           <VersionsAndHealth health={health} />
         ) : (
@@ -793,11 +842,17 @@ function HealthTab({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
         )}
       </Tile>
       <Tile>
-        <Label>Errores, último mes</Label>
+        <Label>
+          Errores, último mes
+          <Stale kind="health" section={snapshot.health} />
+        </Label>
         {health ? <ErrorHeat health={health} /> : <NoData />}
       </Tile>
       <Tile>
-        <Label>Pruebas reales y registro de encargos</Label>
+        <Label>
+          Pruebas reales y registro de encargos
+          <Stale kind="tests" section={snapshot.tests} />
+        </Label>
         {tests ? (
           <>
             <TestsLine tests={tests} />
@@ -951,51 +1006,53 @@ export function CompanyPanel({ environmentId }: { environmentId: EnvironmentId }
   };
 
   return (
-    <div className="@container/company relative h-full overflow-auto bg-background p-3 text-sm text-foreground">
-      <div className="mb-2.5 flex gap-1 text-sm">
-        {TABS.map((item) => (
-          <button
-            type="button"
-            key={item.id}
-            onClick={() => {
-              setTab(item.id);
-              setDetail(null);
-            }}
-            className={`rounded-full border px-3 py-1 ${tab === item.id ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground hover:text-foreground"}`}
-          >
-            {item.label}
-            {item.id === "decisions" && snapshot ? (
-              <CountBadge count={pendingCompanyDecisions(snapshot).length} />
-            ) : null}
-          </button>
-        ))}
-      </div>
-      {snapshot === null ? (
-        <NoData {...(query.error ? { what: query.error } : {})} />
-      ) : !snapshot.available ? (
-        <NoData what="este panel no está disponible para ti" />
-      ) : tab === "home" ? (
-        <HomeTab snapshot={snapshot} busy={busy} onAnswer={onAnswer} onDetail={setDetail} />
-      ) : tab === "decisions" ? (
-        <DecisionsTab snapshot={snapshot} busy={busy} onAnswer={onAnswer} />
-      ) : tab === "costs" ? (
-        <CostsTab snapshot={snapshot} />
-      ) : (
-        <HealthTab snapshot={snapshot} />
-      )}
-      {detail !== null && snapshot !== null ? (
-        <div className="absolute inset-2 z-10 overflow-auto transition starting:scale-95 starting:opacity-0 rounded-xl border border-ring bg-popover p-4 duration-200">
-          <button
-            type="button"
-            aria-label="Cerrar"
-            onClick={() => setDetail(null)}
-            className="absolute top-3 right-3 z-10 rounded-lg bg-muted p-1.5"
-          >
-            <XIcon className="size-3.5" />
-          </button>
-          <DetailView detail={detail} snapshot={snapshot} />
+    <FetchedAtContext value={query.dataUpdatedAt}>
+      <div className="@container/company relative h-full overflow-auto bg-background p-3 text-sm text-foreground">
+        <div className="mb-2.5 flex gap-1 text-sm">
+          {TABS.map((item) => (
+            <button
+              type="button"
+              key={item.id}
+              onClick={() => {
+                setTab(item.id);
+                setDetail(null);
+              }}
+              className={`rounded-full border px-3 py-1 ${tab === item.id ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground hover:text-foreground"}`}
+            >
+              {item.label}
+              {item.id === "decisions" && snapshot ? (
+                <CountBadge count={pendingCompanyDecisions(snapshot).length} />
+              ) : null}
+            </button>
+          ))}
         </div>
-      ) : null}
-    </div>
+        {snapshot === null ? (
+          <NoData {...(query.error ? { what: query.error } : {})} />
+        ) : !snapshot.available ? (
+          <NoData what="este panel no está disponible para ti" />
+        ) : tab === "home" ? (
+          <HomeTab snapshot={snapshot} busy={busy} onAnswer={onAnswer} onDetail={setDetail} />
+        ) : tab === "decisions" ? (
+          <DecisionsTab snapshot={snapshot} busy={busy} onAnswer={onAnswer} />
+        ) : tab === "costs" ? (
+          <CostsTab snapshot={snapshot} />
+        ) : (
+          <HealthTab snapshot={snapshot} />
+        )}
+        {detail !== null && snapshot !== null ? (
+          <div className="absolute inset-2 z-10 overflow-auto transition starting:scale-95 starting:opacity-0 rounded-xl border border-ring bg-popover p-4 duration-200">
+            <button
+              type="button"
+              aria-label="Cerrar"
+              onClick={() => setDetail(null)}
+              className="absolute top-3 right-3 z-10 rounded-lg bg-muted p-1.5"
+            >
+              <XIcon className="size-3.5" />
+            </button>
+            <DetailView detail={detail} snapshot={snapshot} />
+          </div>
+        ) : null}
+      </div>
+    </FetchedAtContext>
   );
 }

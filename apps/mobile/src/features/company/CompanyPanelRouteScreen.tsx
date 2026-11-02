@@ -4,10 +4,13 @@
  */
 import {
   COMPANY_PANEL_REFRESH_MS,
+  companyPanelJobState,
+  companyPanelStaleLabel,
   costTrend,
   pendingCompanyDecisions,
   simulateMonthlyCost,
 } from "@t3tools/client-runtime/state/company-panel";
+import type { CompanyPanelDataKind } from "@t3tools/client-runtime/state/company-panel";
 import type {
   CompanyPanelAnswer,
   CompanyPanelCostsFile,
@@ -18,7 +21,7 @@ import type {
   CompanyPanelTestsFile,
   EnvironmentId,
 } from "@t3tools/contracts";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, use, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Animated, PanResponder, Pressable, ScrollView, TextInput, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
@@ -51,6 +54,17 @@ const money = (amount: number, currency: string) => {
     return `${Math.round(amount)} ${currency}`;
   }
 };
+
+/** When the shown snapshot was fetched, to tell how old each file is. */
+const FetchedAtContext = createContext(0);
+
+function Stale(props: {
+  readonly kind: CompanyPanelDataKind;
+  readonly section: CompanyPanelSnapshot["health" | "costs" | "tests" | "decisions"];
+}) {
+  const label = companyPanelStaleLabel(props.kind, props.section, use(FetchedAtContext));
+  return label === null ? null : <Text style={{ color: AMBER }}> · {label}</Text>;
+}
 
 const Label = ({ children }: { children: ReactNode }) => (
   <Text className="text-2xs tracking-[0.5px] uppercase text-foreground-muted">{children}</Text>
@@ -293,17 +307,47 @@ function SystemDetails({ health }: { health: CompanyPanelHealthFile }) {
 }
 
 function JobsLog({ tests }: { tests: CompanyPanelTestsFile }) {
-  if (!tests.jobs) return <NoData what="registro de encargos" />;
+  const [suite, setSuite] = useState<string | null>(null);
+  const jobs = tests.jobs;
+  if (!jobs) return <NoData what="registro de encargos" />;
+  const suites = [...new Set(jobs.flatMap((job) => (job.suite ? [job.suite] : [])))];
+  const shown = suite === null ? jobs : jobs.filter((job) => job.suite === suite);
   return (
     <View className="gap-1.5">
-      {tests.jobs.map((job) => (
-        <View key={`${job.suite ?? ""}:${job.message}`}>
-          <Text className="text-xs text-foreground">
-            {job.result === "passed" ? "✅" : job.result === "failed" ? "❌" : "⚪"} {job.message}
-          </Text>
-          {job.why ? <Sub>Por qué: {job.why}</Sub> : null}
-        </View>
-      ))}
+      {suites.length > 1 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="grow-0">
+          <View className="flex-row gap-1">
+            {[null, ...suites].map((name) => (
+              <Pressable
+                key={name ?? "all"}
+                onPress={() => setSuite(name)}
+                className={`max-w-48 rounded-full px-2 py-1 ${suite === name ? "bg-foreground" : "bg-subtle"}`}
+              >
+                <Text
+                  numberOfLines={1}
+                  className={`text-2xs ${suite === name ? "text-background" : "text-foreground-muted"}`}
+                >
+                  {name ?? "Todas"}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </ScrollView>
+      ) : null}
+      {shown.map((job) => {
+        const state = companyPanelJobState(job);
+        return (
+          <View key={`${job.suite ?? ""}:${job.message}`}>
+            <Text className="text-xs text-foreground">
+              {state.icon} {job.message}
+            </Text>
+            {job.before ? <Sub>Antes: {job.before}</Sub> : null}
+            {state.note ? <Sub>Ahora: {state.note}</Sub> : null}
+            {job.why ? <Sub>Por qué: {job.why}</Sub> : null}
+            {job.version ? <Sub>Versión {job.version}</Sub> : null}
+          </View>
+        );
+      })}
     </View>
   );
 }
@@ -500,10 +544,16 @@ function HomeTab(props: {
   const tests = snapshot.tests.status === "ok" ? snapshot.tests.data : null;
   return (
     <View className="gap-2">
-      <Label>Decisiones · {pendingCompanyDecisions(snapshot).length}</Label>
+      <Label>
+        Decisiones · {pendingCompanyDecisions(snapshot).length}
+        <Stale kind="decisions" section={snapshot.decisions} />
+      </Label>
       <PendingDecision snapshot={snapshot} busy={props.busy} onAnswer={props.onAnswer} />
       <Tile detail={costs ? <CostParts costs={costs} /> : undefined}>
-        <Label>Coste por persona{costs ? ` · ${costs.daysPerMonth} días` : ""}</Label>
+        <Label>
+          Coste por persona{costs ? ` · ${costs.daysPerMonth} días` : ""}
+          <Stale kind="costs" section={snapshot.costs} />
+        </Label>
         {costs ? (
           <>
             <CostSummary costs={costs} />
@@ -515,14 +565,20 @@ function HomeTab(props: {
       </Tile>
       <View className="flex-row gap-2">
         <Tile className="flex-1">
-          <Label>Caché</Label>
+          <Label>
+            Caché
+            <Stale kind="costs" section={snapshot.costs} />
+          </Label>
           {costs?.cache ? <Big>{Math.round(costs.cache.percent)} %</Big> : <NoData />}
         </Tile>
         <Tile
           className="flex-1"
           {...(health?.database?.detail ? { detail: <Sub>{health.database.detail}</Sub> } : {})}
         >
-          <Label>Base</Label>
+          <Label>
+            Base
+            <Stale kind="health" section={snapshot.health} />
+          </Label>
           {health?.database ? <Big>{Math.round(health.database.readGbPerDay)} GB</Big> : <NoData />}
         </Tile>
       </View>
@@ -542,15 +598,24 @@ function HomeTab(props: {
         )}
       </Tile>
       <Tile detail={health ? <ErrorDays health={health} /> : undefined}>
-        <Label>Errores, último mes</Label>
+        <Label>
+          Errores, último mes
+          <Stale kind="health" section={snapshot.health} />
+        </Label>
         {health ? <ErrorHeat health={health} /> : <NoData />}
       </Tile>
       <Tile detail={tests ? <JobsLog tests={tests} /> : undefined}>
-        <Label>Pruebas reales</Label>
+        <Label>
+          Pruebas reales
+          <Stale kind="tests" section={snapshot.tests} />
+        </Label>
         {tests ? <TestsLine tests={tests} /> : <NoData />}
       </Tile>
       <Tile detail={health ? <SystemDetails health={health} /> : undefined}>
-        <Label>Versiones y salud del sistema</Label>
+        <Label>
+          Versiones y salud del sistema
+          <Stale kind="health" section={snapshot.health} />
+        </Label>
         {health ? <VersionsAndHealth health={health} /> : <NoData />}
       </Tile>
     </View>
@@ -566,7 +631,10 @@ function CostsTab({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
   return (
     <View className="gap-2">
       <Tile>
-        <Label>Coste por persona · regla D205 · {costs.daysPerMonth} días</Label>
+        <Label>
+          Coste por persona · regla D205 · {costs.daysPerMonth} días
+          <Stale kind="costs" section={snapshot.costs} />
+        </Label>
         <CostSummary costs={costs} />
         <CostBars costs={costs} />
       </Tile>
@@ -610,7 +678,10 @@ function HealthTab({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
   return (
     <View className="gap-2">
       <Tile detail={health ? <SystemDetails health={health} /> : undefined}>
-        <Label>Versiones y salud del sistema</Label>
+        <Label>
+          Versiones y salud del sistema
+          <Stale kind="health" section={snapshot.health} />
+        </Label>
         {health ? (
           <VersionsAndHealth health={health} />
         ) : (
@@ -618,11 +689,17 @@ function HealthTab({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
         )}
       </Tile>
       <Tile detail={health ? <ErrorDays health={health} /> : undefined}>
-        <Label>Errores, último mes</Label>
+        <Label>
+          Errores, último mes
+          <Stale kind="health" section={snapshot.health} />
+        </Label>
         {health ? <ErrorHeat health={health} /> : <NoData />}
       </Tile>
       <Tile>
-        <Label>Pruebas reales y registro de encargos</Label>
+        <Label>
+          Pruebas reales y registro de encargos
+          <Stale kind="tests" section={snapshot.tests} />
+        </Label>
         {tests ? (
           <>
             <TestsLine tests={tests} />
@@ -658,6 +735,8 @@ function EnvironmentPanel({ environmentId }: { environmentId: EnvironmentId }) {
   }, [refresh]);
 
   const snapshot = query.data;
+  const [fetchedAt, setFetchedAt] = useState(0);
+  useEffect(() => setFetchedAt(Date.now()), [snapshot]);
   const onAnswer: AnswerFn = (decisionId, answer) => {
     setBusy(true);
     void answerCommand({ environmentId, input: { decisionId, answer } }).finally(() => {
@@ -667,7 +746,7 @@ function EnvironmentPanel({ environmentId }: { environmentId: EnvironmentId }) {
   };
 
   return (
-    <>
+    <FetchedAtContext value={fetchedAt}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-3 grow-0">
         <View className="flex-row gap-1.5">
           {TABS.map((item) => (
@@ -709,7 +788,7 @@ function EnvironmentPanel({ environmentId }: { environmentId: EnvironmentId }) {
       ) : (
         <HealthTab snapshot={snapshot} />
       )}
-    </>
+    </FetchedAtContext>
   );
 }
 
