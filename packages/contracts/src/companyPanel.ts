@@ -10,6 +10,8 @@ import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas.ts";
 export const CompanyPanelDecisionOption = Schema.Struct({
   id: TrimmedNonEmptyString,
   label: TrimmedNonEmptyString,
+  /** A word or two for the column of who picks what; without it the column shows the label. */
+  short: Schema.optional(TrimmedNonEmptyString),
   /** What changes if this option is chosen. */
   effect: Schema.optional(Schema.String),
   recommended: Schema.optional(Schema.Boolean),

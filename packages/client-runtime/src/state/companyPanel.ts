@@ -141,9 +141,6 @@ export function companyPanelJobState(job: CompanyPanelJob): {
   return { icon: RESULT_ICON[job.result], note: now === "" ? null : now };
 }
 
-/** A, B, C… for an option's position on the card. */
-export const companyDecisionOptionLetter = (index: number) => String.fromCharCode(65 + index);
-
 export function companyDecisionOptionIndex(
   decision: Pick<CompanyPanelDecision, "options">,
   optionId: string | undefined,
@@ -162,7 +159,7 @@ export interface CompanyDecisionConsensus {
   readonly optionIndex: number | null;
 }
 
-/** What the "2 de 3 hilos recomiendan la opción A" seal says; null with no opinion to count. */
+/** The count behind the "2 de 3 hilos eligen…" seal; null with no opinion on an option. */
 export function companyDecisionConsensus(
   decision: Pick<CompanyPanelDecision, "options" | "opinions">,
 ): CompanyDecisionConsensus | null {
@@ -178,6 +175,67 @@ export function companyDecisionConsensus(
     total: [...votes.values()].reduce((sum, value) => sum + value, 0),
     count,
     optionIndex: leaders.length === 1 ? (leaders[0]?.[0] ?? null) : null,
+  };
+}
+
+/** The seal's sentence, or null when no thread has given an opinion, which must show as missing. */
+export function companyDecisionSealText(
+  decision: Pick<CompanyPanelDecision, "options" | "opinions">,
+): string | null {
+  const consensus = companyDecisionConsensus(decision);
+  if (consensus === null) {
+    const opinions = decision.opinions?.length ?? 0;
+    return opinions === 0 ? null : `${opinions} hilos han opinado sin elegir opción`;
+  }
+  const option =
+    consensus.optionIndex === null ? undefined : decision.options?.[consensus.optionIndex];
+  return option === undefined
+    ? `Los hilos no se ponen de acuerdo (${consensus.total})`
+    : `${consensus.count} de ${consensus.total} hilos eligen «${option.label}»`;
+}
+
+export interface CompanyDecisionMatrixRow {
+  readonly key: string;
+  readonly name: string;
+  /** The column it marks; null when it gave a reason without picking an option. */
+  readonly optionId: string | null;
+  readonly reason: string;
+  readonly source: string | null;
+}
+
+/**
+ * Who picks what, opened from the seal: one column per option, one row per thread or product, and
+ * where each row's reason and source live. Picks of options that no longer exist mark no column.
+ */
+export function companyDecisionMatrix(
+  decision: Pick<CompanyPanelDecision, "options" | "opinions" | "references">,
+) {
+  const options = decision.options ?? [];
+  const pick = (optionId: string | undefined) =>
+    options.some((option) => option.id === optionId) ? (optionId ?? null) : null;
+  const threads = (decision.opinions ?? []).map((opinion, index): CompanyDecisionMatrixRow => ({
+    key: `thread:${index}`,
+    name: opinion.thread,
+    optionId: pick(opinion.optionId),
+    reason: opinion.opinion,
+    source: null,
+  }));
+  const others = (decision.references ?? []).map((reference, index): CompanyDecisionMatrixRow => ({
+    key: `other:${index}`,
+    name: reference.name,
+    optionId: pick(reference.optionId),
+    reason: reference.how,
+    source: reference.source ?? null,
+  }));
+  return {
+    columns: options.map((option) => ({
+      id: option.id,
+      label: option.short ?? option.label,
+      recommended: option.recommended === true,
+      total: [...threads, ...others].filter((row) => row.optionId === option.id).length,
+    })),
+    threads,
+    others,
   };
 }
 

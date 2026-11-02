@@ -21,8 +21,8 @@ import {
   companyPanelShortLabel,
   companyPanelSuites,
   companyDecisionConsensus,
-  companyDecisionOptionIndex,
-  companyDecisionOptionLetter,
+  companyDecisionMatrix,
+  companyDecisionSealText,
   companyDecisionSwipeAction,
   companyDecisionTime,
   companyPanelJobState,
@@ -32,6 +32,7 @@ import {
   simulateMonthlyCost,
 } from "@t3tools/client-runtime/state/company-panel";
 import type {
+  CompanyDecisionMatrixRow,
   CompanyPanelDataKind,
   CompanyPanelJobKind,
   CompanyPanelJobTally,
@@ -531,24 +532,6 @@ const TestsLine = ({ tests }: { tests: CompanyPanelTestsFile }) => (
   </>
 );
 
-const OPTION_COLORS = [BLUE, AMBER, "#8e4ec6", RED];
-
-function OptionLetter({ index }: { index: number | null }) {
-  if (index === null) {
-    return <Text className="w-6 text-center text-xs text-foreground-muted">—</Text>;
-  }
-  return (
-    <View
-      className="h-6 w-6 items-center justify-center rounded-full"
-      style={{ backgroundColor: OPTION_COLORS[index % OPTION_COLORS.length] }}
-    >
-      <Text className="text-xs font-t3-medium text-white">
-        {companyDecisionOptionLetter(index)}
-      </Text>
-    </View>
-  );
-}
-
 const Missing = ({ children }: { children: ReactNode }) => (
   <Text className="mt-1 text-xs italic" style={{ color: AMBER }}>
     {children}
@@ -576,63 +559,194 @@ function CardButton(props: {
   );
 }
 
-function ConsensusSeal({ decision }: { decision: CompanyPanelDecision }) {
-  const consensus = companyDecisionConsensus(decision);
-  if (consensus === null) return <Missing>Faltan las opiniones de los hilos.</Missing>;
+function MatrixRow(props: {
+  readonly row: CompanyDecisionMatrixRow;
+  readonly columns: ReturnType<typeof companyDecisionMatrix>["columns"];
+  /** Threads speak for themselves; only what others do needs a source. */
+  readonly needsSource: boolean;
+}) {
+  const { row, columns } = props;
+  const { source } = row;
+  const [open, setOpen] = useState(false);
   return (
-    <View
-      className="mt-2 flex-row items-center gap-2 rounded-lg px-2.5 py-1.5"
-      style={{ backgroundColor: `${GREEN}26` }}
-    >
-      <View className="flex-row gap-1">
-        {Array.from({ length: consensus.total }, (_, index) => (
-          <View
-            key={index}
-            className="h-2 w-2 rounded-full"
-            style={{ backgroundColor: index < consensus.count ? GREEN : "#8886" }}
-          />
+    <View className="border-t border-separator">
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen((current) => !current)}
+        className="min-h-9 flex-row items-center gap-1"
+      >
+        <Text
+          className="text-xs font-t3-medium text-foreground"
+          style={{ flex: 1.6 }}
+          numberOfLines={2}
+        >
+          {row.name}
+        </Text>
+        {columns.map((column) => (
+          <View key={column.id} className="flex-1 items-center">
+            {row.optionId === column.id ? (
+              <View
+                accessibilityLabel={`Elige ${column.label}`}
+                className="h-3.5 w-3.5 rounded-full"
+                style={{ backgroundColor: column.recommended ? GREEN : AMBER }}
+              />
+            ) : null}
+          </View>
         ))}
-      </View>
-      <Text className="shrink text-xs text-foreground">
-        {consensus.optionIndex === null
-          ? `Los hilos no se ponen de acuerdo (${consensus.total})`
-          : `${consensus.count} de ${consensus.total} hilos recomiendan la opción ${companyDecisionOptionLetter(consensus.optionIndex)}`}
-      </Text>
+      </Pressable>
+      {open ? (
+        <View className="pb-2">
+          <Text className="text-xs text-foreground">{row.reason}</Text>
+          {source === null ? (
+            props.needsSource ? (
+              <Missing>Sin fuente</Missing>
+            ) : null
+          ) : /^https?:\/\//.test(source) ? (
+            <Pressable onPress={() => void tryOpenExternalUrl(source, "markdown-link")}>
+              <Text className="mt-1 text-xs underline text-foreground-muted">Fuente</Text>
+            </Pressable>
+          ) : (
+            <Sub>{source}</Sub>
+          )}
+        </View>
+      ) : null}
     </View>
   );
 }
 
-function DecisionRow(props: {
-  readonly name: string;
-  readonly letter: number | null;
-  readonly reason: string;
-  readonly source?: string | undefined;
-  /** Threads speak for themselves; only what others do needs a source. */
-  readonly needsSource?: boolean;
-}) {
-  const { source } = props;
-  const link = source !== undefined && /^https?:\/\//.test(source);
-  return (
-    <View className="flex-row gap-2 py-1">
-      <OptionLetter index={props.letter} />
-      <View className="min-w-0 flex-1">
-        <Text className="text-xs text-foreground">
-          <Text className="text-xs font-t3-medium text-foreground">{props.name}</Text> ·{" "}
-          {props.reason}
-        </Text>
-        {source === undefined ? (
-          props.needsSource === false ? null : (
-            <Missing>Sin fuente</Missing>
-          )
-        ) : link ? (
-          <Pressable onPress={() => void tryOpenExternalUrl(source, "markdown-link")}>
-            <Text className="text-xs underline text-foreground-muted">Fuente</Text>
-          </Pressable>
-        ) : (
-          <Sub>{source}</Sub>
-        )}
+/** Who picks what. Pressing a row shows its reason and source, which live nowhere else. */
+function DecisionMatrix({ decision }: { decision: CompanyPanelDecision }) {
+  const { columns, threads, others } = companyDecisionMatrix(decision);
+  const group = (
+    title: string,
+    rows: ReadonlyArray<CompanyDecisionMatrixRow>,
+    needsSource: boolean,
+    missing: string,
+  ) => (
+    <>
+      <View className="mt-2.5 mb-1">
+        <Label>{title}</Label>
       </View>
+      {rows.length > 0 ? (
+        rows.map((row) => (
+          <MatrixRow key={row.key} row={row} columns={columns} needsSource={needsSource} />
+        ))
+      ) : (
+        <Missing>{missing}</Missing>
+      )}
+    </>
+  );
+  return (
+    <View className="mt-2 rounded-xl bg-subtle p-3">
+      <Sub>Pulsa una fila para ver el motivo y la fuente</Sub>
+      {columns.length > 0 ? (
+        <View className="mt-2 flex-row items-end gap-1">
+          <View style={{ flex: 1.6 }} />
+          {columns.map((column) => (
+            <Text
+              key={column.id}
+              className="flex-1 text-center text-xs font-t3-medium text-foreground"
+            >
+              {column.label}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+      {group("Hilos", threads, false, "Falta: ningún hilo ha dado su opinión.")}
+      {group("Otros", others, true, "Falta: nadie ha mirado cómo lo hacen otros.")}
+      {columns.length > 0 ? (
+        <View className="min-h-9 flex-row items-center gap-1 border-t-2 border-separator">
+          <Text className="text-xs font-t3-medium text-foreground" style={{ flex: 1.6 }}>
+            Total
+          </Text>
+          {columns.map((column) => (
+            <Text
+              key={column.id}
+              className="flex-1 text-center text-xs font-t3-medium text-foreground"
+            >
+              {column.total}
+            </Text>
+          ))}
+        </View>
+      ) : null}
     </View>
+  );
+}
+
+/** The seal says the outcome; pressing it opens who picks what. */
+function ConsensusSeal({ decision }: { decision: CompanyPanelDecision }) {
+  const [open, setOpen] = useState(false);
+  const consensus = companyDecisionConsensus(decision);
+  const text = companyDecisionSealText(decision);
+  return (
+    <>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen((current) => !current)}
+        className="mt-2.5 flex-row items-center gap-2 rounded-lg px-2.5 py-2"
+        style={{ backgroundColor: `${GREEN}26` }}
+      >
+        {consensus ? (
+          <View className="flex-row gap-1">
+            {Array.from({ length: consensus.total }, (_, index) => (
+              <View
+                key={index}
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: index < consensus.count ? GREEN : "#8886" }}
+              />
+            ))}
+          </View>
+        ) : null}
+        <Text className="min-w-0 flex-1 text-xs font-t3-medium text-foreground">
+          {text ?? "Faltan las opiniones de los hilos"}
+        </Text>
+        <Sub>{open ? "Cerrar" : "Ver quién"}</Sub>
+      </Pressable>
+      {open ? <DecisionMatrix decision={decision} /> : null}
+    </>
+  );
+}
+
+function Backers(props: { readonly title: string; readonly names: ReadonlyArray<string> }) {
+  if (props.names.length === 0) return null;
+  return (
+    <View className="mt-1.5 flex-row flex-wrap items-center gap-1.5">
+      <Text className="w-11 text-xs text-foreground-muted" numberOfLines={1}>
+        {props.title}
+      </Text>
+      {props.names.map((name, index) => (
+        <View key={`${name}:${index}`} className="rounded-full bg-grouped-card px-2 py-0.5">
+          <Text className="text-xs font-t3-medium text-foreground">{name}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function OptionBackers(props: {
+  readonly decision: CompanyPanelDecision;
+  readonly optionId: string;
+}) {
+  const { threads, others } = companyDecisionMatrix(props.decision);
+  const names = (rows: ReadonlyArray<CompanyDecisionMatrixRow>) =>
+    rows.filter((row) => row.optionId === props.optionId).map((row) => row.name);
+  const inThreads = names(threads);
+  const inOthers = names(others);
+  // Only worth saying once someone has picked: with no data at all, the seal says it is missing.
+  if (inThreads.length + inOthers.length === 0) {
+    return threads.length + others.length === 0 ? null : (
+      <View className="mt-1.5">
+        <Sub>Nadie la elige</Sub>
+      </View>
+    );
+  }
+  return (
+    <>
+      <Backers title="Hilos" names={inThreads} />
+      <Backers title="Otros" names={inOthers} />
+    </>
   );
 }
 
@@ -700,19 +814,21 @@ function DecisionCard(props: {
         </View>
         <View className="gap-1.5">
           {options.length > 0 ? (
-            options.map((option, index) => (
+            options.map((option) => (
               <Pressable
                 key={option.id}
                 disabled={props.busy}
                 onPress={() => onAnswer(decision.id, { type: "option", optionId: option.id })}
-                className="flex-row gap-2 rounded-xl border bg-subtle p-3"
+                className="rounded-xl bg-subtle p-3"
                 style={[
-                  { borderColor: option.recommended ? GREEN : "transparent" },
+                  {
+                    borderColor: option.recommended ? GREEN : "transparent",
+                    borderWidth: option.recommended ? 2 : 1,
+                  },
                   props.busy ? { opacity: 0.5 } : null,
                 ]}
               >
-                <OptionLetter index={index} />
-                <View className="min-w-0 flex-1">
+                <View className="min-w-0">
                   <Text className="font-t3-medium text-sm text-foreground">
                     {option.label}
                     {option.recommended ? (
@@ -722,6 +838,7 @@ function DecisionCard(props: {
                     ) : null}
                   </Text>
                   {option.effect ? <Sub>{option.effect}</Sub> : null}
+                  <OptionBackers decision={decision} optionId={option.id} />
                 </View>
               </Pressable>
             ))
@@ -786,40 +903,6 @@ function DecisionCard(props: {
             />
           </View>
         ) : null}
-
-        <View className="mt-3">
-          <Label>Qué opinan los hilos</Label>
-        </View>
-        {decision.opinions?.length ? (
-          decision.opinions.map((opinion) => (
-            <DecisionRow
-              key={opinion.thread}
-              name={opinion.thread}
-              letter={companyDecisionOptionIndex(decision, opinion.optionId)}
-              reason={opinion.opinion}
-              needsSource={false}
-            />
-          ))
-        ) : (
-          <Missing>Falta: ningún hilo ha dado su opinión.</Missing>
-        )}
-
-        <View className="mt-3">
-          <Label>Cómo lo hacen otros</Label>
-        </View>
-        {decision.references?.length ? (
-          decision.references.map((reference) => (
-            <DecisionRow
-              key={reference.name}
-              name={reference.name}
-              letter={companyDecisionOptionIndex(decision, reference.optionId)}
-              reason={reference.how}
-              source={reference.source}
-            />
-          ))
-        ) : (
-          <Missing>Falta: nadie ha mirado cómo lo hacen otros.</Missing>
-        )}
       </View>
     </Animated.View>
   );
@@ -1527,7 +1610,6 @@ function DecisionsBlock(props: {
   const first = pending[0];
   // Answering the last one leaves nothing to show large, so it closes on its own.
   const open = wantsOpen && first !== undefined;
-  const consensus = first ? companyDecisionConsensus(first) : null;
   const toggle = () => setWantsOpen((current) => !current);
   return (
     <Pressable
@@ -1565,11 +1647,9 @@ function DecisionsBlock(props: {
           <Text className="mt-3 font-t3-medium text-sm text-foreground">{first.title}</Text>
           <View className="mt-1.5">
             <Sub>
-              {consensus === null
-                ? "Faltan las opiniones de los hilos"
-                : consensus.optionIndex === null
-                  ? "Los hilos no se ponen de acuerdo"
-                  : `${consensus.count} de ${consensus.total} hilos recomiendan ${companyDecisionOptionLetter(consensus.optionIndex)}`}
+              {first
+                ? (companyDecisionSealText(first) ?? "Faltan las opiniones de los hilos")
+                : null}
             </Sub>
           </View>
         </>

@@ -13,6 +13,8 @@ import {
   companyPanelShortDate,
   companyPanelSuites,
   companyDecisionConsensus,
+  companyDecisionMatrix,
+  companyDecisionSealText,
   companyDecisionSwipeAction,
   companyPanelJobState,
   companyPanelStaleLabel,
@@ -378,5 +380,53 @@ describe("companyTestsVersionHeading", () => {
       title: "Versión 2.0.22",
       app: null,
     });
+  });
+});
+
+describe("the decision's seal and matrix", () => {
+  const options = [
+    { id: "a", label: "Borrarlo también de la búsqueda", short: "Borrarlo", recommended: true },
+    { id: "b", label: "Papelera de un mes" },
+  ];
+  const opinions = [
+    { thread: "Features1", optionId: "a", opinion: "Lo espera." },
+    { thread: "Performance", optionId: "a", opinion: "Es sencillo." },
+    { thread: "Producción 2", optionId: "b", opinion: "Se puede deshacer." },
+  ];
+
+  it("says the option's name, not a letter", () => {
+    expect(companyDecisionSealText({ options, opinions })).toBe(
+      "2 de 3 hilos eligen «Borrarlo también de la búsqueda»",
+    );
+  });
+
+  it("does not hide opinions that picked nothing, and has no sentence with none", () => {
+    expect(companyDecisionSealText({ opinions: [{ thread: "t", opinion: "o" }] })).toContain(
+      "sin elegir",
+    );
+    expect(companyDecisionSealText({ options })).toBeNull();
+  });
+
+  it("keeps every reason and source in its row, and counts threads and others together", () => {
+    const matrix = companyDecisionMatrix({
+      options,
+      opinions,
+      references: [{ name: "Codex", optionId: "a", how: "Lo borra.", source: "https://x.test" }],
+    });
+    expect(matrix.columns.map((column) => [column.label, column.total])).toEqual([
+      ["Borrarlo", 3],
+      ["Papelera de un mes", 1],
+    ]);
+    expect(matrix.threads[2]?.reason).toBe("Se puede deshacer.");
+    expect(matrix.others[0]?.source).toBe("https://x.test");
+  });
+
+  it("marks no column for a pick of an option that is gone", () => {
+    const matrix = companyDecisionMatrix({
+      options,
+      opinions: [{ thread: "t", optionId: "z", opinion: "o" }],
+    });
+    expect(matrix.threads[0]?.optionId).toBeNull();
+    expect(matrix.columns.every((column) => column.total === 0)).toBe(true);
   });
 });
