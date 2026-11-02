@@ -156,7 +156,13 @@ const TONE_BG: Record<CompanyPanelTone, string> = {
   active: "bg-primary",
   neutral: "bg-muted-foreground/40",
 };
-const PART_COLORS = ["bg-primary", "bg-warning", "bg-success", "bg-info", "bg-destructive"];
+const PART_COLORS = [
+  "bg-primary",
+  "bg-warning",
+  "bg-success",
+  "bg-foreground/50",
+  "bg-destructive",
+];
 
 /** A horizontal bar made of coloured slices; hovering a slice says what it is. */
 function SliceBar(props: {
@@ -429,10 +435,10 @@ const TestsLine = ({ tests }: { tests: CompanyPanelTestsFile }) => {
 type AnswerFn = (decisionId: string, answer: CompanyPanelAnswer) => void;
 
 const OPTION_LETTER_STYLE = [
-  "bg-primary text-primary-foreground",
-  "bg-warning text-warning-foreground",
-  "bg-info text-info-foreground",
-  "bg-destructive text-destructive-foreground",
+  "bg-primary text-white",
+  "bg-warning text-white",
+  "bg-foreground text-background",
+  "bg-destructive text-white",
 ];
 
 function OptionLetter({ index }: { index: number | null }) {
@@ -584,7 +590,7 @@ function DecisionCard(props: {
               <span className="min-w-0">
                 <span className="font-medium">{option.label}</span>
                 {option.recommended ? (
-                  <span className="ml-1.5 text-xs text-success">Recomendada</span>
+                  <span className="block text-xs text-success">Recomendada</span>
                 ) : null}
                 {option.effect ? (
                   <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -1171,7 +1177,7 @@ function TechnicalDetail({ text }: { text: string | undefined }) {
   return (
     <details className="mt-3 text-xs text-muted-foreground">
       <summary className="cursor-pointer">Detalle técnico</summary>
-      <p className="mt-1">{text}</p>
+      <p className="mt-1 whitespace-pre-line">{text}</p>
     </details>
   );
 }
@@ -1197,25 +1203,16 @@ function DetailView({ detail, snapshot }: { detail: Detail; snapshot: CompanyPan
           {health ? (
             <>
               <VersionsAndHealth health={health} />
-              <div className="mt-3 space-y-1 text-xs">
-                {health.versions.map((version) =>
-                  version.detail ? (
-                    <div key={version.environment}>
-                      <b>{version.environment}</b> · {version.detail}
-                    </div>
-                  ) : null,
-                )}
-                {health.systems.map((system) => (
-                  <div key={system.name} className="flex gap-2">
-                    <span
-                      className={`mt-1 size-2 flex-none rounded-full ${STATUS_DOT[system.status]}`}
-                    />
-                    <span>
-                      <b>{system.name}</b> · {system.detail ?? STATUS_LABEL[system.status]}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <TechnicalDetail
+                text={[
+                  ...health.versions.flatMap((version) =>
+                    version.detail ? [`${version.environment}: ${version.detail}`] : [],
+                  ),
+                  ...health.systems.flatMap((system) =>
+                    system.detail ? [`${system.name}: ${system.detail}`] : [],
+                  ),
+                ].join("\n")}
+              />
             </>
           ) : (
             <NoData />
@@ -1309,38 +1306,41 @@ export function CompanyPanel({ environmentId }: { environmentId: EnvironmentId }
 
   return (
     <FetchedAtContext value={query.dataUpdatedAt}>
-      <div className="@container/company relative h-full overflow-auto bg-background p-3 text-sm text-foreground">
-        <div className="mb-2.5 flex gap-1 text-sm">
-          {TABS.map((item) => (
-            <button
-              type="button"
-              key={item.id}
-              onClick={() => {
-                setTab(item.id);
-                setDetail(null);
-              }}
-              className={`rounded-full border px-3 py-1 ${tab === item.id ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground hover:text-foreground"}`}
-            >
-              {item.label}
-              {item.id === "decisions" && snapshot ? (
-                <CountBadge count={pendingCompanyDecisions(snapshot).length} />
-              ) : null}
-            </button>
-          ))}
+      <div className="@container/company relative h-full bg-background text-sm text-foreground">
+        {/* The detail sits outside the scroller, so it opens in view from any scroll position. */}
+        <div className="h-full overflow-auto p-3">
+          <div className="mb-2.5 flex gap-1 text-sm">
+            {TABS.map((item) => (
+              <button
+                type="button"
+                key={item.id}
+                onClick={() => {
+                  setTab(item.id);
+                  setDetail(null);
+                }}
+                className={`rounded-full border px-3 py-1 ${tab === item.id ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground hover:text-foreground"}`}
+              >
+                {item.label}
+                {item.id === "decisions" && snapshot ? (
+                  <CountBadge count={pendingCompanyDecisions(snapshot).length} />
+                ) : null}
+              </button>
+            ))}
+          </div>
+          {snapshot === null ? (
+            <NoData {...(query.error ? { what: query.error } : {})} />
+          ) : !snapshot.available ? (
+            <NoData what="este panel no está disponible para ti" />
+          ) : tab === "home" ? (
+            <HomeTab snapshot={snapshot} busy={busy} onAnswer={onAnswer} onDetail={setDetail} />
+          ) : tab === "decisions" ? (
+            <DecisionsTab snapshot={snapshot} busy={busy} onAnswer={onAnswer} />
+          ) : tab === "costs" ? (
+            <CostsTab snapshot={snapshot} />
+          ) : (
+            <HealthTab snapshot={snapshot} />
+          )}
         </div>
-        {snapshot === null ? (
-          <NoData {...(query.error ? { what: query.error } : {})} />
-        ) : !snapshot.available ? (
-          <NoData what="este panel no está disponible para ti" />
-        ) : tab === "home" ? (
-          <HomeTab snapshot={snapshot} busy={busy} onAnswer={onAnswer} onDetail={setDetail} />
-        ) : tab === "decisions" ? (
-          <DecisionsTab snapshot={snapshot} busy={busy} onAnswer={onAnswer} />
-        ) : tab === "costs" ? (
-          <CostsTab snapshot={snapshot} />
-        ) : (
-          <HealthTab snapshot={snapshot} />
-        )}
         {detail !== null && snapshot !== null ? (
           <div className="absolute inset-2 z-10 overflow-auto transition starting:scale-95 starting:opacity-0 rounded-xl border border-ring bg-popover p-4 duration-200">
             <button
