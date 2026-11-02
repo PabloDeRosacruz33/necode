@@ -371,7 +371,7 @@ function CardButton(props: {
     <Pressable
       {...(props.disabled === undefined ? {} : { disabled: props.disabled })}
       onPress={props.onPress}
-      className={`flex-1 items-center rounded-xl border p-3 ${props.color ? "" : "border-separator"}`}
+      className="flex-1 items-center rounded-xl border border-transparent bg-subtle p-3"
       style={[
         props.color ? { borderColor: props.color } : null,
         props.disabled ? { opacity: 0.5 } : null,
@@ -403,6 +403,7 @@ function DecisionCard(props: {
       PanResponder.create({
         onMoveShouldSetPanResponder: (_, gesture) =>
           latest.current.canSwipe && (Math.abs(gesture.dx) > 12 || gesture.dy < -12),
+        onPanResponderTerminationRequest: () => false,
         onPanResponderMove: (_, gesture) => {
           position.setValue({ x: gesture.dx, y: Math.min(gesture.dy, 0) });
         },

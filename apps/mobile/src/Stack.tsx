@@ -289,6 +289,8 @@ const SettingsContentStack = createV5SheetStackNavigator({
       linking: "panel",
       options: {
         title: "Panel",
+        // Swiping a decision right answers yes; the back button stays.
+        gestureEnabled: false,
       },
     }),
     SettingsArchive: createNativeStackScreen({
