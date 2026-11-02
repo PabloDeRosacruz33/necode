@@ -242,6 +242,42 @@ export function companyDecisionMatrix(
   };
 }
 
+/**
+ * How much backing an option has, as "n of the group": what its dots show. Names stay in the
+ * matrix. An empty group has no opinion to count, which must not read as nobody backing it.
+ */
+export function companyOptionSupport(
+  decision: Pick<CompanyPanelDecision, "options" | "opinions" | "references">,
+  optionId: string,
+) {
+  const { threads, others } = companyDecisionMatrix(decision);
+  const count = (rows: ReadonlyArray<CompanyDecisionMatrixRow>) => ({
+    on: rows.filter((row) => row.optionId === optionId).length,
+    total: rows.length,
+  });
+  return { team: count(threads), others: count(others) };
+}
+
+export interface CompanyDecisionCursor {
+  readonly id: string | null;
+  readonly index: number;
+}
+
+/**
+ * Which decision someone is reading. It follows the decision, not its place in the list, so a new
+ * one never replaces what they read. When theirs goes, because it was answered, they get the one
+ * that took its place, or the last one if theirs was the last.
+ */
+export function companyDecisionCursor(
+  decisions: ReadonlyArray<{ readonly id: string }>,
+  cursor: CompanyDecisionCursor,
+): CompanyDecisionCursor {
+  if (decisions.length === 0) return { id: null, index: 0 };
+  const found = decisions.findIndex((decision) => decision.id === cursor.id);
+  const index = found >= 0 ? found : Math.min(cursor.index, decisions.length - 1);
+  return { id: decisions[index]?.id ?? null, index };
+}
+
 export type CompanyDecisionSwipe = "right" | "left" | "up";
 
 /**

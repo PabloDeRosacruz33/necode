@@ -30,8 +30,10 @@ import {
   companyPanelShortLabel,
   companyPanelSuites,
   companyDecisionConsensus,
+  companyDecisionCursor,
   companyDecisionMatrix,
   companyDecisionSealText,
+  companyOptionSupport,
   companyDecisionSwipeAction,
   companyDecisionTime,
   companyPanelJobState,
@@ -41,6 +43,7 @@ import {
   simulateMonthlyCost,
 } from "@t3tools/client-runtime/state/company-panel";
 import type {
+  CompanyDecisionCursor,
   CompanyDecisionMatrixRow,
   CompanyPanelDataKind,
   CompanyPanelJobKind,
@@ -596,39 +599,30 @@ function ConsensusSeal({ decision }: { decision: CompanyPanelDecision }) {
   );
 }
 
-function OptionBackers(props: {
-  readonly decision: CompanyPanelDecision;
-  readonly optionId: string;
+function SupportDots(props: {
+  readonly title: string;
+  readonly on: number;
+  readonly total: number;
 }) {
-  const { threads, others } = companyDecisionMatrix(props.decision);
-  const names = (rows: ReadonlyArray<CompanyDecisionMatrixRow>) =>
-    rows.filter((row) => row.optionId === props.optionId).map((row) => row.name);
-  const inThreads = names(threads);
-  const inOthers = names(others);
-  // Only worth saying once someone has picked: with no data at all, the seal says it is missing.
-  if (inThreads.length + inOthers.length === 0) {
-    return threads.length + others.length === 0 ? null : (
-      <span className="mt-1.5 block text-xs text-muted-foreground">Nadie la elige</span>
-    );
-  }
   return (
-    <>
-      <Backers title="Hilos" names={inThreads} />
-      <Backers title="Otros" names={inOthers} />
-    </>
-  );
-}
-
-function Backers(props: { readonly title: string; readonly names: ReadonlyArray<string> }) {
-  if (props.names.length === 0) return null;
-  return (
-    <span className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
-      <span className="w-9 flex-none text-muted-foreground">{props.title}</span>
-      {props.names.map((name, index) => (
-        <span key={`${name}:${index}`} className="rounded-full bg-foreground/8 px-2 font-medium">
-          {name}
+    <span className="flex items-center gap-1.5">
+      {props.title}
+      {props.total === 0 ? (
+        <span className="italic">sin dato</span>
+      ) : (
+        <span
+          role="img"
+          aria-label={`${props.on} de ${props.total}`}
+          className="flex items-center gap-0.75"
+        >
+          {Array.from({ length: props.total }, (_, index) => (
+            <span
+              key={index}
+              className={`size-2.5 rounded-full ${index < props.on ? "bg-success" : "bg-foreground/15"}`}
+            />
+          ))}
         </span>
-      ))}
+      )}
     </span>
   );
 }
@@ -640,6 +634,7 @@ function DecisionCard(props: {
   readonly total: number;
   readonly busy: boolean;
   readonly onAnswer: AnswerFn;
+  readonly onMove: (step: number) => void;
 }) {
   const { decision } = props;
   const [explained, setExplained] = useState(false);
@@ -687,11 +682,35 @@ function DecisionCard(props: {
       }
       className="flex touch-pan-y flex-col rounded-xl border border-border bg-background p-4 text-sm"
     >
-      <Sub>
-        Decisión {props.position} de {props.total}
-        {decision.area ? ` · ${decision.area}` : ""} ·{" "}
-        {companyDecisionTime(decision.createdAt, fetchedAt)}
-      </Sub>
+      <div className="flex items-center justify-between gap-2">
+        <Sub>
+          Decisión {props.position} de {props.total}
+          {decision.area ? ` · ${decision.area}` : ""} ·{" "}
+          {companyDecisionTime(decision.createdAt, fetchedAt)}
+        </Sub>
+        {props.total > 1 ? (
+          <span className="flex flex-none gap-1">
+            <button
+              type="button"
+              aria-label="Decisión anterior"
+              disabled={props.position <= 1}
+              onClick={() => props.onMove(-1)}
+              className="flex size-8 items-center justify-center rounded-lg border border-border hover:bg-accent disabled:opacity-40"
+            >
+              ←
+            </button>
+            <button
+              type="button"
+              aria-label="Decisión siguiente"
+              disabled={props.position >= props.total}
+              onClick={() => props.onMove(1)}
+              className="flex size-8 items-center justify-center rounded-lg border border-border hover:bg-accent disabled:opacity-40"
+            >
+              →
+            </button>
+          </span>
+        ) : null}
+      </div>
       <div className="mt-1 text-lg leading-snug font-semibold">{decision.title}</div>
       <p className="mt-1.5">{decision.summary}</p>
       <ConsensusSeal decision={decision} />
@@ -710,16 +729,21 @@ function DecisionCard(props: {
               onClick={() => props.onAnswer(decision.id, { type: "option", optionId: option.id })}
             >
               <span className="block min-w-0">
-                <span className="font-medium">{option.label}</span>
+                <span className="block text-base leading-snug font-semibold">{option.label}</span>
                 {option.recommended ? (
                   <span className="block text-xs text-success">Recomendada</span>
                 ) : null}
-                {option.effect ? (
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    {option.effect}
-                  </span>
-                ) : null}
-                <OptionBackers decision={decision} optionId={option.id} />
+                {option.effect ? <span className="mt-1 block text-sm">{option.effect}</span> : null}
+                <span className="mt-2 flex flex-wrap gap-x-3.5 gap-y-1 text-xs text-muted-foreground">
+                  <SupportDots
+                    title="Tu equipo"
+                    {...companyOptionSupport(decision, option.id).team}
+                  />
+                  <SupportDots
+                    title="Otros productos"
+                    {...companyOptionSupport(decision, option.id).others}
+                  />
+                </span>
               </span>
             </button>
           ))
@@ -802,15 +826,31 @@ function DecisionCard(props: {
   );
 }
 
+/** Which decision is on screen; keeps it there when others arrive or go. */
+function useDecisionCursor(decisions: ReadonlyArray<CompanyPanelDecision>) {
+  const [stored, setStored] = useState<CompanyDecisionCursor>({ id: null, index: 0 });
+  const cursor = companyDecisionCursor(decisions, stored);
+  if (cursor.id !== stored.id || cursor.index !== stored.index) setStored(cursor);
+  return {
+    index: cursor.index,
+    decision: decisions[cursor.index],
+    go: (step: number) => {
+      const target = decisions[cursor.index + step];
+      if (target) setStored({ id: target.id, index: cursor.index + step });
+    },
+  };
+}
+
 function PendingDecision(props: {
   readonly snapshot: CompanyPanelSnapshot;
   readonly busy: boolean;
   readonly onAnswer: AnswerFn;
+  readonly cursor: ReturnType<typeof useDecisionCursor>;
 }) {
   const section = props.snapshot.decisions;
   if (section.status !== "ok")
     return <NoData broken={section.status === "invalid"} what="decisiones" />;
-  const decision = section.data.decisions[0];
+  const { decision, index, go } = props.cursor;
   if (decision === undefined) {
     return (
       <div className="mt-2 rounded-xl border border-border bg-background p-3 text-sm">
@@ -824,10 +864,11 @@ function PendingDecision(props: {
       <DecisionCard
         key={decision.id}
         decision={decision}
-        position={1}
+        position={index + 1}
         total={section.data.decisions.length}
         busy={props.busy}
         onAnswer={props.onAnswer}
+        onMove={go}
       />
     </div>
   );
@@ -1781,7 +1822,8 @@ function DecisionsBlock(props: {
 }) {
   const { snapshot } = props;
   const pending = pendingCompanyDecisions(snapshot);
-  const first = pending[0];
+  const cursor = useDecisionCursor(pending);
+  const first = cursor.decision;
   const expandable = first !== undefined;
   return (
     <section
@@ -1820,7 +1862,12 @@ function DecisionsBlock(props: {
         </>
       ) : null}
       {props.open || first === undefined ? (
-        <PendingDecision snapshot={snapshot} busy={props.busy} onAnswer={props.onAnswer} />
+        <PendingDecision
+          snapshot={snapshot}
+          busy={props.busy}
+          onAnswer={props.onAnswer}
+          cursor={cursor}
+        />
       ) : (
         <>
           <p className="mt-3.5 text-sm leading-snug font-semibold">{first.title}</p>
@@ -1883,12 +1930,15 @@ function DecisionsTab(props: {
   readonly onAnswer: AnswerFn;
 }) {
   const { snapshot } = props;
+  const cursor = useDecisionCursor(pendingCompanyDecisions(snapshot));
   return (
     <div className="mx-auto max-w-xl space-y-4">
-      <PendingDecision snapshot={snapshot} busy={props.busy} onAnswer={props.onAnswer} />
-      {pendingCompanyDecisions(snapshot).length > 1 ? (
-        <Sub>Quedan {pendingCompanyDecisions(snapshot).length - 1} más después de esta.</Sub>
-      ) : null}
+      <PendingDecision
+        snapshot={snapshot}
+        busy={props.busy}
+        onAnswer={props.onAnswer}
+        cursor={cursor}
+      />
       {snapshot.answered.length > 0 ? (
         <div>
           <Label>Ya contestadas</Label>

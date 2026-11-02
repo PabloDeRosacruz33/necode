@@ -29,8 +29,10 @@ import {
   companyPanelShortLabel,
   companyPanelSuites,
   companyDecisionConsensus,
+  companyDecisionCursor,
   companyDecisionMatrix,
   companyDecisionSealText,
+  companyOptionSupport,
   companyDecisionSwipeAction,
   companyDecisionTime,
   companyPanelJobState,
@@ -40,6 +42,7 @@ import {
   simulateMonthlyCost,
 } from "@t3tools/client-runtime/state/company-panel";
 import type {
+  CompanyDecisionCursor,
   CompanyDecisionMatrixRow,
   CompanyPanelDataKind,
   CompanyPanelJobKind,
@@ -720,44 +723,28 @@ function ConsensusSeal({ decision }: { decision: CompanyPanelDecision }) {
   );
 }
 
-function Backers(props: { readonly title: string; readonly names: ReadonlyArray<string> }) {
-  if (props.names.length === 0) return null;
-  return (
-    <View className="mt-1.5 flex-row flex-wrap items-center gap-1.5">
-      <Text className="w-11 text-xs text-foreground-muted" numberOfLines={1}>
-        {props.title}
-      </Text>
-      {props.names.map((name, index) => (
-        <View key={`${name}:${index}`} className="rounded-full bg-grouped-card px-2 py-0.5">
-          <Text className="text-xs font-t3-medium text-foreground">{name}</Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function OptionBackers(props: {
-  readonly decision: CompanyPanelDecision;
-  readonly optionId: string;
+function SupportDots(props: {
+  readonly title: string;
+  readonly on: number;
+  readonly total: number;
 }) {
-  const { threads, others } = companyDecisionMatrix(props.decision);
-  const names = (rows: ReadonlyArray<CompanyDecisionMatrixRow>) =>
-    rows.filter((row) => row.optionId === props.optionId).map((row) => row.name);
-  const inThreads = names(threads);
-  const inOthers = names(others);
-  // Only worth saying once someone has picked: with no data at all, the seal says it is missing.
-  if (inThreads.length + inOthers.length === 0) {
-    return threads.length + others.length === 0 ? null : (
-      <View className="mt-1.5">
-        <Sub>Nadie la elige</Sub>
-      </View>
-    );
-  }
   return (
-    <>
-      <Backers title="Hilos" names={inThreads} />
-      <Backers title="Otros" names={inOthers} />
-    </>
+    <View className="flex-row items-center gap-1.5">
+      <Sub>{props.title}</Sub>
+      {props.total === 0 ? (
+        <Text className="text-xs italic text-foreground-muted">sin dato</Text>
+      ) : (
+        <View accessibilityLabel={`${props.on} de ${props.total}`} className="flex-row gap-0.75">
+          {Array.from({ length: props.total }, (_, index) => (
+            <View
+              key={index}
+              className="h-2.5 w-2.5 rounded-full"
+              style={{ backgroundColor: index < props.on ? GREEN : "#8884" }}
+            />
+          ))}
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -768,6 +755,7 @@ function DecisionCard(props: {
   readonly total: number;
   readonly busy: boolean;
   readonly onAnswer: AnswerFn;
+  readonly onMove: (step: number) => void;
 }) {
   const { decision, onAnswer } = props;
   const [explained, setExplained] = useState(false);
@@ -811,11 +799,43 @@ function DecisionCard(props: {
       className="rounded-2xl bg-grouped-card"
     >
       <View className="p-4">
-        <Sub>
-          Decisión {props.position} de {props.total}
-          {decision.area ? ` · ${decision.area}` : ""} ·{" "}
-          {companyDecisionTime(decision.createdAt, fetchedAt || Date.parse(decision.createdAt))}
-        </Sub>
+        <View className="flex-row items-center justify-between gap-2">
+          <View className="min-w-0 flex-1">
+            <Sub>
+              Decisión {props.position} de {props.total}
+              {decision.area ? ` · ${decision.area}` : ""} ·{" "}
+              {companyDecisionTime(decision.createdAt, fetchedAt || Date.parse(decision.createdAt))}
+            </Sub>
+          </View>
+          {props.total > 1 ? (
+            <View className="flex-row gap-2">
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Decisión anterior"
+                accessibilityState={{ disabled: props.position <= 1 }}
+                disabled={props.position <= 1}
+                hitSlop={4}
+                onPress={() => props.onMove(-1)}
+                className="h-10 w-10 items-center justify-center rounded-full bg-subtle"
+                style={props.position <= 1 ? { opacity: 0.4 } : null}
+              >
+                <Text className="text-base text-foreground">←</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Decisión siguiente"
+                accessibilityState={{ disabled: props.position >= props.total }}
+                disabled={props.position >= props.total}
+                hitSlop={4}
+                onPress={() => props.onMove(1)}
+                className="h-10 w-10 items-center justify-center rounded-full bg-subtle"
+                style={props.position >= props.total ? { opacity: 0.4 } : null}
+              >
+                <Text className="text-base text-foreground">→</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
         <Text className="mt-1 font-t3-medium text-xl text-foreground">{decision.title}</Text>
         <Text className="mt-1.5 text-sm text-foreground">{decision.summary}</Text>
         <ConsensusSeal decision={decision} />
@@ -840,7 +860,7 @@ function DecisionCard(props: {
                 ]}
               >
                 <View className="min-w-0">
-                  <Text className="font-t3-medium text-sm text-foreground">
+                  <Text className="font-t3-medium text-base text-foreground">
                     {option.label}
                     {option.recommended ? (
                       <Text className="text-xs" style={{ color: GREEN }}>
@@ -848,8 +868,19 @@ function DecisionCard(props: {
                       </Text>
                     ) : null}
                   </Text>
-                  {option.effect ? <Sub>{option.effect}</Sub> : null}
-                  <OptionBackers decision={decision} optionId={option.id} />
+                  {option.effect ? (
+                    <Text className="mt-1 text-sm text-foreground">{option.effect}</Text>
+                  ) : null}
+                  <View className="mt-2 flex-row flex-wrap gap-x-3.5 gap-y-1">
+                    <SupportDots
+                      title="Tu equipo"
+                      {...companyOptionSupport(decision, option.id).team}
+                    />
+                    <SupportDots
+                      title="Otros productos"
+                      {...companyOptionSupport(decision, option.id).others}
+                    />
+                  </View>
                 </View>
               </Pressable>
             ))
@@ -919,16 +950,32 @@ function DecisionCard(props: {
   );
 }
 
+/** Which decision is on screen; keeps it there when others arrive or go. */
+function useDecisionCursor(decisions: ReadonlyArray<CompanyPanelDecision>) {
+  const [stored, setStored] = useState<CompanyDecisionCursor>({ id: null, index: 0 });
+  const cursor = companyDecisionCursor(decisions, stored);
+  if (cursor.id !== stored.id || cursor.index !== stored.index) setStored(cursor);
+  return {
+    index: cursor.index,
+    decision: decisions[cursor.index],
+    go: (step: number) => {
+      const target = decisions[cursor.index + step];
+      if (target) setStored({ id: target.id, index: cursor.index + step });
+    },
+  };
+}
+
 function PendingDecision(props: {
   readonly snapshot: CompanyPanelSnapshot;
   readonly busy: boolean;
   readonly onAnswer: AnswerFn;
+  readonly cursor: ReturnType<typeof useDecisionCursor>;
 }) {
   const section = props.snapshot.decisions;
   if (section.status !== "ok") {
     return <NoData broken={section.status === "invalid"} what="decisiones" />;
   }
-  const decision = section.data.decisions[0];
+  const { decision, index, go } = props.cursor;
   if (decision === undefined) {
     return (
       <View className="rounded-2xl bg-grouped-card p-4">
@@ -943,10 +990,11 @@ function PendingDecision(props: {
     <DecisionCard
       key={decision.id}
       decision={decision}
-      position={1}
+      position={index + 1}
       total={section.data.decisions.length}
       busy={props.busy}
       onAnswer={props.onAnswer}
+      onMove={go}
     />
   );
 }
@@ -1857,7 +1905,8 @@ function DecisionsBlock(props: {
   const { snapshot } = props;
   const [wantsOpen, setWantsOpen] = useState(false);
   const pending = pendingCompanyDecisions(snapshot);
-  const first = pending[0];
+  const cursor = useDecisionCursor(pending);
+  const first = cursor.decision;
   // Answering the last one leaves nothing to show large, so it closes on its own.
   const open = wantsOpen && first !== undefined;
   const toggle = () => setWantsOpen((current) => !current);
@@ -1890,7 +1939,12 @@ function DecisionsBlock(props: {
       ) : null}
       {open || first === undefined ? (
         <View className="mt-3">
-          <PendingDecision snapshot={snapshot} busy={props.busy} onAnswer={props.onAnswer} />
+          <PendingDecision
+            snapshot={snapshot}
+            busy={props.busy}
+            onAnswer={props.onAnswer}
+            cursor={cursor}
+          />
         </View>
       ) : (
         <>
@@ -1925,6 +1979,31 @@ function HomeTab(props: {
       <DatabaseBlock snapshot={snapshot} />
       <TestsAndErrorsBlock snapshot={snapshot} />
       <SystemStrip snapshot={snapshot} />
+    </View>
+  );
+}
+
+function DecisionsTab(props: {
+  readonly snapshot: CompanyPanelSnapshot;
+  readonly busy: boolean;
+  readonly onAnswer: AnswerFn;
+}) {
+  const { snapshot } = props;
+  const cursor = useDecisionCursor(pendingCompanyDecisions(snapshot));
+  return (
+    <View className="gap-3">
+      <PendingDecision
+        snapshot={snapshot}
+        busy={props.busy}
+        onAnswer={props.onAnswer}
+        cursor={cursor}
+      />
+      {snapshot.answered.length > 0 ? <Label>Ya contestadas</Label> : null}
+      {[...snapshot.answered].reverse().map((answered) => (
+        <Text key={answered.decisionId} className="text-xs text-foreground">
+          {answered.title ?? answered.decisionId} · {answered.answer} · {answered.person}
+        </Text>
+      ))}
     </View>
   );
 }
@@ -2081,15 +2160,7 @@ function EnvironmentPanel({ environmentId }: { environmentId: EnvironmentId }) {
       ) : tab === "home" ? (
         <HomeTab snapshot={snapshot} busy={busy} onAnswer={onAnswer} />
       ) : tab === "decisions" ? (
-        <View className="gap-3">
-          <PendingDecision snapshot={snapshot} busy={busy} onAnswer={onAnswer} />
-          {snapshot.answered.length > 0 ? <Label>Ya contestadas</Label> : null}
-          {[...snapshot.answered].reverse().map((answered) => (
-            <Text key={answered.decisionId} className="text-xs text-foreground">
-              {answered.title ?? answered.decisionId} · {answered.answer} · {answered.person}
-            </Text>
-          ))}
-        </View>
+        <DecisionsTab snapshot={snapshot} busy={busy} onAnswer={onAnswer} />
       ) : tab === "costs" ? (
         <CostsTab snapshot={snapshot} />
       ) : (

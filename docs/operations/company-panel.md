@@ -12,7 +12,7 @@ conversations. The schemas are in `packages/contracts/src/companyPanel.ts`.
 "example"?, "thread"?, "options"?: [{ "id", "label", "short"?, "effect"?, "recommended"? }], "opinions"?: [{ "thread",
 "optionId"?, "opinion" }], "references"?: [{ "name", "optionId"?, "how", "source"? }] }] }`. `title`
   describes the problem, `summary` explains it plainly, and `problem` with `example` are what "No lo
-  entiendo" unfolds. `optionId` ties a row to an option: each option shows who picks it, the seal counts the threads, and pressing the seal opens who picks what, with each reason and source. `short` names the option's column there. What is missing shows
+  entiendo" unfolds. `optionId` ties a row to an option: each option shows dots for how many pick it, `effect` is its short example of what changes, the seal counts the threads, and pressing the seal opens who picks what, with each reason and source. `short` names the option's column there. What is missing shows
   as missing. With `options`, the card shows them; without, yes and no. `thread` is the name of the thread waiting on it, which turns its tile purple.
 - `costes.json`: `{ "currency": "EUR", "daysPerMonth", "perPerson": [{ "date", "total", "parts":
 [{ "name", "amount" }], "release"? }], "simulator"?: { "withoutImages", "perFifthOfImages",

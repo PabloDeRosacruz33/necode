@@ -18,7 +18,9 @@ import {
   companyPanelShortDate,
   companyPanelSuites,
   companyDecisionConsensus,
+  companyDecisionCursor,
   companyDecisionMatrix,
+  companyOptionSupport,
   companyDecisionSealText,
   companyDecisionSwipeAction,
   companyPanelJobState,
@@ -505,5 +507,61 @@ describe("companyPlanTurn", () => {
       "Te toca: mira esto",
     );
     expect(companyPlanTurn({}, "roi")).toBeNull();
+  });
+});
+
+describe("companyDecisionCursor", () => {
+  const list = (...ids: ReadonlyArray<string>) => ids.map((id) => ({ id }));
+
+  it("starts on the first one", () => {
+    expect(companyDecisionCursor(list("a", "b"), { id: null, index: 0 })).toEqual({
+      id: "a",
+      index: 0,
+    });
+  });
+
+  it("stays on what is being read when a new one arrives, wherever it lands", () => {
+    const reading = { id: "b", index: 1 };
+    expect(companyDecisionCursor(list("a", "b", "c"), reading)).toEqual(reading);
+    expect(companyDecisionCursor(list("new", "a", "b"), reading)).toEqual({ id: "b", index: 2 });
+  });
+
+  it("moves to the one that took its place when it is answered", () => {
+    expect(companyDecisionCursor(list("a", "c"), { id: "b", index: 1 })).toEqual({
+      id: "c",
+      index: 1,
+    });
+  });
+
+  it("falls back to the last one, then to nothing", () => {
+    expect(companyDecisionCursor(list("a"), { id: "b", index: 1 })).toEqual({ id: "a", index: 0 });
+    expect(companyDecisionCursor([], { id: "a", index: 0 })).toEqual({ id: null, index: 0 });
+  });
+});
+
+describe("companyOptionSupport", () => {
+  const options = [
+    { id: "a", label: "A" },
+    { id: "b", label: "B" },
+  ];
+
+  it("counts each group apart, out of those in it", () => {
+    const support = companyOptionSupport(
+      {
+        options,
+        opinions: [
+          { thread: "x", optionId: "a", opinion: "o" },
+          { thread: "y", optionId: "a", opinion: "o" },
+          { thread: "z", optionId: "b", opinion: "o" },
+        ],
+        references: [{ name: "n", optionId: "b", how: "h" }],
+      },
+      "a",
+    );
+    expect(support).toEqual({ team: { on: 2, total: 3 }, others: { on: 0, total: 1 } });
+  });
+
+  it("tells no opinions apart from no support", () => {
+    expect(companyOptionSupport({ options }, "a").team).toEqual({ on: 0, total: 0 });
   });
 });
