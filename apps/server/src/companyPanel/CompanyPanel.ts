@@ -11,6 +11,7 @@ import {
   CompanyPanelError,
   CompanyPanelHealthFile,
   CompanyPanelTestsFile,
+  IsoDateTime,
   type CompanyPanelAnswer,
   type CompanyPanelDecision,
   type CompanyPanelSnapshot,
@@ -33,6 +34,19 @@ const ThreadsFile = Schema.Struct({
   ),
 });
 type ThreadsFile = typeof ThreadsFile.Type;
+
+/** The coordinator's hand-written line about each thread. Nothing here decides a tile's colour. */
+const ThreadNotesFile = Schema.Struct({
+  threads: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      phrase: Schema.optional(Schema.String),
+      detail: Schema.optional(Schema.String),
+      updatedAt: Schema.optional(IsoDateTime),
+      news: Schema.optional(Schema.Array(Schema.Struct({ at: IsoDateTime, text: Schema.String }))),
+    }),
+  ),
+});
 
 const ANSWERS_FILE = "respuestas.jsonl";
 const decodeAnswerLine = Schema.decodeUnknownEffect(
@@ -118,8 +132,12 @@ const UNAVAILABLE: CompanyPanelSnapshot = {
 export const readCompanyPanelSnapshot = (input: {
   readonly dir: string;
   readonly memberId: string | null;
-  /** What a thread is doing now; null when it cannot be read. */
-  readonly threadStatus: (threadId: string) => Effect.Effect<string | null>;
+  /** What a thread is doing now, from its own records; null when it cannot be read. */
+  readonly threadStatus: (threadId: string) => Effect.Effect<{
+    readonly status: string;
+    readonly lastActivityAt: string | null;
+    readonly backgroundCommands: number;
+  } | null>;
 }) =>
   Effect.gen(function* () {
     const path = yield* Path.Path;
@@ -131,9 +149,24 @@ export const readCompanyPanelSnapshot = (input: {
     const answeredIds = new Set(answered.map((answer) => answer.decisionId));
     const threadsFile = yield* readThreadsFile(input.dir);
     const threads: Array<CompanyPanelThreadActivity> = [];
+    const notes = yield* readJsonFile(ThreadNotesFile, file("hilos-estado.json")).pipe(
+      Effect.map(({ data }) => data.threads),
+      Effect.orElseSucceed(() => []),
+    );
     for (const thread of Object.values(threadsFile?.trabajo ?? {})) {
-      const status = yield* input.threadStatus(thread.threadId);
-      if (status !== null) threads.push({ name: thread.titulo, status });
+      const state = yield* input.threadStatus(thread.threadId);
+      if (state === null) continue;
+      const note = notes.find((candidate) => candidate.name === thread.titulo);
+      threads.push({
+        name: thread.titulo,
+        status: state.status,
+        backgroundCommands: state.backgroundCommands,
+        ...(state.lastActivityAt === null ? {} : { lastActivityAt: state.lastActivityAt }),
+        ...(note?.phrase === undefined ? {} : { phrase: note.phrase }),
+        ...(note?.detail === undefined ? {} : { detail: note.detail }),
+        ...(note?.updatedAt === undefined ? {} : { updatedAt: note.updatedAt }),
+        ...(note?.news === undefined ? {} : { news: note.news }),
+      });
     }
     return {
       available: true,

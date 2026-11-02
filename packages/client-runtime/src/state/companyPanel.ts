@@ -5,7 +5,10 @@ import {
   type CompanyPanelDecision,
   type CompanyPanelCostsFile,
   type CompanyPanelSnapshot,
+  type CompanyPanelTest,
+  type CompanyPanelTestResult,
   type CompanyPanelTestsFile,
+  type CompanyPanelThreadActivity,
 } from "@t3tools/contracts";
 
 import type { Atom } from "effect/reactivity";
@@ -330,4 +333,148 @@ export function companyDatabaseView(database: {
     percent: Math.min(ratio * 100, 100),
     tone: ratio <= 0.8 ? "good" : ratio <= 1 ? "warning" : "bad",
   };
+}
+
+// Fixed colours where the approved design needs more than the theme's tones.
+export const COMPANY_PANEL_COLORS = {
+  working: "#2f7fe0",
+  decision: "#8b5cf6",
+  idle: "#7b8088",
+  failed: "#e5484d",
+  parts: ["#346bf1", "#2dd4bf", "#fbbf24", "#c084fc", "#fb7185", "#a3e635"],
+} as const;
+
+const SILENT_AFTER_MS = 15 * 60_000;
+
+export type CompanyThreadTone = "working" | "decision" | "idle" | "failed";
+
+/**
+ * A thread's tile. Its colour only comes from what the server sees, never from the coordinator's
+ * note: blue needs a turn in progress that actually produced something lately, because a turn can
+ * say running with its process dead, and "finished" says nothing of commands left in the background.
+ */
+export function companyThreadTile(
+  thread: CompanyPanelThreadActivity,
+  input: { readonly nowMs: number; readonly decisionThreads: ReadonlySet<string> },
+): { readonly tone: CompanyThreadTone; readonly state: string } {
+  const view = companyThreadStatusView(thread.status);
+  if (view.tone === "bad") return { tone: "failed", state: view.label };
+  if (input.decisionThreads.has(thread.name)) {
+    return { tone: "decision", state: "Tiene una decisión" };
+  }
+  if (view.tone === "active") {
+    const last = thread.lastActivityAt ? Date.parse(thread.lastActivityAt) : Number.NaN;
+    const silentMs = input.nowMs - last;
+    if (Number.isFinite(silentMs) && silentMs <= SILENT_AFTER_MS) {
+      return { tone: "working", state: "Trabajando" };
+    }
+    return {
+      tone: "idle",
+      state: Number.isFinite(silentMs)
+        ? `Dice que trabaja; sin señal hace ${Math.round(silentMs / 60_000)} min`
+        : "Dice que trabaja; sin señal",
+    };
+  }
+  if ((thread.backgroundCommands ?? 0) > 0) {
+    return { tone: "idle", state: "Terminó su turno; comandos en segundo plano sin confirmar" };
+  }
+  return { tone: "idle", state: view.tone === "warning" ? view.label : "Parado" };
+}
+
+/** "hace 3 min", for data that is measured every few minutes rather than live. */
+export function companyPanelAgo(at: string, nowMs: number): string {
+  const minutes = Math.max(0, Math.round((nowMs - Date.parse(at)) / 60_000));
+  if (minutes < 60) return `hace ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `hace ${hours} h` : `hace ${Math.round(hours / 24)} días`;
+}
+
+const DATABASE_STALE_MS = 25 * 60_000;
+
+/** Whether a database measure is too old to read as the current state. */
+export const companyDatabaseIsStale = (checkedAt: string, nowMs: number) =>
+  nowMs - Date.parse(checkedAt) > DATABASE_STALE_MS;
+
+export type CompanyTestState = CompanyPanelTestResult | "untested";
+
+export interface CompanyTestRow {
+  readonly id: string;
+  readonly suite: string;
+  readonly message: string;
+  /** Its state in the current version; "untested" if it has not run in it. */
+  readonly state: CompanyTestState;
+  readonly why: string | null;
+  /** The newest run in another version, shown apart and never counted. */
+  readonly previous: { readonly version: string; readonly result: CompanyPanelTestResult } | null;
+  /** Every run, oldest first: the test's evolution across versions. */
+  readonly history: ReadonlyArray<CompanyPanelTestResult>;
+}
+
+export interface CompanyTestTally {
+  readonly passed: number;
+  readonly failed: number;
+  readonly warning: number;
+  /** Not run in this version, or run without a verdict. */
+  readonly untested: number;
+}
+
+const tallyOf = (rows: ReadonlyArray<CompanyTestRow>): CompanyTestTally => ({
+  passed: rows.filter((row) => row.state === "passed").length,
+  failed: rows.filter((row) => row.state === "failed").length,
+  warning: rows.filter((row) => row.state === "warning").length,
+  untested: rows.filter(
+    (row) => row.state === "untested" || row.state === "pending" || row.state === "skipped",
+  ).length,
+});
+
+const TEST_STATE_ORDER: ReadonlyArray<CompanyTestState> = [
+  "failed",
+  "warning",
+  "pending",
+  "untested",
+  "skipped",
+  "passed",
+];
+
+/**
+ * The tests against the current version only: a run from another version never counts. Null until
+ * the publisher gives both the version and the tests, since older data cannot be split by version.
+ */
+export function companyTestsByVersion(file: CompanyPanelTestsFile) {
+  const { currentVersion, tests } = file;
+  if (currentVersion === undefined || tests === undefined) return null;
+  const rows = tests.map((test: CompanyPanelTest): CompanyTestRow => {
+    const runs = [...test.runs].sort((left, right) => left.at.localeCompare(right.at));
+    const current = runs.filter((run) => run.version === currentVersion).at(-1);
+    const previous = runs.filter((run) => run.version !== currentVersion).at(-1);
+    return {
+      id: test.id,
+      suite: test.suite,
+      message: test.message,
+      state: current?.result ?? "untested",
+      why: current?.why ?? null,
+      previous: previous ? { version: previous.version, result: previous.result } : null,
+      history: runs.map((run) => run.result),
+    };
+  });
+  const suites = [...new Set(rows.map((row) => row.suite))].map((name) => ({
+    name,
+    tally: tallyOf(rows.filter((row) => row.suite === name)),
+  }));
+  return {
+    version: currentVersion,
+    tally: tallyOf(rows),
+    suites,
+    rows: [...rows].sort(
+      (left, right) => TEST_STATE_ORDER.indexOf(left.state) - TEST_STATE_ORDER.indexOf(right.state),
+    ),
+  };
+}
+
+/** The errors of the last 15 days, oldest first, and how many today. */
+export function companyErrorDays(
+  days: ReadonlyArray<{ readonly date: string; readonly count: number }>,
+) {
+  const recent = days.slice(-15);
+  return { days: recent, today: recent.at(-1)?.count ?? 0 };
 }

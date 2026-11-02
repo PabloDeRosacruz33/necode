@@ -3598,10 +3598,18 @@ const layerWsRpc = (
               dir: CompanyPanel.companyPanelDir({ env: process.env, home: NodeOS.homedir(), path }),
               memberId,
               threadStatus: (threadId) =>
-                threadManagement.getThreadShell(ThreadId.make(threadId)).pipe(
-                  Effect.map((shell) => shell?.status ?? null),
-                  Effect.orElseSucceed(() => null),
-                ),
+                Effect.gen(function* () {
+                  const id = ThreadId.make(threadId);
+                  const shell = yield* threadManagement.getThreadShell(id);
+                  if (!shell) return null;
+                  return {
+                    status: shell.status,
+                    lastActivityAt: yield* threadManagement.getThreadLastActivityAt(id),
+                    backgroundCommands: (shell.pendingBackgroundTasks ?? []).filter(
+                      (task) => task.kind === "command",
+                    ).length,
+                  };
+                }).pipe(Effect.orElseSucceed(() => null)),
             });
           }).pipe(Effect.provideContext(taskContext)),
         [WS_METHODS.companyPanelAnswer]: (input) =>

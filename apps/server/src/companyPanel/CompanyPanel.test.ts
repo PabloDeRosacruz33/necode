@@ -37,7 +37,16 @@ const snapshot = (dir: string, memberId: string | null = "member-roi") =>
   readCompanyPanelSnapshot({
     dir,
     memberId,
-    threadStatus: (threadId) => Effect.succeed(threadId === "thread-pe" ? "running" : null),
+    threadStatus: (threadId) =>
+      Effect.succeed(
+        threadId === "thread-pe"
+          ? {
+              status: "running",
+              lastActivityAt: "2026-11-02T10:00:00.000Z",
+              backgroundCommands: 1,
+            }
+          : null,
+      ),
   });
 
 describe("company panel", () => {
@@ -63,7 +72,35 @@ describe("company panel", () => {
         assert.equal(result.health.status, "missing");
         assert.equal(result.costs.status, "invalid");
         assert.equal(result.decisions.status, "ok");
-        assert.deepEqual(result.threads, [{ name: "Performance", status: "running" }]);
+        assert.deepEqual(result.threads, [
+          {
+            name: "Performance",
+            status: "running",
+            backgroundCommands: 1,
+            lastActivityAt: "2026-11-02T10:00:00.000Z",
+          },
+        ]);
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("adds the coordinator's note to a thread without touching its real status", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { dir, write } = yield* makePanel;
+        yield* write("hilos-estado.json", {
+          threads: [
+            {
+              name: "Performance",
+              phrase: "Escribe su informe",
+              updatedAt: "2026-11-02T09:00:00.000Z",
+            },
+          ],
+        });
+        const [thread] = (yield* snapshot(dir)).threads;
+        assert.equal(thread?.phrase, "Escribe su informe");
+        assert.equal(thread?.updatedAt, "2026-11-02T09:00:00.000Z");
+        assert.equal(thread?.status, "running");
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
   );

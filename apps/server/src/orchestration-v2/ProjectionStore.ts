@@ -426,6 +426,10 @@ export interface ProjectionStoreV2Shape {
     readonly autoResume: boolean;
     readonly snooze: boolean;
   }) => Effect.Effect<ReadonlyArray<ProjectionLimitRecoveryCandidate>, ProjectionStoreV2Error>;
+  /** When the thread last produced anything, read from its newest item. */
+  readonly getThreadLastActivityAt: (
+    threadId: ThreadId,
+  ) => Effect.Effect<string | null, ProjectionStoreV2Error>;
   /** Threads whose latest run failed on a usage limit that has not reset yet. */
   readonly getUsageLimitedRuns: (options: {
     readonly now: DateTime.Utc;
@@ -3658,6 +3662,19 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
     );
 
+    const getThreadLastActivityAt = Effect.fn("ProjectionStore.getThreadLastActivityAt")(
+      function* (threadId: ThreadId) {
+        const rows = yield* sql<{ readonly updated_at: string }>`
+          SELECT updated_at FROM orchestration_v2_projection_turn_items
+          WHERE thread_id = ${threadId}
+          ORDER BY ordinal DESC
+          LIMIT 1
+        `;
+        return rows[0]?.updated_at ?? null;
+      },
+      Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+    );
+
     const getUsageLimitedRuns = Effect.fn("ProjectionStore.getUsageLimitedRuns")(
       function* (options: Parameters<ProjectionStoreV2Shape["getUsageLimitedRuns"]>[0]) {
         const rows = yield* sql<{
@@ -6188,6 +6205,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getPlan,
       getProviderControlContext,
       getLimitRecoveryCandidates,
+      getThreadLastActivityAt,
       getUsageLimitedRuns,
       getRecoveryThreadIds,
       getUnreadableThreadIds,
@@ -6397,6 +6415,13 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
               })
               .toSorted((left, right) => left.id.localeCompare(right.id)),
           ),
+        ),
+      getThreadLastActivityAt: (threadId) =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) => {
+            const updatedAt = state.projections.get(threadId)?.turnItems.at(-1)?.updatedAt;
+            return updatedAt === undefined ? null : DateTime.formatIso(updatedAt);
+          }),
         ),
       getUsageLimitedRuns: (options) =>
         Ref.get(replayState).pipe(

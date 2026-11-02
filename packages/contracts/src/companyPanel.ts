@@ -21,6 +21,8 @@ export const CompanyPanelDecision = Schema.Struct({
   title: TrimmedNonEmptyString,
   summary: Schema.String,
   createdAt: IsoDateTime,
+  /** The thread this decision is for; its tile shows it has one. */
+  thread: Schema.optional(TrimmedNonEmptyString),
   /** The kind of decision shown on the card, such as "Producto" or "Técnica". */
   area: Schema.optional(Schema.String),
   /** What "No lo entiendo" unfolds: the plain explanation and an everyday example. */
@@ -81,6 +83,10 @@ export const CompanyPanelCostsFile = Schema.Struct({
       baseVolume: Schema.Number,
     }),
   ),
+  /** What moved the cost per person, in plain words. */
+  drops: Schema.optional(
+    Schema.Array(Schema.Struct({ amount: Schema.Number, reason: Schema.String })),
+  ),
   /** What was really spent per day. Context only: it is not the cost per person. */
   spendLast30Days: Schema.optional(
     Schema.Array(Schema.Struct({ date: TrimmedNonEmptyString, amount: Schema.Number })),
@@ -94,7 +100,14 @@ export type CompanyPanelCostsFile = typeof CompanyPanelCostsFile.Type;
 export const CompanyPanelSystemStatus = Schema.Literals(["ok", "warning", "down"]);
 export type CompanyPanelSystemStatus = typeof CompanyPanelSystemStatus.Type;
 
+export const CompanyPanelLogTone = Schema.Literals(["good", "warning", "bad", "neutral"]);
+export type CompanyPanelLogTone = typeof CompanyPanelLogTone.Type;
+
 export const CompanyPanelHealthFile = Schema.Struct({
+  /** The thin system strip: what works, in plain words. */
+  strip: Schema.optional(
+    Schema.Array(Schema.Struct({ status: CompanyPanelSystemStatus, text: Schema.String })),
+  ),
   versions: Schema.Array(
     Schema.Struct({
       environment: TrimmedNonEmptyString,
@@ -122,16 +135,60 @@ export const CompanyPanelHealthFile = Schema.Struct({
   database: Schema.optional(
     Schema.Struct({
       readGbPerDay: Schema.Number,
-      /** What it reads with nobody using it, and the level to stay under: they give the scale. */
+      /** What it reads with nobody using it, and our own warning level: they give the scale. */
       restGbPerDay: Schema.optional(Schema.Number),
       targetGbPerDay: Schema.optional(Schema.Number),
+      /** When this was measured; it is measured every few minutes, not live. */
+      checkedAt: Schema.optional(IsoDateTime),
+      status: Schema.optional(CompanyPanelSystemStatus),
+      callsPerMinute: Schema.optional(Schema.Number),
+      readGbToday: Schema.optional(Schema.Number),
+      readGbYesterday: Schema.optional(Schema.Number),
+      connectionsUsed: Schema.optional(Schema.Number),
+      connectionsLimit: Schema.optional(Schema.Number),
+      /** Calls per minute, one value per hour from midnight. */
+      today: Schema.optional(Schema.Array(Schema.Number)),
+      yesterday: Schema.optional(Schema.Array(Schema.Number)),
+      log: Schema.optional(
+        Schema.Array(
+          Schema.Struct({ at: IsoDateTime, tone: CompanyPanelLogTone, text: Schema.String }),
+        ),
+      ),
       detail: Schema.optional(Schema.String),
     }),
   ),
 });
 export type CompanyPanelHealthFile = typeof CompanyPanelHealthFile.Type;
 
+export const CompanyPanelTestResult = Schema.Literals([
+  "passed",
+  "failed",
+  "warning",
+  "pending",
+  "skipped",
+]);
+export type CompanyPanelTestResult = typeof CompanyPanelTestResult.Type;
+
+export const CompanyPanelTest = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  suite: TrimmedNonEmptyString,
+  message: Schema.String,
+  /** Every time it ran. Empty means it has to be tested and never was. */
+  runs: Schema.Array(
+    Schema.Struct({
+      version: TrimmedNonEmptyString,
+      at: IsoDateTime,
+      result: CompanyPanelTestResult,
+      why: Schema.optional(Schema.String),
+    }),
+  ),
+});
+export type CompanyPanelTest = typeof CompanyPanelTest.Type;
+
 export const CompanyPanelTestsFile = Schema.Struct({
+  /** The version results count against: the Cloud's, in the same format as a run's version. */
+  currentVersion: Schema.optional(TrimmedNonEmptyString),
+  tests: Schema.optional(Schema.Array(CompanyPanelTest)),
   label: TrimmedNonEmptyString,
   passed: Schema.Number,
   failed: Schema.Number,
@@ -172,6 +229,14 @@ export type CompanyPanelAnsweredDecision = typeof CompanyPanelAnsweredDecision.T
 export const CompanyPanelThreadActivity = Schema.Struct({
   name: TrimmedNonEmptyString,
   status: TrimmedNonEmptyString,
+  /** The last thing the thread actually did; what tells working from merely saying so. */
+  lastActivityAt: Schema.optional(IsoDateTime),
+  backgroundCommands: Schema.optional(Schema.Number),
+  /** Written by hand by the coordinator, so they carry their time and may be old. */
+  phrase: Schema.optional(Schema.String),
+  detail: Schema.optional(Schema.String),
+  updatedAt: Schema.optional(IsoDateTime),
+  news: Schema.optional(Schema.Array(Schema.Struct({ at: IsoDateTime, text: Schema.String }))),
 });
 export type CompanyPanelThreadActivity = typeof CompanyPanelThreadActivity.Type;
 

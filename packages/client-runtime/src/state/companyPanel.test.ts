@@ -1,6 +1,9 @@
 import { describe, expect, it } from "@effect/vitest";
 
 import {
+  companyDatabaseIsStale,
+  companyTestsByVersion,
+  companyThreadTile,
   companyCacheView,
   companyDatabaseView,
   companyPanelJobKind,
@@ -224,5 +227,103 @@ describe("plain views", () => {
     expect(companyDatabaseView({ readGbPerDay: 455 })).toBeNull();
     expect(companyDatabaseView({ readGbPerDay: 50, targetGbPerDay: 100 })?.tone).toBe("good");
     expect(companyDatabaseView({ readGbPerDay: 150, targetGbPerDay: 100 })?.tone).toBe("bad");
+  });
+});
+
+describe("companyThreadTile", () => {
+  const nowMs = Date.parse("2026-11-02T20:00:00.000Z");
+  const tile = (thread: object, decisionThreads: ReadonlyArray<string> = []) =>
+    companyThreadTile(
+      { name: "AutoBug", status: "idle", ...thread },
+      { nowMs, decisionThreads: new Set(decisionThreads) },
+    );
+
+  it("only calls a thread working if it did something lately", () => {
+    expect(tile({ status: "running", lastActivityAt: "2026-11-02T19:55:00.000Z" }).tone).toBe(
+      "working",
+    );
+    const silent = tile({ status: "running", lastActivityAt: "2026-11-02T19:30:00.000Z" });
+    expect(silent.tone).toBe("idle");
+    expect(silent.state).toBe("Dice que trabaja; sin señal hace 30 min");
+    expect(tile({ status: "running" }).tone).toBe("idle");
+  });
+
+  it("does not take a finished turn with background commands as work", () => {
+    const tileView = tile({ status: "completed", backgroundCommands: 2 });
+    expect(tileView.tone).toBe("idle");
+    expect(tileView.state).toContain("sin confirmar");
+  });
+
+  it("shows a failure first, then a decision", () => {
+    expect(tile({ status: "failed" }, ["AutoBug"]).tone).toBe("failed");
+    expect(tile({ status: "completed" }, ["AutoBug"]).tone).toBe("decision");
+  });
+
+  it("ignores the coordinator's note for the colour", () => {
+    expect(tile({ status: "completed", phrase: "Trabajando sin parar" }).tone).toBe("idle");
+  });
+});
+
+describe("companyTestsByVersion", () => {
+  const run = (version: string, result: "passed" | "failed", at = "2026-11-01T10:00:00.000Z") => ({
+    version,
+    result,
+    at,
+  });
+  const test = (id: string, runs: ReadonlyArray<ReturnType<typeof run>>) => ({
+    id,
+    suite: "Microsoft",
+    message: id,
+    runs,
+  });
+  const file = (tests: ReadonlyArray<ReturnType<typeof test>>) => ({
+    label: "x",
+    passed: 0,
+    failed: 0,
+    skipped: 0,
+    currentVersion: "2.0.22",
+    tests,
+  });
+
+  it("has nothing to say until the data can be split by version", () => {
+    expect(companyTestsByVersion({ label: "x", passed: 41, failed: 1, skipped: 7 })).toBeNull();
+  });
+
+  it("never counts a run from another version", () => {
+    const view = companyTestsByVersion(
+      file([
+        test("hoy", [run("2.0.22", "passed")]),
+        test("antigua", [run("2.0.12", "passed")]),
+        test("nunca", []),
+      ]),
+    );
+    expect(view?.tally).toEqual({ passed: 1, failed: 0, warning: 0, untested: 2 });
+    const old = view?.rows.find((row) => row.id === "antigua");
+    expect(old?.state).toBe("untested");
+    expect(old?.previous).toEqual({ version: "2.0.12", result: "passed" });
+  });
+
+  it("takes the latest run of the version, and puts what is not done first", () => {
+    const view = companyTestsByVersion(
+      file([
+        test("ok", [run("2.0.22", "passed")]),
+        test("arreglada", [
+          run("2.0.22", "failed", "2026-11-01T10:00:00.000Z"),
+          run("2.0.22", "passed", "2026-11-02T10:00:00.000Z"),
+        ]),
+        test("mal", [run("2.0.22", "failed")]),
+      ]),
+    );
+    expect(view?.rows[0]?.id).toBe("mal");
+    expect(view?.rows.find((row) => row.id === "arreglada")?.state).toBe("passed");
+    expect(view?.rows.find((row) => row.id === "arreglada")?.history).toEqual(["failed", "passed"]);
+  });
+});
+
+describe("companyDatabaseIsStale", () => {
+  it("allows for measures taken every few minutes", () => {
+    const now = Date.parse("2026-11-02T20:30:00.000Z");
+    expect(companyDatabaseIsStale("2026-11-02T20:10:00.000Z", now)).toBe(false);
+    expect(companyDatabaseIsStale("2026-11-02T20:00:00.000Z", now)).toBe(true);
   });
 });

@@ -211,6 +211,7 @@ it.effect(
           apply: () => Effect.void,
           getLimitRecoveryCandidates: () => Effect.die("unused getLimitRecoveryCandidates"),
           getUsageLimitedRuns: () => Effect.die("unused getUsageLimitedRuns"),
+          getThreadLastActivityAt: () => Effect.die("unused getThreadLastActivityAt"),
           getShellSnapshot: () => Effect.die("unused getShellSnapshot"),
           readShellSnapshot: () => Effect.die("unused readShellSnapshot"),
           getThreadShell: () => Effect.die("unused getThreadShell"),
