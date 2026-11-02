@@ -4,14 +4,35 @@
  * has no data says so ("Sin dato"), never a zero.
  */
 import {
+  COMPANY_DATABASE_SENTENCE,
+  COMPANY_PANEL_JOB_KINDS,
   COMPANY_PANEL_REFRESH_MS,
+  companyCacheView,
+  companyDatabaseView,
+  companyPanelJobKind,
+  companyPanelJobsByUrgency,
+  companyPanelJobTally,
+  companyPanelShortDate,
+  companyPanelShortLabel,
+  companyPanelSuites,
+  companyThreadStatusView,
+  companyDecisionConsensus,
+  companyDecisionOptionIndex,
+  companyDecisionOptionLetter,
+  companyDecisionSwipeAction,
+  companyDecisionTime,
   companyPanelJobState,
   companyPanelStaleLabel,
   costTrend,
   pendingCompanyDecisions,
   simulateMonthlyCost,
 } from "@t3tools/client-runtime/state/company-panel";
-import type { CompanyPanelDataKind } from "@t3tools/client-runtime/state/company-panel";
+import type {
+  CompanyPanelDataKind,
+  CompanyPanelJobKind,
+  CompanyPanelJobTally,
+  CompanyPanelTone,
+} from "@t3tools/client-runtime/state/company-panel";
 import type {
   CompanyPanelAnswer,
   CompanyPanelCostsFile,
@@ -128,20 +149,83 @@ function Tile(props: {
   );
 }
 
+const TONE_BG: Record<CompanyPanelTone, string> = {
+  good: "bg-success",
+  warning: "bg-warning",
+  bad: "bg-destructive",
+  active: "bg-primary",
+  neutral: "bg-muted-foreground/40",
+};
+const PART_COLORS = ["bg-primary", "bg-warning", "bg-success", "bg-info", "bg-destructive"];
+
+/** A horizontal bar made of coloured slices; hovering a slice says what it is. */
+function SliceBar(props: {
+  readonly slices: ReadonlyArray<{
+    readonly key: string;
+    readonly value: number;
+    readonly className: string;
+    readonly hint: string;
+  }>;
+}) {
+  const total = props.slices.reduce((sum, slice) => sum + slice.value, 0);
+  if (total <= 0) return null;
+  return (
+    <div className="flex h-3 w-full gap-0.5 overflow-hidden rounded-full">
+      {props.slices
+        .filter((slice) => slice.value > 0)
+        .map((slice) => (
+          <Hint key={slice.key} text={slice.hint}>
+            <div
+              className={`h-full ${slice.className} hover:opacity-80`}
+              style={{ width: `${(slice.value / total) * 100}%` }}
+            />
+          </Hint>
+        ))}
+    </div>
+  );
+}
+
 function CostBars({ costs }: { costs: CompanyPanelCostsFile }) {
   const max = Math.max(...costs.perPerson.map((point) => point.total), 1);
+  const names = [
+    ...new Set(costs.perPerson.flatMap((point) => point.parts.map((part) => part.name))),
+  ];
+  const color = (name: string) => PART_COLORS[names.indexOf(name) % PART_COLORS.length] ?? "";
   return (
-    <div className="mt-2 flex h-14 items-end gap-1.5">
-      {costs.perPerson.map((point, index) => (
-        <Hint key={point.date} text={`${point.date}: ${money(point.total, costs.currency)}`}>
-          <div
-            style={{ height: `${Math.max((point.total / max) * 100, 4)}%` }}
-            className={`flex-1 rounded-t-sm hover:opacity-100 hover:outline hover:outline-foreground ${
-              index === costs.perPerson.length - 1 ? "bg-success" : "bg-primary opacity-55"
-            }`}
-          />
-        </Hint>
-      ))}
+    <div className="mt-2">
+      <div className="flex h-28 items-end gap-2">
+        {costs.perPerson.map((point) => (
+          <div key={point.date} className="flex h-full min-w-0 flex-1 flex-col justify-end">
+            <div className="mb-0.5 text-center font-mono text-xs">
+              {money(point.total, costs.currency)}
+            </div>
+            <div
+              className="flex flex-col-reverse gap-px overflow-hidden rounded-t-sm"
+              style={{ height: `${Math.max((point.total / max) * 75, 4)}%` }}
+            >
+              {point.parts.map((part) => (
+                <Hint key={part.name} text={`${part.name}: ${money(part.amount, costs.currency)}`}>
+                  <div
+                    className={`${color(part.name)} hover:opacity-80`}
+                    style={{ flexGrow: part.amount, flexBasis: 0 }}
+                  />
+                </Hint>
+              ))}
+            </div>
+            <div className="mt-1 truncate text-center text-2xs text-muted-foreground">
+              {companyPanelShortDate(point.date)}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-2xs text-muted-foreground">
+        {names.map((name) => (
+          <span key={name} className="flex items-center gap-1">
+            <span className={`size-2 rounded-xs ${color(name)}`} />
+            {name}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -160,7 +244,10 @@ function CostSummary({ costs }: { costs: CompanyPanelCostsFile }) {
             {Math.abs(Math.round(percent))} %
           </span>
         )}{" "}
-        {percent === null ? "" : `desde el ${costs.perPerson[0]?.date} · `}se recalcula solo
+        {percent === null
+          ? ""
+          : `desde el ${companyPanelShortDate(costs.perPerson[0]?.date ?? "")} · `}
+        se recalcula solo
       </Sub>
     </>
   );
@@ -277,7 +364,6 @@ function VersionsAndHealth({ health }: { health: CompanyPanelHealthFile }) {
               <b>{version.environment}</b>
               <span className="font-mono text-base">{version.version}</span>
             </div>
-            {version.detail ? <Sub>{version.detail}</Sub> : null}
           </div>
         ))}
       </div>
@@ -286,21 +372,142 @@ function VersionsAndHealth({ health }: { health: CompanyPanelHealthFile }) {
   );
 }
 
-const TestsLine = ({ tests }: { tests: CompanyPanelTestsFile }) => (
-  <>
-    <div className="mt-1.5 font-mono text-2xl leading-tight">
-      ✅ {tests.passed} · ❌ {tests.failed} · ⚪ {tests.skipped}
-    </div>
-    <Sub>{tests.label}</Sub>
-  </>
-);
+const KIND_TONE = Object.fromEntries(
+  COMPANY_PANEL_JOB_KINDS.map((entry) => [entry.kind, entry.tone]),
+) as Record<CompanyPanelJobKind, CompanyPanelTone>;
+
+function TallyBar({ tally }: { tally: CompanyPanelJobTally }) {
+  return (
+    <SliceBar
+      slices={COMPANY_PANEL_JOB_KINDS.toReversed().map((entry) => ({
+        key: entry.kind,
+        value: tally[entry.kind],
+        className: TONE_BG[entry.tone],
+        hint: `${entry.label}: ${tally[entry.kind]}`,
+      }))}
+    />
+  );
+}
+
+/** The battery at a glance: how much of it is done, as a bar. */
+const TestsLine = ({ tests }: { tests: CompanyPanelTestsFile }) => {
+  const total = tests.passed + tests.failed + tests.skipped;
+  return (
+    <>
+      <div className="mt-1.5 font-mono text-2xl leading-tight">
+        {tests.passed} <span className="text-base text-muted-foreground">de {total} bien</span>
+      </div>
+      <div className="my-1.5">
+        <SliceBar
+          slices={[
+            {
+              key: "ok",
+              value: tests.passed,
+              className: "bg-success",
+              hint: `Bien: ${tests.passed}`,
+            },
+            {
+              key: "ko",
+              value: tests.failed,
+              className: "bg-destructive",
+              hint: `Falla: ${tests.failed}`,
+            },
+            {
+              key: "no",
+              value: tests.skipped,
+              className: "bg-muted-foreground/40",
+              hint: `Sin resultado: ${tests.skipped}`,
+            },
+          ]}
+        />
+      </div>
+      <Sub>{companyPanelShortLabel(tests.label)}</Sub>
+    </>
+  );
+};
 
 type AnswerFn = (decisionId: string, answer: CompanyPanelAnswer) => void;
 
-/** One decision: right is yes, left is no, up is "something else". Buttons do the same. */
+const OPTION_LETTER_STYLE = [
+  "bg-primary text-primary-foreground",
+  "bg-warning text-warning-foreground",
+  "bg-info text-info-foreground",
+  "bg-destructive text-destructive-foreground",
+];
+
+function OptionLetter({ index }: { index: number | null }) {
+  if (index === null) return <span className="size-5 flex-none text-center">—</span>;
+  return (
+    <span
+      className={`flex size-5 flex-none items-center justify-center rounded-full text-xs font-semibold ${OPTION_LETTER_STYLE[index % OPTION_LETTER_STYLE.length]}`}
+    >
+      {companyDecisionOptionLetter(index)}
+    </span>
+  );
+}
+
+const Missing = ({ children }: { children: ReactNode }) => (
+  <div className="mt-1 text-xs text-warning italic">{children}</div>
+);
+
+function ConsensusSeal({ decision }: { decision: CompanyPanelDecision }) {
+  const consensus = companyDecisionConsensus(decision);
+  if (consensus === null) return <Missing>Faltan las opiniones de los hilos.</Missing>;
+  return (
+    <div className="mt-2 flex items-center gap-2 rounded-lg bg-success/15 px-2.5 py-1.5 text-xs">
+      <span className="flex flex-none gap-1">
+        {Array.from({ length: consensus.total }, (_, index) => (
+          <span
+            key={index}
+            className={`size-2 rounded-full ${index < consensus.count ? "bg-success" : "bg-muted-foreground/40"}`}
+          />
+        ))}
+      </span>
+      {consensus.optionIndex === null
+        ? `Los hilos no se ponen de acuerdo (${consensus.total})`
+        : `${consensus.count} de ${consensus.total} hilos recomiendan la opción ${companyDecisionOptionLetter(consensus.optionIndex)}`}
+    </div>
+  );
+}
+
+function DecisionRow(props: {
+  readonly name: string;
+  readonly letter: number | null;
+  readonly reason: string;
+  readonly source?: string | undefined;
+  /** Threads speak for themselves; only what others do needs a source. */
+  readonly needsSource?: boolean;
+}) {
+  const link = props.source !== undefined && /^https?:\/\//.test(props.source);
+  return (
+    <div className="flex gap-2 py-1 text-xs">
+      <OptionLetter index={props.letter} />
+      <div className="min-w-0">
+        <b>{props.name}</b> · {props.reason}
+        {props.source === undefined ? (
+          props.needsSource === false ? null : (
+            <span className="text-warning italic"> · sin fuente</span>
+          )
+        ) : link ? (
+          <>
+            {" · "}
+            <a href={props.source} target="_blank" rel="noreferrer" className="underline">
+              Fuente
+            </a>
+          </>
+        ) : (
+          ` · ${props.source}`
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** One decision, in the order Roi approved. Drag right, left or up does what the swipe says. */
 function DecisionCard(props: {
   readonly decision: CompanyPanelDecision;
-  readonly large?: boolean;
+  readonly position: number;
+  readonly total: number;
   readonly busy: boolean;
   readonly onAnswer: AnswerFn;
 }) {
@@ -310,11 +517,11 @@ function DecisionCard(props: {
   const [text, setText] = useState("");
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const start = useRef<{ x: number; y: number } | null>(null);
+  const fetchedAt = use(FetchedAtContext);
   const options = decision.options ?? [];
-  const canSwipe = options.length === 0;
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (!canSwipe || writing || (event.target as HTMLElement).closest("button,textarea,a")) return;
+    if (writing || (event.target as HTMLElement).closest("button,textarea,a")) return;
     start.current = { x: event.clientX, y: event.clientY };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
@@ -328,16 +535,12 @@ function DecisionCard(props: {
     start.current = null;
     setDrag(null);
     if (!moved) return;
-    if (moved.x > 90) props.onAnswer(decision.id, { type: "yes" });
-    else if (moved.x < -90) props.onAnswer(decision.id, { type: "no" });
-    else if (moved.y < -70) setWriting(true);
+    const swipe = moved.x > 90 ? "right" : moved.x < -90 ? "left" : moved.y < -70 ? "up" : null;
+    if (swipe === null) return;
+    const action = companyDecisionSwipeAction(decision, swipe);
+    if (action === "write") setWriting(true);
+    else if (action !== null) props.onAnswer(decision.id, action);
   };
-
-  const hasExplanation =
-    decision.problem ||
-    decision.example ||
-    decision.opinions?.length ||
-    decision.references?.length;
 
   return (
     <div
@@ -353,41 +556,97 @@ function DecisionCard(props: {
             }
           : undefined
       }
-      className={`flex flex-col rounded-xl border border-border bg-background p-2.5 ${canSwipe ? "touch-pan-y" : ""} ${props.large ? "p-4 text-sm" : "text-xs"}`}
+      className="flex touch-pan-y flex-col rounded-xl border border-border bg-background p-3 text-sm"
     >
-      <b className={props.large ? "mb-1 text-base" : "mb-1 text-sm"}>{decision.title}</b>
-      <div>{decision.summary}</div>
+      <Sub>
+        Decisión {props.position} de {props.total}
+        {decision.area ? ` · ${decision.area}` : ""} ·{" "}
+        {companyDecisionTime(decision.createdAt, fetchedAt)}
+      </Sub>
+      <div className="mt-1 text-lg leading-snug font-semibold">{decision.title}</div>
+      <p className="mt-1.5">{decision.summary}</p>
+      <ConsensusSeal decision={decision} />
+
+      <div className="mt-3">
+        <Label>Elige</Label>
+      </div>
+      <div className="mt-1.5 space-y-1.5">
+        {options.length > 0 ? (
+          options.map((option, index) => (
+            <button
+              type="button"
+              key={option.id}
+              disabled={props.busy}
+              className={`flex w-full gap-2 rounded-lg border p-2.5 text-left transition-colors hover:bg-accent disabled:opacity-50 ${option.recommended ? "border-success" : "border-border"}`}
+              onClick={() => props.onAnswer(decision.id, { type: "option", optionId: option.id })}
+            >
+              <OptionLetter index={index} />
+              <span className="min-w-0">
+                <span className="font-medium">{option.label}</span>
+                {option.recommended ? (
+                  <span className="ml-1.5 text-xs text-success">Recomendada</span>
+                ) : null}
+                {option.effect ? (
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    {option.effect}
+                  </span>
+                ) : null}
+              </span>
+            </button>
+          ))
+        ) : (
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              type="button"
+              disabled={props.busy}
+              className="rounded-lg border border-destructive bg-destructive/15 p-2.5 disabled:opacity-50"
+              onClick={() => props.onAnswer(decision.id, { type: "no" })}
+            >
+              ← No
+            </button>
+            <button
+              type="button"
+              disabled={props.busy}
+              className="rounded-lg border border-success bg-success/15 p-2.5 disabled:opacity-50"
+              onClick={() => props.onAnswer(decision.id, { type: "yes" })}
+            >
+              Sí →
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+        <button
+          type="button"
+          className="rounded-lg border border-border bg-card p-2 text-xs hover:bg-accent"
+          onClick={() => setExplained((current) => !current)}
+        >
+          {explained ? "Ocultar" : "No lo entiendo"}
+        </button>
+        <button
+          type="button"
+          className="rounded-lg border border-border bg-card p-2 text-xs hover:bg-accent"
+          onClick={() => setWriting((current) => !current)}
+        >
+          Quiero otra cosa
+        </button>
+      </div>
 
       {explained ? (
-        <div className="mt-2 space-y-2 border-t border-border pt-2">
-          {decision.problem ? <p>{decision.problem}</p> : null}
+        <div className="mt-2 space-y-1.5 rounded-lg bg-card p-2.5">
+          {decision.problem ? (
+            <p>{decision.problem}</p>
+          ) : (
+            <Missing>Falta la explicación fácil.</Missing>
+          )}
           {decision.example ? (
             <p>
               <b>Ejemplo:</b> {decision.example}
             </p>
-          ) : null}
-          {decision.opinions?.length ? (
-            <div>
-              <b>Qué opina cada hilo</b>
-              {decision.opinions.map((opinion) => (
-                <div key={opinion.thread}>
-                  {opinion.thread}: {opinion.opinion}
-                </div>
-              ))}
-            </div>
-          ) : null}
-          {decision.references?.length ? (
-            <div>
-              <b>Cómo lo hacen otros</b>
-              {decision.references.map((reference) => (
-                <div key={reference.name}>
-                  {reference.name}: {reference.how}
-                  {reference.source ? ` (${reference.source})` : ""}
-                </div>
-              ))}
-            </div>
-          ) : null}
-          {hasExplanation ? null : <NoData what="explicación" />}
+          ) : (
+            <Missing>Falta el ejemplo.</Missing>
+          )}
         </div>
       ) : null}
 
@@ -397,77 +656,52 @@ function DecisionCard(props: {
             autoFocus
             value={text}
             onChange={(event) => setText(event.target.value)}
-            placeholder="Escribe lo que quieras decidir…"
+            placeholder="Escribe lo que quieres…"
             className="min-h-16 w-full rounded-lg border border-border bg-card p-2 text-xs text-foreground outline-none focus:border-ring"
           />
-          <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-            <button
-              type="button"
-              className="rounded-lg border border-border bg-card p-1.5"
-              onClick={() => setWriting(false)}
-            >
-              Volver
-            </button>
-            <button
-              type="button"
-              disabled={props.busy || text.trim() === ""}
-              className="rounded-lg border border-success bg-success/15 p-1.5 disabled:opacity-50"
-              onClick={() => props.onAnswer(decision.id, { type: "other", text: text.trim() })}
-            >
-              Enviar
-            </button>
-          </div>
+          <button
+            type="button"
+            disabled={props.busy || text.trim() === ""}
+            className="mt-1.5 w-full rounded-lg border border-success bg-success/15 p-1.5 text-xs disabled:opacity-50"
+            onClick={() => props.onAnswer(decision.id, { type: "other", text: text.trim() })}
+          >
+            Enviar
+          </button>
         </div>
+      ) : null}
+
+      <div className="mt-3">
+        <Label>Qué opinan los hilos</Label>
+      </div>
+      {decision.opinions?.length ? (
+        decision.opinions.map((opinion) => (
+          <DecisionRow
+            key={opinion.thread}
+            name={opinion.thread}
+            letter={companyDecisionOptionIndex(decision, opinion.optionId)}
+            reason={opinion.opinion}
+            needsSource={false}
+          />
+        ))
       ) : (
-        <div className="mt-2 grid grid-cols-2 gap-1.5">
-          {options.length > 0 ? (
-            options.map((option) => (
-              <button
-                type="button"
-                key={option.id}
-                disabled={props.busy}
-                className={`col-span-2 rounded-lg border p-1.5 disabled:opacity-50 ${option.recommended ? "border-success bg-success/15" : "border-border bg-card"}`}
-                onClick={() => props.onAnswer(decision.id, { type: "option", optionId: option.id })}
-              >
-                {option.label}
-                {option.recommended ? " · recomendada" : ""}
-              </button>
-            ))
-          ) : (
-            <>
-              <button
-                type="button"
-                disabled={props.busy}
-                className="rounded-lg border border-destructive bg-destructive/15 p-1.5 disabled:opacity-50"
-                onClick={() => props.onAnswer(decision.id, { type: "no" })}
-              >
-                ← No
-              </button>
-              <button
-                type="button"
-                disabled={props.busy}
-                className="rounded-lg border border-success bg-success/15 p-1.5 disabled:opacity-50"
-                onClick={() => props.onAnswer(decision.id, { type: "yes" })}
-              >
-                Sí →
-              </button>
-            </>
-          )}
-          <button
-            type="button"
-            className="col-span-2 rounded-lg border border-border bg-card p-1.5"
-            onClick={() => setWriting(true)}
-          >
-            ↑ Otra cosa
-          </button>
-          <button
-            type="button"
-            className="col-span-2 rounded-lg border border-border bg-card p-1.5"
-            onClick={() => setExplained((current) => !current)}
-          >
-            {explained ? "Ocultar" : "No lo entiendo"}
-          </button>
-        </div>
+        <Missing>Falta: ningún hilo ha dado su opinión.</Missing>
+      )}
+
+      <div className="mt-3">
+        <Label>Cómo lo hacen otros</Label>
+      </div>
+      {decision.references?.length ? (
+        decision.references.map((reference) => (
+          <DecisionRow
+            key={reference.name}
+            name={reference.name}
+            letter={companyDecisionOptionIndex(decision, reference.optionId)}
+            reason={reference.how}
+            source={reference.source}
+          />
+        ))
+      ) : (
+        <Missing>Falta: nadie ha mirado cómo lo hacen otros.</Missing>
       )}
     </div>
   );
@@ -475,7 +709,6 @@ function DecisionCard(props: {
 
 function PendingDecision(props: {
   readonly snapshot: CompanyPanelSnapshot;
-  readonly large?: boolean;
   readonly busy: boolean;
   readonly onAnswer: AnswerFn;
 }) {
@@ -484,16 +717,22 @@ function PendingDecision(props: {
     return <NoData broken={section.status === "invalid"} what="decisiones" />;
   const decision = section.data.decisions[0];
   if (decision === undefined) {
-    return <div className="mt-2 text-xs text-muted-foreground">Sin decisiones pendientes.</div>;
+    return (
+      <div className="mt-2 rounded-xl border border-border bg-background p-3 text-sm">
+        <span className="text-success">✓</span> Nada que decidir ahora.
+        <Sub>Las nuevas aparecen aquí solas.</Sub>
+      </div>
+    );
   }
   return (
     <div className="mt-2">
       <DecisionCard
         key={decision.id}
         decision={decision}
+        position={1}
+        total={section.data.decisions.length}
         busy={props.busy}
         onAnswer={props.onAnswer}
-        {...(props.large ? { large: true } : {})}
       />
     </div>
   );
@@ -512,13 +751,50 @@ function ThreadsList({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
   if (snapshot.threads.length === 0) return <NoData what="hilos" />;
   return (
     <div className="mt-1.5 space-y-1 text-xs">
-      {snapshot.threads.map((thread) => (
-        <div key={thread.name} className="flex items-center justify-between gap-2">
-          <span className="truncate">{thread.name}</span>
-          <span className="text-muted-foreground">{thread.status}</span>
-        </div>
-      ))}
+      {snapshot.threads.map((thread) => {
+        const view = companyThreadStatusView(thread.status);
+        return (
+          <Hint key={thread.name} text={`${thread.name}: ${view.label}`}>
+            <div className="flex items-center gap-1.5">
+              <span className={`size-2 flex-none rounded-full ${TONE_BG[view.tone]}`} />
+              <span className="min-w-0 flex-1 truncate">{thread.name}</span>
+              <span className="flex-none text-muted-foreground">{view.label}</span>
+            </div>
+          </Hint>
+        );
+      })}
     </div>
+  );
+}
+
+function CacheView({ percent }: { percent: number }) {
+  const view = companyCacheView(percent);
+  return (
+    <>
+      <Big>{Math.round(percent)} %</Big>
+      <div className="my-1.5 h-2 overflow-hidden rounded-full bg-muted">
+        <div className={`h-full ${TONE_BG[view.tone]}`} style={{ width: `${percent}%` }} />
+      </div>
+      <Sub>{view.sentence}</Sub>
+    </>
+  );
+}
+
+function DatabaseView({ health }: { health: CompanyPanelHealthFile }) {
+  const { database } = health;
+  if (!database) return <NoData />;
+  const view = companyDatabaseView(database);
+  return (
+    <>
+      <Big>{Math.round(database.readGbPerDay)} GB</Big>
+      {view ? (
+        <div className="my-1.5 h-2 overflow-hidden rounded-full bg-muted">
+          <div className={`h-full ${TONE_BG[view.tone]}`} style={{ width: `${view.percent}%` }} />
+        </div>
+      ) : null}
+      <Sub>{COMPANY_DATABASE_SENTENCE}</Sub>
+      {view ? null : <NoData what="falta un límite para saber si es mucho" />}
+    </>
   );
 }
 
@@ -554,21 +830,17 @@ function HomeTab(props: {
           Caché
           <Stale kind="costs" section={snapshot.costs} />
         </Label>
-        {costs?.cache ? (
-          <>
-            <Big>{Math.round(costs.cache.percent)} %</Big>
-            {costs.cache.detail ? <Sub>{costs.cache.detail}</Sub> : null}
-          </>
-        ) : (
-          <NoData />
-        )}
+        {costs?.cache ? <CacheView percent={costs.cache.percent} /> : <NoData />}
       </Tile>
-      <Tile className="col-span-2 row-auto flex flex-col border-ring bg-accent @xl/company:col-span-1 @xl/company:col-start-4 @xl/company:row-span-3 @xl/company:row-start-1">
-        <Label>
-          Decisiones <CountBadge count={pendingCompanyDecisions(snapshot).length} />
-          <Stale kind="decisions" section={snapshot.decisions} />
-        </Label>
-        <PendingDecision snapshot={snapshot} busy={props.busy} onAnswer={props.onAnswer} />
+      <Tile className="relative col-span-2 row-auto flex flex-col border-ring bg-accent @xl/company:col-span-1 @xl/company:col-start-4 @xl/company:row-span-3 @xl/company:row-start-1">
+        {/* The column keeps the height of the blocks beside it; a long card scrolls inside. */}
+        <div className="@xl/company:absolute @xl/company:inset-3 @xl/company:overflow-y-auto">
+          <Label>
+            Decisiones <CountBadge count={pendingCompanyDecisions(snapshot).length} />
+            <Stale kind="decisions" section={snapshot.decisions} />
+          </Label>
+          <PendingDecision snapshot={snapshot} busy={props.busy} onAnswer={props.onAnswer} />
+        </div>
       </Tile>
       <Tile onOpen={() => onDetail("versions")}>
         <Label>
@@ -588,17 +860,10 @@ function HomeTab(props: {
       </Tile>
       <Tile onOpen={() => onDetail("database")}>
         <Label>
-          Base
+          Base de datos
           <Stale kind="health" section={snapshot.health} />
         </Label>
-        {health?.database ? (
-          <>
-            <Big>{Math.round(health.database.readGbPerDay)} GB</Big>
-            <Sub>leídos al día</Sub>
-          </>
-        ) : (
-          <NoData />
-        )}
+        {health ? <DatabaseView health={health} /> : <NoData />}
       </Tile>
       <Tile onOpen={() => onDetail("threads")}>
         <Label>Hilos, ahora</Label>
@@ -653,7 +918,7 @@ function DecisionsTab(props: {
   const { snapshot } = props;
   return (
     <div className="mx-auto max-w-xl space-y-4">
-      <PendingDecision large snapshot={snapshot} busy={props.busy} onAnswer={props.onAnswer} />
+      <PendingDecision snapshot={snapshot} busy={props.busy} onAnswer={props.onAnswer} />
       {pendingCompanyDecisions(snapshot).length > 1 ? (
         <Sub>Quedan {pendingCompanyDecisions(snapshot).length - 1} más después de esta.</Sub>
       ) : null}
@@ -780,46 +1045,80 @@ function CostsTab({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
   );
 }
 
+function JobRow({ job }: { job: NonNullable<CompanyPanelTestsFile["jobs"]>[number] }) {
+  const [open, setOpen] = useState(false);
+  const kind = companyPanelJobKind(job);
+  const state = companyPanelJobState(job);
+  const entry = COMPANY_PANEL_JOB_KINDS.find((candidate) => candidate.kind === kind);
+  return (
+    <button
+      type="button"
+      onClick={() => setOpen((current) => !current)}
+      className="flex w-full gap-2 rounded-lg border border-border bg-background p-2 text-left hover:bg-accent"
+    >
+      <span className={`w-1 flex-none self-stretch rounded-full ${TONE_BG[KIND_TONE[kind]]}`} />
+      <span className="min-w-0 flex-1">
+        <span className={open ? "block" : "block truncate"}>{job.message}</span>
+        <span className="text-2xs text-muted-foreground">{entry?.label}</span>
+        {open ? (
+          <span className="mt-1 block space-y-0.5 text-xs text-muted-foreground">
+            {job.before ? <span className="block">Antes: {job.before}</span> : null}
+            {state.note ? <span className="block">Ahora: {state.note}</span> : null}
+            {job.why ? <span className="block">Por qué: {job.why}</span> : null}
+            {job.version ? <span className="block">Versión {job.version}</span> : null}
+          </span>
+        ) : null}
+      </span>
+    </button>
+  );
+}
+
+/** Every battery with its bar, then what is and is not done; pressing a row shows why. */
 function JobsLog({ tests }: { tests: CompanyPanelTestsFile }) {
   const [suite, setSuite] = useState<string | null>(null);
+  const [kind, setKind] = useState<CompanyPanelJobKind | null>(null);
   const jobs = tests.jobs;
   if (!jobs) return <NoData what="registro de encargos" />;
-  const suites = [...new Set(jobs.flatMap((job) => (job.suite ? [job.suite] : [])))];
-  const shown = suite === null ? jobs : jobs.filter((job) => job.suite === suite);
+  const inSuite = suite === null ? jobs : jobs.filter((job) => job.suite === suite);
+  const tally = companyPanelJobTally(inSuite);
+  const shown = companyPanelJobsByUrgency(
+    kind === null ? inSuite : inSuite.filter((job) => companyPanelJobKind(job) === kind),
+  );
   return (
-    <div className="mt-2">
-      {suites.length > 1 ? (
-        <div className="mb-2 flex flex-wrap gap-1 text-xs">
-          {[null, ...suites].map((name) => (
-            <button
-              type="button"
-              key={name ?? "all"}
-              onClick={() => setSuite(name)}
-              className={`rounded-full border px-2 py-0.5 ${suite === name ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground"}`}
-            >
-              {name ?? "Todas"}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      <div className="space-y-1.5 text-xs">
-        {shown.map((job) => {
-          const state = companyPanelJobState(job);
-          return (
-            <div
-              key={`${job.suite ?? ""}:${job.message}`}
-              className="rounded-lg border border-border bg-background p-2"
-            >
-              <div>
-                {state.icon} {job.message}
-              </div>
-              {job.before ? <Sub>Antes: {job.before}</Sub> : null}
-              {state.note ? <Sub>Ahora: {state.note}</Sub> : null}
-              {job.why ? <Sub>Por qué: {job.why}</Sub> : null}
-              {job.version ? <Sub>Versión {job.version}</Sub> : null}
-            </div>
-          );
-        })}
+    <div className="mt-3 text-xs">
+      <div className="space-y-1">
+        {companyPanelSuites(jobs).map((entry) => (
+          <button
+            type="button"
+            key={entry.name}
+            onClick={() => setSuite((current) => (current === entry.name ? null : entry.name))}
+            className={`grid w-full grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-accent ${suite === entry.name ? "bg-accent" : ""}`}
+          >
+            <span className="truncate">{entry.name}</span>
+            <TallyBar tally={entry.tally} />
+            <span className="font-mono text-muted-foreground">
+              {entry.tally.done}/{entry.total}
+            </span>
+          </button>
+        ))}
+      </div>
+      <div className="my-2 flex flex-wrap gap-1">
+        {COMPANY_PANEL_JOB_KINDS.filter((entry) => tally[entry.kind] > 0).map((entry) => (
+          <button
+            type="button"
+            key={entry.kind}
+            onClick={() => setKind((current) => (current === entry.kind ? null : entry.kind))}
+            className={`flex items-center gap-1.5 rounded-full border px-2 py-0.5 ${kind === entry.kind ? "border-foreground" : "border-border"}`}
+          >
+            <span className={`size-2 rounded-full ${TONE_BG[entry.tone]}`} />
+            {entry.label} · {tally[entry.kind]}
+          </button>
+        ))}
+      </div>
+      <div className="space-y-1">
+        {shown.map((job) => (
+          <JobRow key={`${job.suite ?? ""}:${job.message}`} job={job} />
+        ))}
       </div>
     </div>
   );
@@ -866,6 +1165,17 @@ function HealthTab({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
   );
 }
 
+/** The publisher's own words, for whoever wants them; they stay folded. */
+function TechnicalDetail({ text }: { text: string | undefined }) {
+  if (!text) return null;
+  return (
+    <details className="mt-3 text-xs text-muted-foreground">
+      <summary className="cursor-pointer">Detalle técnico</summary>
+      <p className="mt-1">{text}</p>
+    </details>
+  );
+}
+
 function DetailView({ detail, snapshot }: { detail: Detail; snapshot: CompanyPanelSnapshot }) {
   const costs = snapshot.costs.status === "ok" ? snapshot.costs.data : null;
   const health = snapshot.health.status === "ok" ? snapshot.health.data : null;
@@ -877,14 +1187,7 @@ function DetailView({ detail, snapshot }: { detail: Detail; snapshot: CompanyPan
       return (
         <>
           <h3 className="mb-2 text-lg font-semibold">Caché</h3>
-          {costs?.cache ? (
-            <>
-              <Big>{Math.round(costs.cache.percent)} %</Big>
-              {costs.cache.detail ? <Sub>{costs.cache.detail}</Sub> : null}
-            </>
-          ) : (
-            <NoData />
-          )}
+          {costs?.cache ? <CacheView percent={costs.cache.percent} /> : <NoData />}
         </>
       );
     case "versions":
@@ -895,6 +1198,13 @@ function DetailView({ detail, snapshot }: { detail: Detail; snapshot: CompanyPan
             <>
               <VersionsAndHealth health={health} />
               <div className="mt-3 space-y-1 text-xs">
+                {health.versions.map((version) =>
+                  version.detail ? (
+                    <div key={version.environment}>
+                      <b>{version.environment}</b> · {version.detail}
+                    </div>
+                  ) : null,
+                )}
                 {health.systems.map((system) => (
                   <div key={system.name} className="flex gap-2">
                     <span
@@ -916,17 +1226,8 @@ function DetailView({ detail, snapshot }: { detail: Detail; snapshot: CompanyPan
       return (
         <>
           <h3 className="mb-2 text-lg font-semibold">Base de datos</h3>
-          {health?.database ? (
-            <>
-              <Big>{Math.round(health.database.readGbPerDay)} GB</Big>
-              <Sub>leídos al día</Sub>
-              {health.database.detail ? (
-                <p className="mt-2 text-sm">{health.database.detail}</p>
-              ) : null}
-            </>
-          ) : (
-            <NoData />
-          )}
+          {health ? <DatabaseView health={health} /> : <NoData />}
+          <TechnicalDetail text={health?.database?.detail} />
         </>
       );
     case "threads":
@@ -967,6 +1268,7 @@ function DetailView({ detail, snapshot }: { detail: Detail; snapshot: CompanyPan
             <>
               <TestsLine tests={tests} />
               <JobsLog tests={tests} />
+              <TechnicalDetail text={tests.label} />
             </>
           ) : (
             <NoData />

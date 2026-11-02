@@ -8,10 +8,12 @@ conversations. The schemas are in `packages/contracts/src/companyPanel.ts`.
 
 - `personas.json`: who may see the panel. `{ "members": { "<team member id>": "roi" } }`. The value
   must match a key of `informadores` in `../hilos.json`, which is where that person's answers go.
-- `decisiones.json`: `{ "decisions": [{ "id", "title", "summary", "createdAt", "problem"?, "example"?,
-"opinions"?: [{ "thread", "opinion" }], "references"?: [{ "name", "how", "source"? }],
-"options"?: [{ "id", "label", "recommended"? }] }] }`. With `options`, the card shows buttons;
-  without, yes and no.
+- `decisiones.json`: `{ "decisions": [{ "id", "title", "summary", "createdAt", "area"?, "problem"?,
+"example"?, "options"?: [{ "id", "label", "effect"?, "recommended"? }], "opinions"?: [{ "thread",
+"optionId"?, "opinion" }], "references"?: [{ "name", "optionId"?, "how", "source"? }] }] }`. `title`
+  describes the problem, `summary` explains it plainly, and `problem` with `example` are what "No lo
+  entiendo" unfolds. `optionId` ties a row to an option; the seal counts them. What is missing shows
+  as missing. With `options`, the card shows them; without, yes and no.
 - `costes.json`: `{ "currency": "EUR", "daysPerMonth", "perPerson": [{ "date", "total", "parts":
 [{ "name", "amount" }], "release"? }], "simulator"?: { "withoutImages", "perFifthOfImages",
 "baseVolume" }, "spendLast30Days"?: [{ "date", "amount" }], "cache"?: { "percent", "detail"? } }`.

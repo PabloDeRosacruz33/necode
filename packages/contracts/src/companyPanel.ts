@@ -10,6 +10,8 @@ import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas.ts";
 export const CompanyPanelDecisionOption = Schema.Struct({
   id: TrimmedNonEmptyString,
   label: TrimmedNonEmptyString,
+  /** What changes if this option is chosen. */
+  effect: Schema.optional(Schema.String),
   recommended: Schema.optional(Schema.Boolean),
 });
 export type CompanyPanelDecisionOption = typeof CompanyPanelDecisionOption.Type;
@@ -19,16 +21,27 @@ export const CompanyPanelDecision = Schema.Struct({
   title: TrimmedNonEmptyString,
   summary: Schema.String,
   createdAt: IsoDateTime,
-  /** What "No lo entiendo" unfolds. */
+  /** The kind of decision shown on the card, such as "Producto" or "Técnica". */
+  area: Schema.optional(Schema.String),
+  /** What "No lo entiendo" unfolds: the plain explanation and an everyday example. */
   problem: Schema.optional(Schema.String),
   example: Schema.optional(Schema.String),
   opinions: Schema.optional(
-    Schema.Array(Schema.Struct({ thread: TrimmedNonEmptyString, opinion: Schema.String })),
+    Schema.Array(
+      Schema.Struct({
+        thread: TrimmedNonEmptyString,
+        /** The option this thread picks, from `options`. */
+        optionId: Schema.optional(Schema.String),
+        opinion: Schema.String,
+      }),
+    ),
   ),
   references: Schema.optional(
     Schema.Array(
       Schema.Struct({
         name: TrimmedNonEmptyString,
+        /** The option this product's way matches, from `options`. */
+        optionId: Schema.optional(Schema.String),
         how: Schema.String,
         source: Schema.optional(Schema.String),
       }),
@@ -107,7 +120,13 @@ export const CompanyPanelHealthFile = Schema.Struct({
     ),
   ),
   database: Schema.optional(
-    Schema.Struct({ readGbPerDay: Schema.Number, detail: Schema.optional(Schema.String) }),
+    Schema.Struct({
+      readGbPerDay: Schema.Number,
+      /** What it reads with nobody using it, and the level to stay under: they give the scale. */
+      restGbPerDay: Schema.optional(Schema.Number),
+      targetGbPerDay: Schema.optional(Schema.Number),
+      detail: Schema.optional(Schema.String),
+    }),
   ),
 });
 export type CompanyPanelHealthFile = typeof CompanyPanelHealthFile.Type;

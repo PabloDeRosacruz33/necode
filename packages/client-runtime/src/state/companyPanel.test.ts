@@ -1,6 +1,14 @@
 import { describe, expect, it } from "@effect/vitest";
 
 import {
+  companyCacheView,
+  companyDatabaseView,
+  companyPanelJobKind,
+  companyPanelJobsByUrgency,
+  companyPanelShortDate,
+  companyPanelSuites,
+  companyDecisionConsensus,
+  companyDecisionSwipeAction,
   companyPanelJobState,
   companyPanelStaleLabel,
   costTrend,
@@ -89,5 +97,132 @@ describe("companyPanelJobState", () => {
       icon: "⚪",
       note: "sin probar",
     });
+  });
+});
+
+describe("companyDecisionConsensus", () => {
+  const options = [
+    { id: "a", label: "A" },
+    { id: "b", label: "B" },
+  ];
+  const opinion = (optionId?: string) => ({
+    thread: "t",
+    opinion: "o",
+    ...(optionId === undefined ? {} : { optionId }),
+  });
+
+  it("names the option most threads picked", () => {
+    expect(
+      companyDecisionConsensus({ options, opinions: [opinion("a"), opinion("a"), opinion("b")] }),
+    ).toEqual({ total: 3, count: 2, optionIndex: 0 });
+  });
+
+  it("names no option on a tie", () => {
+    expect(
+      companyDecisionConsensus({ options, opinions: [opinion("a"), opinion("b")] })?.optionIndex,
+    ).toBeNull();
+  });
+
+  it("has no seal without opinions on an option", () => {
+    expect(companyDecisionConsensus({ options })).toBeNull();
+    expect(companyDecisionConsensus({ options, opinions: [opinion()] })).toBeNull();
+    expect(companyDecisionConsensus({ options, opinions: [opinion("gone")] })).toBeNull();
+  });
+});
+
+describe("companyDecisionSwipeAction", () => {
+  const a = { id: "a", label: "A", recommended: true };
+  const b = { id: "b", label: "B" };
+  const c = { id: "c", label: "C" };
+
+  it("answers yes or no on cards without options", () => {
+    expect(companyDecisionSwipeAction({}, "right")).toEqual({ type: "yes" });
+    expect(companyDecisionSwipeAction({}, "left")).toEqual({ type: "no" });
+  });
+
+  it("takes the recommended option right, and the other left only when there are two", () => {
+    expect(companyDecisionSwipeAction({ options: [b, a] }, "right")).toEqual({
+      type: "option",
+      optionId: "a",
+    });
+    expect(companyDecisionSwipeAction({ options: [a, b] }, "left")).toEqual({
+      type: "option",
+      optionId: "b",
+    });
+    expect(companyDecisionSwipeAction({ options: [a, b, c] }, "left")).toBeNull();
+  });
+
+  it("never picks for the person when nothing is recommended", () => {
+    expect(companyDecisionSwipeAction({ options: [b, c] }, "right")).toBeNull();
+    expect(companyDecisionSwipeAction({ options: [b, c] }, "up")).toBe("write");
+  });
+});
+
+describe("companyPanelStaleLabel with decisions", () => {
+  it("does not call an empty list old", () => {
+    const now = Date.parse("2026-11-10T12:00:00.000Z");
+    const section = (decisions: ReadonlyArray<never>) => ({
+      status: "ok" as const,
+      updatedAt: "2026-11-02T12:00:00.000Z",
+      data: { decisions },
+    });
+    expect(companyPanelStaleLabel("decisions", section([]), now)).toBeNull();
+  });
+});
+
+describe("job kinds", () => {
+  const job = (result: "passed" | "failed" | "skipped", now?: string, suite?: string) => ({
+    message: `${result}${now ?? ""}`,
+    result,
+    ...(now === undefined ? {} : { now }),
+    ...(suite === undefined ? {} : { suite }),
+  });
+
+  it("reads the finer states publishers keep inside skipped", () => {
+    expect(companyPanelJobKind(job("skipped", "⚠️"))).toBe("warning");
+    expect(companyPanelJobKind(job("skipped", "⏳ falta prueba"))).toBe("pending");
+    expect(companyPanelJobKind(job("skipped", "🔵"))).toBe("pending");
+    expect(companyPanelJobKind(job("skipped"))).toBe("skipped");
+    expect(companyPanelJobKind(job("passed", "✅"))).toBe("done");
+  });
+
+  it("puts what is not done first", () => {
+    const sorted = companyPanelJobsByUrgency([job("passed"), job("failed"), job("skipped", "⏳")]);
+    expect(sorted.map((entry) => companyPanelJobKind(entry))).toEqual([
+      "failed",
+      "pending",
+      "done",
+    ]);
+  });
+
+  it("counts each battery, failures first", () => {
+    const suites = companyPanelSuites([
+      job("passed", undefined, "A"),
+      job("failed", undefined, "B"),
+      job("passed", undefined, "B"),
+    ]);
+    expect(suites.map((suite) => [suite.name, suite.total, suite.tally.failed])).toEqual([
+      ["B", 2, 1],
+      ["A", 1, 0],
+    ]);
+  });
+});
+
+describe("plain views", () => {
+  it("shortens dates and leaves the rest alone", () => {
+    expect(companyPanelShortDate("2026-11-02")).toBe("2 nov");
+    expect(companyPanelShortDate("ayer")).toBe("ayer");
+  });
+
+  it("explains the cache in plain words", () => {
+    expect(companyCacheView(96.2).sentence).toContain("96");
+    expect(companyCacheView(96.2).tone).toBe("good");
+    expect(companyCacheView(30).tone).toBe("bad");
+  });
+
+  it("gives no verdict on the database without a level to compare with", () => {
+    expect(companyDatabaseView({ readGbPerDay: 455 })).toBeNull();
+    expect(companyDatabaseView({ readGbPerDay: 50, targetGbPerDay: 100 })?.tone).toBe("good");
+    expect(companyDatabaseView({ readGbPerDay: 150, targetGbPerDay: 100 })?.tone).toBe("bad");
   });
 });
