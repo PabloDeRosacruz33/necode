@@ -6,7 +6,6 @@ import {
   type CompanyPanelCostsFile,
   type CompanyPanelSnapshot,
   type CompanyPanelPlan,
-  type CompanyPanelPlanSquareStatus,
   type CompanyPanelTest,
   type CompanyPanelTestResult,
   type CompanyPanelTestsFile,
@@ -456,16 +455,20 @@ export const companyPanelPlans = (snapshot: CompanyPanelSnapshot) =>
 export const companyPlanColor = (color: string) =>
   /^#[0-9a-f]{6}$/i.test(color) ? color : COMPANY_PANEL_COLORS.noPlan;
 
-/** The squares inside a plan: filled colours that read at a glance, with no text to go through. */
-export const COMPANY_PLAN_SQUARES: Record<
-  CompanyPanelPlanSquareStatus,
-  { readonly color: string; readonly icon: string; readonly label: string }
-> = {
-  ok: { color: "#15803d", icon: "✓", label: "Bien" },
-  bad: { color: "#dc2626", icon: "✕", label: "Mal" },
-  decide: { color: "#6d4fc4", icon: "?", label: "Por decidir" },
-  partial: { color: "#64748b", icon: "…", label: "A medias" },
-};
+/**
+ * The threads under a plan's step, in the file's order. A name with no thread behind it stays
+ * apart, to be shown as missing rather than silently dropped.
+ */
+export function companyStepThreads<Thread extends { readonly name: string }>(
+  step: Pick<CompanyPanelPlan["steps"][number], "threads">,
+  threads: ReadonlyArray<Thread>,
+) {
+  const names = step.threads ?? [];
+  return {
+    known: names.flatMap((name) => threads.filter((thread) => thread.name === name)),
+    missing: names.filter((name) => !threads.some((thread) => thread.name === name)),
+  };
+}
 
 /** A plan's "Te toca" for this person; someone else's turn is not theirs to see. */
 export function companyPlanTurn(
@@ -483,7 +486,11 @@ export function companyThreadPlan(
   threadName: string,
   plans: ReadonlyArray<CompanyPanelPlan>,
 ): { readonly name: string; readonly color: string } {
-  const plan = plans.find((candidate) => candidate.threads?.includes(threadName));
+  const plan = plans.find(
+    (candidate) =>
+      candidate.threads?.includes(threadName) ||
+      candidate.steps.some((step) => step.threads?.includes(threadName)),
+  );
   return plan
     ? { name: plan.name, color: companyPlanColor(plan.color) }
     : { name: "Sistema", color: COMPANY_PANEL_COLORS.noPlan };

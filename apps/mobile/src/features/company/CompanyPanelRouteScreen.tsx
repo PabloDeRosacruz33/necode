@@ -6,8 +6,8 @@ import {
   COMPANY_PANEL_COLORS,
   COMPANY_PANEL_JOB_KINDS,
   COMPANY_PANEL_REFRESH_MS,
-  COMPANY_PLAN_SQUARES,
   companyPlanTurn,
+  companyStepThreads,
   COMPANY_THREAD_TONES,
   companyErrorsByPlanText,
   companyPanelPlans,
@@ -1259,14 +1259,24 @@ function CostBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
   );
 }
 
-/** Inside a plan: its road, what stands out, and only if it is theirs, what the reader must do. */
-function PlanDetail(props: { readonly plan: CompanyPanelPlan; readonly person: string | null }) {
-  const { plan } = props;
-  const [pressed, setPressed] = useState<number | null>(null);
+/** Inside a plan: its road of verbs, then the threads on each verb, as they look in Hilos. */
+function PlanDetail(props: {
+  readonly plan: CompanyPanelPlan;
+  readonly snapshot: CompanyPanelSnapshot;
+}) {
+  const { plan, snapshot } = props;
+  const [pressed, setPressed] = useState<string | null>(null);
   const color = companyPlanColor(plan.color);
-  const turn = companyPlanTurn(plan, props.person);
-  const squares = plan.squares ?? [];
-  const open = pressed === null ? undefined : squares[pressed];
+  const turn = companyPlanTurn(plan, snapshot.person);
+  const tiles = useThreadTiles(snapshot);
+  const open = tiles.find((entry) => entry.thread.name === pressed);
+  const groups = plan.steps.flatMap((step, index) => {
+    const { known, missing } = companyStepThreads(
+      step,
+      tiles.map((entry) => ({ ...entry, name: entry.thread.name })),
+    );
+    return known.length + missing.length > 0 ? [{ step, index, known, missing }] : [];
+  });
   return (
     <View
       className="mt-2 rounded-2xl bg-subtle p-4"
@@ -1316,49 +1326,48 @@ function PlanDetail(props: { readonly plan: CompanyPanelPlan; readonly person: s
           })}
         </View>
       )}
-      {squares.length === 0 ? (
-        <NoData what="cuadrados" />
+      {groups.length === 0 ? (
+        <NoData what="hilos de este plan" />
       ) : (
-        <View className="mt-4 flex-row flex-wrap gap-2.5">
-          {squares.map((square, index) => {
-            const look = COMPANY_PLAN_SQUARES[square.status];
-            return (
-              <Pressable
-                key={`${square.text}:${index}`}
-                accessibilityRole="button"
-                accessibilityLabel={`${look.label}: ${square.text}`}
-                accessibilityState={{ expanded: pressed === index }}
-                onPress={() => setPressed((current) => (current === index ? null : index))}
-                className="min-h-21 rounded-xl p-3"
+        groups.map(({ step, index, known, missing }) => (
+          <View key={`${step.label}:${index}`} className="mt-4">
+            <View className="mb-2 flex-row items-center gap-2">
+              <View
+                className="h-5 w-5 items-center justify-center rounded-full"
                 style={{
-                  flexBasis: "47%",
-                  flexGrow: 1,
-                  backgroundColor: look.color,
-                  opacity: pressed !== null && pressed !== index ? 0.75 : 1,
+                  backgroundColor: step.status === "todo" ? COMPANY_PANEL_COLORS.idle : color,
                 }}
               >
-                <View className="h-6 justify-center">
-                  <Text className="text-xl font-t3-medium text-white">{look.icon}</Text>
-                </View>
-                <Text className="mt-1 text-sm font-t3-medium text-white">{square.text}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
+                <Text className="text-2xs font-t3-medium text-white">
+                  {step.status === "done" ? "✓" : index + 1}
+                </Text>
+              </View>
+              <Text className="font-t3-medium text-sm text-foreground">{step.label}</Text>
+            </View>
+            <View className="flex-row flex-wrap gap-2.5">
+              {known.map(({ thread, tile, plan: threadPlan }) => (
+                <ThreadTile
+                  key={thread.name}
+                  thread={thread}
+                  tile={tile}
+                  plan={threadPlan}
+                  dimmed={pressed !== null && pressed !== thread.name}
+                  selected={pressed === thread.name}
+                  onPress={() =>
+                    setPressed((current) => (current === thread.name ? null : thread.name))
+                  }
+                />
+              ))}
+            </View>
+            {missing.length > 0 ? <NoData what={missing.join(", ")} /> : null}
+          </View>
+        ))
       )}
-      {open ? (
-        <View className="mt-2.5 rounded-xl bg-grouped-card p-3">
-          {open.why ? (
-            <Text className="text-sm text-foreground">{open.why}</Text>
-          ) : (
-            <Text className="text-sm italic text-foreground-muted">Sin dato</Text>
-          )}
-        </View>
-      ) : null}
+      {open ? <ThreadDetail thread={open.thread} state={open.tile.state} plan={open.plan} /> : null}
       {turn ? (
         <View
           className="mt-3 rounded-xl p-3"
-          style={{ backgroundColor: COMPANY_PLAN_SQUARES.decide.color }}
+          style={{ backgroundColor: COMPANY_PANEL_COLORS.decision }}
         >
           <Text className="text-center text-sm font-t3-medium text-white">{turn}</Text>
         </View>
@@ -1429,7 +1438,7 @@ function PlansBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
                     </View>
                   )}
                 </Pressable>
-                {open ? <PlanDetail plan={plan} person={snapshot.person} /> : null}
+                {open ? <PlanDetail plan={plan} snapshot={snapshot} /> : null}
               </View>
             );
           })}
@@ -1504,20 +1513,68 @@ function ThreadDetail(props: {
   );
 }
 
-function ThreadsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
+/** Every thread with its plan and state; the same in Hilos and inside a plan. */
+function useThreadTiles(snapshot: CompanyPanelSnapshot) {
   const fetchedAt = use(FetchedAtContext);
-  const [selected, setSelected] = useState<string | null>(null);
   const decisionThreads = new Set(
     pendingCompanyDecisions(snapshot).flatMap((decision) =>
       decision.thread ? [decision.thread] : [],
     ),
   );
   const plans = companyPanelPlans(snapshot);
-  const tiles = snapshot.threads.map((thread) => ({
+  return snapshot.threads.map((thread) => ({
     thread,
     plan: companyThreadPlan(thread.name, plans),
     tile: companyThreadTile(thread, { nowMs: fetchedAt, decisionThreads }),
   }));
+}
+
+function ThreadTile(props: {
+  readonly thread: CompanyPanelThreadActivity;
+  readonly tile: ReturnType<typeof companyThreadTile>;
+  readonly plan: { readonly name: string; readonly color: string };
+  readonly selected: boolean;
+  readonly dimmed: boolean;
+  readonly onPress: () => void;
+}) {
+  const { thread, tile, plan } = props;
+  const fetchedAt = use(FetchedAtContext);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${thread.name}, ${plan.name}, ${tile.state}`}
+      accessibilityState={{ expanded: props.selected }}
+      onPress={props.onPress}
+      className="min-h-23 flex-row overflow-hidden rounded-xl"
+      style={{ flexBasis: "47%", flexGrow: 1, opacity: props.dimmed ? 0.75 : 1 }}
+    >
+      <View className="min-w-0 p-3" style={{ flex: 4, backgroundColor: plan.color }}>
+        <Text className="font-t3-medium text-sm text-white">{thread.name}</Text>
+        <Text className="mt-1 text-xs text-white">
+          {thread.phrase ?? tile.state}
+          {thread.phrase && thread.updatedAt
+            ? ` · ${companyPanelAgo(thread.updatedAt, fetchedAt)}`
+            : ""}
+        </Text>
+        {tile.caveat && thread.phrase ? (
+          <Text className="mt-1 text-2xs text-white">{tile.caveat}</Text>
+        ) : null}
+      </View>
+      <View
+        className="items-center justify-center"
+        style={{ flex: 1, backgroundColor: COMPANY_THREAD_TONES[tile.tone].color }}
+      >
+        <Text className="font-t3-medium text-base text-white">
+          {COMPANY_THREAD_TONES[tile.tone].icon}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function ThreadsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const tiles = useThreadTiles(snapshot);
   const open = tiles.find((entry) => entry.thread.name === selected);
   return (
     <Block title="Hilos">
@@ -1537,42 +1594,17 @@ function ThreadsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
       ) : (
         <View className="flex-row flex-wrap gap-2.5">
           {tiles.map(({ thread, tile, plan }) => (
-            <Pressable
+            <ThreadTile
               key={thread.name}
-              accessibilityRole="button"
-              accessibilityLabel={`${thread.name}, ${plan.name}, ${tile.state}`}
-              accessibilityState={{ expanded: selected === thread.name }}
+              thread={thread}
+              tile={tile}
+              plan={plan}
+              selected={selected === thread.name}
+              dimmed={selected !== null && selected !== thread.name}
               onPress={() =>
                 setSelected((current) => (current === thread.name ? null : thread.name))
               }
-              className="min-h-23 flex-row overflow-hidden rounded-xl"
-              style={{
-                flexBasis: "47%",
-                flexGrow: 1,
-                opacity: selected !== null && selected !== thread.name ? 0.75 : 1,
-              }}
-            >
-              <View className="min-w-0 p-3" style={{ flex: 4, backgroundColor: plan.color }}>
-                <Text className="font-t3-medium text-sm text-white">{thread.name}</Text>
-                <Text className="mt-1 text-xs text-white">
-                  {thread.phrase ?? tile.state}
-                  {thread.phrase && thread.updatedAt
-                    ? ` · ${companyPanelAgo(thread.updatedAt, fetchedAt)}`
-                    : ""}
-                </Text>
-                {tile.caveat && thread.phrase ? (
-                  <Text className="mt-1 text-2xs text-white">{tile.caveat}</Text>
-                ) : null}
-              </View>
-              <View
-                className="items-center justify-center"
-                style={{ flex: 1, backgroundColor: COMPANY_THREAD_TONES[tile.tone].color }}
-              >
-                <Text className="font-t3-medium text-base text-white">
-                  {COMPANY_THREAD_TONES[tile.tone].icon}
-                </Text>
-              </View>
-            </Pressable>
+            />
           ))}
         </View>
       )}

@@ -6,6 +6,7 @@ import {
   companyErrorsByPlanText,
   companyPlanColor,
   companyPlanTurn,
+  companyStepThreads,
   companyTestsByPlan,
   companyThreadPlan,
   companyTestStateLabel,
@@ -563,5 +564,26 @@ describe("companyOptionSupport", () => {
 
   it("tells no opinions apart from no support", () => {
     expect(companyOptionSupport({ options }, "a").team).toEqual({ on: 0, total: 0 });
+  });
+});
+
+describe("threads on a plan's steps", () => {
+  const threads = [{ name: "Revisor" }, { name: "Producción 2" }];
+
+  it("keeps the file's order, and shows a name with no thread as missing", () => {
+    expect(
+      companyStepThreads({ threads: ["Producción 2", "Borrado", "Revisor"] }, threads),
+    ).toEqual({ known: [{ name: "Producción 2" }, { name: "Revisor" }], missing: ["Borrado"] });
+    expect(companyStepThreads({}, threads)).toEqual({ known: [], missing: [] });
+  });
+
+  it("paints a thread named only on a step with that plan", () => {
+    const plan = {
+      id: "arnes",
+      name: "Arnés",
+      color: "#d97706",
+      steps: [{ label: "Contrastar", status: "doing" as const, threads: ["Revisor"] }],
+    };
+    expect(companyThreadPlan("Revisor", [plan]).name).toBe("Arnés");
   });
 });

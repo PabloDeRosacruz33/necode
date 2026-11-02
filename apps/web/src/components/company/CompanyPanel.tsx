@@ -7,8 +7,8 @@ import {
   COMPANY_PANEL_COLORS,
   COMPANY_PANEL_JOB_KINDS,
   COMPANY_PANEL_REFRESH_MS,
-  COMPANY_PLAN_SQUARES,
   companyPlanTurn,
+  companyStepThreads,
   COMPANY_THREAD_TONES,
   companyErrorsByPlanText,
   companyPanelPlans,
@@ -1193,14 +1193,24 @@ function CostBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
   );
 }
 
-/** Inside a plan: its road, what stands out, and only if it is theirs, what the reader must do. */
-function PlanDetail(props: { readonly plan: CompanyPanelPlan; readonly person: string | null }) {
-  const { plan } = props;
-  const [pressed, setPressed] = useState<number | null>(null);
+/** Inside a plan: its road of verbs, then the threads on each verb, as they look in Hilos. */
+function PlanDetail(props: {
+  readonly plan: CompanyPanelPlan;
+  readonly snapshot: CompanyPanelSnapshot;
+}) {
+  const { plan, snapshot } = props;
+  const [pressed, setPressed] = useState<string | null>(null);
   const color = companyPlanColor(plan.color);
-  const turn = companyPlanTurn(plan, props.person);
-  const squares = plan.squares ?? [];
-  const open = pressed === null ? undefined : squares[pressed];
+  const turn = companyPlanTurn(plan, snapshot.person);
+  const tiles = useThreadTiles(snapshot);
+  const open = tiles.find((entry) => entry.thread.name === pressed);
+  const groups = plan.steps.flatMap((step, index) => {
+    const { known, missing } = companyStepThreads(
+      step,
+      tiles.map((entry) => ({ ...entry, name: entry.thread.name })),
+    );
+    return known.length + missing.length > 0 ? [{ step, index, known, missing }] : [];
+  });
   return (
     <div
       className="col-span-full rounded-2xl border border-t-4 border-border bg-background p-5"
@@ -1248,40 +1258,43 @@ function PlanDetail(props: { readonly plan: CompanyPanelPlan; readonly person: s
           })}
         </div>
       )}
-      {squares.length === 0 ? (
-        <NoData what="cuadrados" />
+      {groups.length === 0 ? (
+        <NoData what="hilos de este plan" />
       ) : (
-        <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2.5">
-          {squares.map((square, index) => {
-            const look = COMPANY_PLAN_SQUARES[square.status];
-            return (
-              <button
-                type="button"
-                key={`${square.text}:${index}`}
-                aria-expanded={pressed === index}
-                aria-label={`${look.label}: ${square.text}`}
-                onClick={() => setPressed((current) => (current === index ? null : index))}
-                style={{ background: look.color }}
-                className={`block min-h-21 w-full rounded-xl p-3.5 text-left text-white -outline-offset-2 hover:outline-2 hover:outline-foreground ${pressed === index ? "outline-2 outline-foreground" : ""}`}
+        groups.map(({ step, index, known, missing }) => (
+          <div key={`${step.label}:${index}`} className="mt-5">
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+              <span
+                className="flex size-5 flex-none items-center justify-center rounded-full text-2xs font-bold text-white"
+                style={{ background: step.status === "todo" ? COMPANY_PANEL_COLORS.idle : color }}
               >
-                <span aria-hidden className="flex h-6 items-center text-xl leading-none font-bold">
-                  {look.icon}
-                </span>
-                <b className="mt-1 block text-sm leading-snug">{square.text}</b>
-              </button>
-            );
-          })}
-        </div>
+                {step.status === "done" ? "✓" : index + 1}
+              </span>
+              {step.label}
+            </div>
+            <div className="grid grid-cols-2 gap-2.5 @xl/company:grid-cols-3">
+              {known.map(({ thread, tile, plan: threadPlan }) => (
+                <ThreadTile
+                  key={thread.name}
+                  thread={thread}
+                  tile={tile}
+                  plan={threadPlan}
+                  selected={pressed === thread.name}
+                  onPress={() =>
+                    setPressed((current) => (current === thread.name ? null : thread.name))
+                  }
+                />
+              ))}
+            </div>
+            {missing.length > 0 ? <NoData what={missing.join(", ")} /> : null}
+          </div>
+        ))
       )}
-      {open ? (
-        <div className="mt-2.5 rounded-xl bg-foreground/7 p-3.5 text-sm">
-          {open.why ?? <span className="text-muted-foreground italic">Sin dato</span>}
-        </div>
-      ) : null}
+      {open ? <ThreadDetail thread={open.thread} state={open.tile.state} plan={open.plan} /> : null}
       {turn ? (
         <div
           className="mt-3.5 rounded-xl p-3.5 text-center font-bold text-white"
-          style={{ background: COMPANY_PLAN_SQUARES.decide.color }}
+          style={{ background: COMPANY_PANEL_COLORS.decision }}
         >
           {turn}
         </div>
@@ -1352,7 +1365,7 @@ function PlansBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
               </button>
             );
           })}
-          {open ? <PlanDetail key={open.id} plan={open} person={snapshot.person} /> : null}
+          {open ? <PlanDetail key={open.id} plan={open} snapshot={snapshot} /> : null}
         </div>
       )}
     </Block>
@@ -1416,20 +1429,65 @@ function ThreadDetail(props: {
   );
 }
 
-function ThreadsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
+/** Every thread with its plan and state; the same in Hilos and inside a plan. */
+function useThreadTiles(snapshot: CompanyPanelSnapshot) {
   const fetchedAt = use(FetchedAtContext);
-  const [selected, setSelected] = useState<string | null>(null);
   const decisionThreads = new Set(
     pendingCompanyDecisions(snapshot).flatMap((decision) =>
       decision.thread ? [decision.thread] : [],
     ),
   );
   const plans = companyPanelPlans(snapshot);
-  const tiles = snapshot.threads.map((thread) => ({
+  return snapshot.threads.map((thread) => ({
     thread,
     plan: companyThreadPlan(thread.name, plans),
     tile: companyThreadTile(thread, { nowMs: fetchedAt, decisionThreads }),
   }));
+}
+
+function ThreadTile(props: {
+  readonly thread: CompanyPanelThreadActivity;
+  readonly tile: ReturnType<typeof companyThreadTile>;
+  readonly plan: { readonly name: string; readonly color: string };
+  readonly selected: boolean;
+  readonly onPress: () => void;
+}) {
+  const { thread, tile, plan } = props;
+  const fetchedAt = use(FetchedAtContext);
+  return (
+    <button
+      type="button"
+      aria-expanded={props.selected}
+      aria-label={`${thread.name}, ${plan.name}, ${tile.state}`}
+      onClick={props.onPress}
+      className={`grid min-h-23 w-full grid-cols-[4fr_1fr] overflow-hidden rounded-xl text-left text-white -outline-offset-2 hover:outline-2 hover:outline-foreground ${props.selected ? "outline-2 outline-foreground" : ""}`}
+    >
+      <span className="min-w-0 p-3" style={{ background: plan.color }}>
+        <b className="block text-sm leading-tight font-bold">{thread.name}</b>
+        <span className="mt-1 block text-xs leading-snug">
+          {thread.phrase ?? tile.state}
+          {thread.phrase && thread.updatedAt
+            ? ` · ${companyPanelAgo(thread.updatedAt, fetchedAt)}`
+            : ""}
+        </span>
+        {tile.caveat && thread.phrase ? (
+          <span className="mt-1 block text-2xs leading-snug">{tile.caveat}</span>
+        ) : null}
+      </span>
+      <span
+        aria-hidden
+        className="flex items-center justify-center text-lg font-bold"
+        style={{ background: COMPANY_THREAD_TONES[tile.tone].color }}
+      >
+        {COMPANY_THREAD_TONES[tile.tone].icon}
+      </span>
+    </button>
+  );
+}
+
+function ThreadsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const tiles = useThreadTiles(snapshot);
   const open = tiles.find((entry) => entry.thread.name === selected);
   return (
     <Block
@@ -1451,36 +1509,16 @@ function ThreadsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
       ) : (
         <div className="grid grid-cols-2 gap-2.5 @xl/company:grid-cols-3">
           {tiles.map(({ thread, tile, plan }) => (
-            <button
-              type="button"
+            <ThreadTile
               key={thread.name}
-              aria-expanded={selected === thread.name}
-              aria-label={`${thread.name}, ${plan.name}, ${tile.state}`}
-              onClick={() =>
+              thread={thread}
+              tile={tile}
+              plan={plan}
+              selected={selected === thread.name}
+              onPress={() =>
                 setSelected((current) => (current === thread.name ? null : thread.name))
               }
-              className={`grid min-h-23 w-full grid-cols-[4fr_1fr] overflow-hidden rounded-xl text-left text-white -outline-offset-2 hover:outline-2 hover:outline-foreground ${selected === thread.name ? "outline-2 outline-foreground" : ""}`}
-            >
-              <span className="min-w-0 p-3" style={{ background: plan.color }}>
-                <b className="block text-sm leading-tight font-bold">{thread.name}</b>
-                <span className="mt-1 block text-xs leading-snug">
-                  {thread.phrase ?? tile.state}
-                  {thread.phrase && thread.updatedAt
-                    ? ` · ${companyPanelAgo(thread.updatedAt, fetchedAt)}`
-                    : ""}
-                </span>
-                {tile.caveat && thread.phrase ? (
-                  <span className="mt-1 block text-2xs leading-snug">{tile.caveat}</span>
-                ) : null}
-              </span>
-              <span
-                aria-hidden
-                className="flex items-center justify-center text-lg font-bold"
-                style={{ background: COMPANY_THREAD_TONES[tile.tone].color }}
-              >
-                {COMPANY_THREAD_TONES[tile.tone].icon}
-              </span>
-            </button>
+            />
           ))}
         </div>
       )}
