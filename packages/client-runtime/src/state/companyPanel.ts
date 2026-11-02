@@ -468,6 +468,21 @@ export function companyTestsByVersion(file: CompanyPanelTestsFile) {
   };
 }
 
+/**
+ * The heading of the version tests count against. The Cloud only reports its commit, which alone
+ * reads like a fault, so it is named as what it is and the app's version goes beside it.
+ */
+export function companyTestsVersionHeading(
+  version: string,
+  versions: ReadonlyArray<{ readonly environment: string; readonly version: string }>,
+): { readonly title: string; readonly app: string | null } {
+  const app = versions.find((entry) => /\bapp\b/i.test(entry.environment));
+  return {
+    title: /^[0-9a-f]{7,40}$/.test(version) ? `Cloud ${version}` : `Versión ${version}`,
+    app: app ? `${app.environment} ${app.version}` : null,
+  };
+}
+
 /** Plain words for a test's state in the current version, and for its last run elsewhere. */
 export function companyTestStateLabel(row: CompanyTestRow): string {
   switch (row.state) {

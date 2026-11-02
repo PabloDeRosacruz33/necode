@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 
 import {
+  companyTestsVersionHeading,
   companyErrorDays,
   companyTestStateLabel,
   companyDatabaseIsStale,
@@ -356,5 +357,26 @@ describe("companyErrorDays", () => {
     expect(companyErrorDays(days, now).days).toHaveLength(15);
     expect(companyErrorDays(days, now).latestIsToday).toBe(true);
     expect(companyErrorDays(days, Date.parse("2026-10-22T12:00:00")).latestIsToday).toBe(false);
+  });
+});
+
+describe("companyTestsVersionHeading", () => {
+  const versions = [
+    { environment: "Staging", version: "26c36c720" },
+    { environment: "App de Mac", version: "2.0.22" },
+  ];
+
+  it("names a commit as the Cloud's, with the app's version beside it", () => {
+    expect(companyTestsVersionHeading("26c36c720", versions)).toEqual({
+      title: "Cloud 26c36c720",
+      app: "App de Mac 2.0.22",
+    });
+  });
+
+  it("keeps a plain version as it is, and has no app without the data", () => {
+    expect(companyTestsVersionHeading("2.0.22", [])).toEqual({
+      title: "Versión 2.0.22",
+      app: null,
+    });
   });
 });

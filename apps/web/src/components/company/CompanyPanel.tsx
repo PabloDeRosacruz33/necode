@@ -12,6 +12,7 @@ import {
   companyErrorDays,
   companyPanelAgo,
   companyTestsByVersion,
+  companyTestsVersionHeading,
   companyTestStateLabel,
   companyThreadTile,
   companyPanelJobKind,
@@ -1338,6 +1339,9 @@ function TestsAndErrorsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
   const health = snapshot.health.status === "ok" ? snapshot.health.data : null;
   const byVersion = tests ? companyTestsByVersion(tests) : null;
   const errors = health?.errorsByDay ? companyErrorDays(health.errorsByDay, fetchedAt) : null;
+  const heading = byVersion
+    ? companyTestsVersionHeading(byVersion.version, health?.versions ?? [])
+    : null;
   return (
     <Block
       title={
@@ -1375,7 +1379,10 @@ function TestsAndErrorsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
       {byVersion ? (
         <>
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <b className="text-lg">Versión {byVersion.version}</b>
+            <span>
+              <b className="text-lg">{heading?.title}</b>
+              {heading?.app ? <Sub2> · {heading.app}</Sub2> : null}
+            </span>
             <TestTallyWords tally={byVersion.tally} missing={() => "sin probar"} />
           </div>
           <div className="mt-2.5 mb-3.5">
