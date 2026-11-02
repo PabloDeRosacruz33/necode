@@ -7,6 +7,12 @@ import {
   COMPANY_PANEL_COLORS,
   COMPANY_PANEL_JOB_KINDS,
   COMPANY_PANEL_REFRESH_MS,
+  COMPANY_THREAD_TONES,
+  companyErrorsByPlanText,
+  companyPanelPlans,
+  companyPlanColor,
+  companyTestsByPlan,
+  companyThreadPlan,
   companyDatabaseIsStale,
   companyDatabaseView,
   companyErrorDays,
@@ -38,9 +44,9 @@ import type {
   CompanyPanelJobKind,
   CompanyPanelJobTally,
   CompanyPanelTone,
+  CompanyTestRow,
   CompanyTestState,
   CompanyTestTally,
-  CompanyThreadTone,
 } from "@t3tools/client-runtime/state/company-panel";
 import type {
   CompanyPanelAnswer,
@@ -48,6 +54,7 @@ import type {
   CompanyPanelDecision,
   CompanyPanelHealthFile,
   CompanyPanelLogTone,
+  CompanyPanelPlanStepStatus,
   CompanyPanelSnapshot,
   CompanyPanelSystemStatus,
   CompanyPanelTestsFile,
@@ -113,7 +120,9 @@ const FetchedAtContext = createContext(0);
 
 function Stale(props: {
   readonly kind: CompanyPanelDataKind;
-  readonly section: CompanyPanelSnapshot["health" | "costs" | "tests" | "decisions"];
+  readonly section: NonNullable<
+    CompanyPanelSnapshot["health" | "costs" | "tests" | "decisions" | "plans"]
+  >;
 }) {
   const label = companyPanelStaleLabel(props.kind, props.section, use(FetchedAtContext));
   return label === null ? null : <span className="text-warning"> · {label}</span>;
@@ -831,18 +840,6 @@ function CountBadge({ count }: { count: number }) {
   );
 }
 
-const THREAD_TONE_COLOR: Record<CompanyThreadTone, string> = {
-  working: COMPANY_PANEL_COLORS.working,
-  decision: COMPANY_PANEL_COLORS.decision,
-  idle: COMPANY_PANEL_COLORS.idle,
-  failed: COMPANY_PANEL_COLORS.failed,
-};
-const THREAD_TONE_LABEL: ReadonlyArray<readonly [CompanyThreadTone, string]> = [
-  ["working", "Trabajando"],
-  ["decision", "Tiene una decisión"],
-  ["idle", "Parado"],
-  ["failed", "Fallo"],
-];
 const LOG_TONE_DOT: Record<CompanyPanelLogTone, string> = {
   good: "bg-success",
   warning: "bg-warning",
@@ -1153,32 +1150,156 @@ function CostBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
   );
 }
 
-function ThreadDetail({ thread, state }: { thread: CompanyPanelThreadActivity; state: string }) {
+const STEP_WORD: Record<CompanyPanelPlanStepStatus, string> = {
+  done: "Hecho",
+  doing: "Ahora",
+  todo: "Después",
+};
+const STEP_ICON: Record<CompanyPanelPlanStepStatus, string> = {
+  done: "✓",
+  doing: "▶\uFE0E",
+  todo: "·",
+};
+
+function PlansBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const section = snapshot.plans ?? { status: "missing" as const };
+  const plans = companyPanelPlans(snapshot);
+  const open = plans.find((plan) => plan.id === selected);
+  return (
+    <Block
+      title={
+        <span className="text-base">
+          Planes
+          <Stale kind="plans" section={section} />
+        </span>
+      }
+    >
+      {plans.length === 0 ? (
+        <NoData broken={section.status === "invalid"} what="planes" />
+      ) : (
+        <div className="grid grid-cols-1 gap-3 @xl/company:grid-cols-2">
+          {plans.map((plan) => {
+            const color = companyPlanColor(plan.color);
+            return (
+              <button
+                type="button"
+                key={plan.id}
+                aria-expanded={selected === plan.id}
+                onClick={() => setSelected((current) => (current === plan.id ? null : plan.id))}
+                style={{ borderTopColor: color }}
+                className="block w-full rounded-xl border border-t-4 border-border bg-background p-3.5 text-left hover:bg-accent"
+              >
+                <span className="flex items-baseline justify-between gap-2">
+                  <b className="text-sm">{plan.name}</b>
+                  {plan.summary ? <Sub2>{plan.summary}</Sub2> : null}
+                </span>
+                {plan.steps.length === 0 ? (
+                  <NoData what="pasos" />
+                ) : (
+                  <span className="mt-2.5 flex gap-1">
+                    {plan.steps.map((step, index) => (
+                      <span
+                        key={`${step.label}:${index}`}
+                        className={`min-w-0 flex-1 text-xs leading-tight wrap-anywhere ${step.status === "doing" ? "font-semibold" : ""}`}
+                      >
+                        <span
+                          className={`mb-1 block h-2 rounded-full ${step.status === "todo" ? "bg-foreground/12" : ""}`}
+                          style={
+                            step.status === "done"
+                              ? { background: color }
+                              : step.status === "doing"
+                                ? {
+                                    background: `repeating-linear-gradient(90deg, ${color} 0 5px, ${color}73 5px 9px)`,
+                                  }
+                                : undefined
+                          }
+                        />
+                        {step.label}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+          {open ? (
+            <div
+              className="rounded-xl border bg-background p-4 @xl/company:col-span-2"
+              style={{ borderColor: companyPlanColor(open.color) }}
+            >
+              <b className="text-sm">{open.name}</b>
+              {open.steps.map((step, index) => (
+                <div
+                  key={`${step.label}:${index}`}
+                  className="mt-2 grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-baseline gap-2 border-t border-border pt-2 text-xs"
+                >
+                  <b>{STEP_ICON[step.status]}</b>
+                  <span>{step.detail ?? step.label}</span>
+                  <Sub2>{STEP_WORD[step.status]}</Sub2>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      )}
+    </Block>
+  );
+}
+
+function ThreadStage({ title, text, color }: { title: string; text?: string; color?: string }) {
+  return (
+    <div
+      className="min-w-0 rounded-lg border border-border p-2.5 text-xs"
+      style={color ? { borderColor: color } : undefined}
+    >
+      <div className="mb-0.5 text-2xs font-semibold text-muted-foreground">{title}</div>
+      {text ?? <span className="text-muted-foreground italic">Sin dato</span>}
+    </div>
+  );
+}
+
+function ThreadDetail(props: {
+  readonly thread: CompanyPanelThreadActivity;
+  readonly state: string;
+  readonly plan: { readonly name: string; readonly color: string };
+}) {
+  const { thread, plan } = props;
   const fetchedAt = use(FetchedAtContext);
   return (
-    <div className="mt-4 border-t border-border pt-4">
-      <b>{thread.name}</b> <Sub2>· {state}</Sub2>
-      <SectionTitle>Qué hace</SectionTitle>
-      {thread.phrase ? (
-        <p className="text-xs">
-          {thread.phrase}
-          {thread.updatedAt ? <Sub2> · {companyPanelAgo(thread.updatedAt, fetchedAt)}</Sub2> : null}
-        </p>
-      ) : (
-        <NoData />
-      )}
-      <SectionTitle>Qué espera</SectionTitle>
-      {thread.detail ? <p className="text-xs">{thread.detail}</p> : <NoData />}
-      <SectionTitle>Últimas novedades</SectionTitle>
-      {thread.news?.length ? (
-        thread.news.map((item) => (
-          <div key={`${item.at}:${item.text}`} className="border-t border-border py-1.5 text-xs">
-            <Sub2>{companyPanelAgo(item.at, fetchedAt)}</Sub2> · {item.text}
-          </div>
-        ))
-      ) : (
-        <NoData />
-      )}
+    <div
+      className="mt-3 rounded-xl border border-l-4 border-border bg-background p-4"
+      style={{ borderLeftColor: plan.color }}
+    >
+      <Sub>
+        {thread.name} · {plan.name} · {props.state}
+        {thread.updatedAt ? ` · ${companyPanelAgo(thread.updatedAt, fetchedAt)}` : ""}
+      </Sub>
+      <p className="mt-1 mb-3 text-lg leading-snug font-bold">
+        {thread.now ?? thread.phrase ?? props.state}
+      </p>
+      <div className="grid grid-cols-1 gap-2 @xl/company:grid-cols-3">
+        <ThreadStage title="✓ ACABA DE HACER" {...(thread.done ? { text: thread.done } : {})} />
+        <ThreadStage
+          title={"▶\uFE0E AHORA"}
+          color={plan.color}
+          {...(thread.now ? { text: thread.now } : {})}
+        />
+        <ThreadStage title="DESPUÉS" {...(thread.next ? { text: thread.next } : {})} />
+      </div>
+      {thread.needsYou ? (
+        <div
+          className="mt-2.5 rounded-lg p-2.5 text-xs font-semibold"
+          style={{ background: `${COMPANY_PANEL_COLORS.decision}29` }}
+        >
+          Necesita de ti: {thread.needsYou}
+        </div>
+      ) : null}
+      {thread.waitingFor ? (
+        <div className="mt-2.5 rounded-lg bg-foreground/6 p-2.5 text-xs font-semibold">
+          Espera a: {thread.waitingFor}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1191,8 +1312,10 @@ function ThreadsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
       decision.thread ? [decision.thread] : [],
     ),
   );
+  const plans = companyPanelPlans(snapshot);
   const tiles = snapshot.threads.map((thread) => ({
     thread,
+    plan: companyThreadPlan(thread.name, plans),
     tile: companyThreadTile(thread, { nowMs: fetchedAt, decisionThreads }),
   }));
   const open = tiles.find((entry) => entry.thread.name === selected);
@@ -1201,10 +1324,11 @@ function ThreadsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
       title={<span className="text-base">Hilos</span>}
       aside={
         <span className="flex flex-wrap gap-x-3 gap-y-1 text-2xs">
-          {THREAD_TONE_LABEL.map(([tone, label]) => (
-            <span key={tone} className="flex items-center gap-1">
-              <span className="size-2 rounded-xs" style={{ background: THREAD_TONE_COLOR[tone] }} />
-              {label}
+          <span>Color grande: su plan · Franja derecha:</span>
+          {Object.values(COMPANY_THREAD_TONES).map((tone) => (
+            <span key={tone.label} className="flex items-center gap-1">
+              <span className="size-2 rounded-xs" style={{ background: tone.color }} />
+              {tone.icon} {tone.label}
             </span>
           ))}
         </span>
@@ -1214,32 +1338,41 @@ function ThreadsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
         <NoData what="hilos" />
       ) : (
         <div className="grid grid-cols-2 gap-2.5 @xl/company:grid-cols-3">
-          {tiles.map(({ thread, tile }) => (
+          {tiles.map(({ thread, tile, plan }) => (
             <button
               type="button"
               key={thread.name}
               aria-expanded={selected === thread.name}
+              aria-label={`${thread.name}, ${plan.name}, ${tile.state}`}
               onClick={() =>
                 setSelected((current) => (current === thread.name ? null : thread.name))
               }
-              style={{ background: THREAD_TONE_COLOR[tile.tone] }}
-              className={`flex min-h-23 w-full flex-col justify-start rounded-xl p-3 text-left text-white -outline-offset-2 hover:outline-2 hover:outline-foreground ${selected === thread.name ? "outline-2 outline-foreground" : ""}`}
+              className={`grid min-h-23 w-full grid-cols-[4fr_1fr] overflow-hidden rounded-xl text-left text-white -outline-offset-2 hover:outline-2 hover:outline-foreground ${selected === thread.name ? "outline-2 outline-foreground" : ""}`}
             >
-              <b className="block text-sm font-bold">{thread.name}</b>
-              <span className="mt-1 block text-xs leading-snug">
-                {thread.phrase ?? tile.state}
-                {thread.phrase && thread.updatedAt
-                  ? ` · ${companyPanelAgo(thread.updatedAt, fetchedAt)}`
-                  : ""}
+              <span className="min-w-0 p-3" style={{ background: plan.color }}>
+                <b className="block text-sm leading-tight font-bold">{thread.name}</b>
+                <span className="mt-1 block text-xs leading-snug">
+                  {thread.phrase ?? tile.state}
+                  {thread.phrase && thread.updatedAt
+                    ? ` · ${companyPanelAgo(thread.updatedAt, fetchedAt)}`
+                    : ""}
+                </span>
+                {tile.caveat && thread.phrase ? (
+                  <span className="mt-1 block text-2xs leading-snug">{tile.caveat}</span>
+                ) : null}
               </span>
-              {tile.caveat && thread.phrase ? (
-                <span className="mt-1 block text-2xs leading-snug">{tile.caveat}</span>
-              ) : null}
+              <span
+                aria-hidden
+                className="flex items-center justify-center text-lg font-bold"
+                style={{ background: COMPANY_THREAD_TONES[tile.tone].color }}
+              >
+                {COMPANY_THREAD_TONES[tile.tone].icon}
+              </span>
             </button>
           ))}
         </div>
       )}
-      {open ? <ThreadDetail thread={open.thread} state={open.tile.state} /> : null}
+      {open ? <ThreadDetail thread={open.thread} state={open.tile.state} plan={open.plan} /> : null}
     </Block>
   );
 }
@@ -1415,11 +1548,71 @@ function TestTallyWords(props: { tally: CompanyTestTally; missing: (count: numbe
   );
 }
 
+function TestRowView({ row }: { row: CompanyTestRow }) {
+  return (
+    <div
+      className={`grid grid-cols-[0.625rem_minmax(0,1fr)_auto] items-baseline gap-2 border-t border-border py-1.5 text-xs ${row.state === "untested" ? "opacity-60" : ""}`}
+    >
+      <span className={`size-2 rounded-full ${TEST_STATE_DOT[row.state]}`} />
+      <span>
+        {row.message}
+        <Sub>
+          {row.suite} · {companyTestStateLabel(row)}
+          {row.why ? ` · ${row.why}` : ""}
+        </Sub>
+      </span>
+      <span className="flex items-center gap-1">
+        {row.history.slice(-8).map((result, index) => (
+          <span key={index} className={`size-2 rounded-full ${TEST_STATE_DOT[result]}`} />
+        ))}
+      </span>
+    </div>
+  );
+}
+
+function TestPlanRow(props: { readonly group: ReturnType<typeof companyTestsByPlan>[number] }) {
+  const { group } = props;
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t border-border">
+      <button
+        type="button"
+        aria-expanded={open}
+        disabled={group.rows.length === 0}
+        onClick={() => setOpen((current) => !current)}
+        className="grid w-full grid-cols-[8rem_minmax(0,1fr)] items-center gap-2.5 py-2 text-left text-xs hover:bg-accent disabled:cursor-default disabled:hover:bg-transparent @xl/company:grid-cols-[8rem_minmax(0,1fr)_9.5rem]"
+      >
+        <span className="flex min-w-0 items-center gap-1.5 font-semibold">
+          <span className="h-5.5 w-1.5 flex-none rounded-xs" style={{ background: group.color }} />
+          <span className="min-w-0">{group.name}</span>
+        </span>
+        {group.rows.length === 0 ? (
+          <span className="text-muted-foreground italic @xl/company:col-span-2">
+            Sin dato · sin pruebas de este plan
+          </span>
+        ) : (
+          <>
+            <TestTallyBar tally={group.tally} />
+            <span className="col-span-full @xl/company:col-span-1">
+              <TestTallyWords
+                tally={group.tally}
+                missing={(count) => (count === 1 ? "falta" : "faltan")}
+              />
+            </span>
+          </>
+        )}
+      </button>
+      {open ? group.rows.map((row) => <TestRowView key={row.id} row={row} />) : null}
+    </div>
+  );
+}
+
 function TestsAndErrorsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
   const fetchedAt = use(FetchedAtContext);
   const tests = snapshot.tests.status === "ok" ? snapshot.tests.data : null;
   const health = snapshot.health.status === "ok" ? snapshot.health.data : null;
   const byVersion = tests ? companyTestsByVersion(tests) : null;
+  const plans = companyPanelPlans(snapshot);
   const errors = health?.errorsByDay ? companyErrorDays(health.errorsByDay, fetchedAt) : null;
   const heading = byVersion
     ? companyTestsVersionHeading(byVersion.version, health?.versions ?? [])
@@ -1432,31 +1625,7 @@ function TestsAndErrorsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
           <Stale kind="tests" section={snapshot.tests} />
         </>
       }
-      {...(byVersion
-        ? {
-            openHint: "Pulsa para ver cada una",
-            detail: byVersion.rows.map((row) => (
-              <div
-                key={row.id}
-                className={`grid grid-cols-[0.625rem_minmax(0,1fr)_auto] items-baseline gap-2 border-t border-border py-1.5 text-xs ${row.state === "untested" ? "opacity-60" : ""}`}
-              >
-                <span className={`size-2 rounded-full ${TEST_STATE_DOT[row.state]}`} />
-                <span>
-                  {row.message}
-                  <Sub>
-                    {row.suite} · {companyTestStateLabel(row)}
-                    {row.why ? ` · ${row.why}` : ""}
-                  </Sub>
-                </span>
-                <span className="flex items-center gap-1">
-                  {row.history.slice(-8).map((result, index) => (
-                    <span key={index} className={`size-2 rounded-full ${TEST_STATE_DOT[result]}`} />
-                  ))}
-                </span>
-              </div>
-            )),
-          }
-        : {})}
+      aside={byVersion ? "Pulsa un plan para ver sus pruebas" : undefined}
     >
       {byVersion ? (
         <>
@@ -1470,20 +1639,8 @@ function TestsAndErrorsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
           <div className="mt-2.5 mb-3.5">
             <TestTallyBar tally={byVersion.tally} thick />
           </div>
-          {byVersion.suites.map((suite) => (
-            <div
-              key={suite.name}
-              className="grid grid-cols-[5.25rem_minmax(0,1fr)] items-center gap-2.5 border-t border-border py-1.5 text-xs @xl/company:grid-cols-[5.25rem_minmax(0,1fr)_9.5rem]"
-            >
-              <span className="truncate">{suite.name}</span>
-              <TestTallyBar tally={suite.tally} />
-              <span className="col-span-full @xl/company:col-span-1">
-                <TestTallyWords
-                  tally={suite.tally}
-                  missing={(count) => (count === 1 ? "falta" : "faltan")}
-                />
-              </span>
-            </div>
+          {companyTestsByPlan(byVersion.rows, plans).map((group) => (
+            <TestPlanRow key={group.id} group={group} />
           ))}
         </>
       ) : (
@@ -1506,7 +1663,10 @@ function TestsAndErrorsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
             <div>
               <ErrorHeat health={health} />
               <div className="mt-1.5">
-                <Sub>Últimos 15 días, el último a la derecha</Sub>
+                <Sub>
+                  Últimos 15 días, el último a la derecha ·{" "}
+                  {companyErrorsByPlanText(errors.latest, plans) ?? "por plan: sin dato"}
+                </Sub>
               </div>
             </div>
           </div>
@@ -1624,6 +1784,7 @@ function HomeTab(props: {
       <div className="grid min-w-0 gap-4">
         <CostBlock snapshot={snapshot} />
         <Block title="Simulador de coste">{costs ? <Simulator costs={costs} /> : <NoData />}</Block>
+        <PlansBlock snapshot={snapshot} />
         <ThreadsBlock snapshot={snapshot} />
         <DatabaseBlock snapshot={snapshot} />
         <TestsAndErrorsBlock snapshot={snapshot} />

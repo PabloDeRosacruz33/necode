@@ -93,14 +93,40 @@ describe("company panel", () => {
             {
               name: "Performance",
               phrase: "Escribe su informe",
+              now: "Mide la memoria",
               updatedAt: "2026-11-02T09:00:00.000Z",
             },
           ],
         });
         const [thread] = (yield* snapshot(dir)).threads;
         assert.equal(thread?.phrase, "Escribe su informe");
+        assert.equal(thread?.now, "Mide la memoria");
         assert.equal(thread?.updatedAt, "2026-11-02T09:00:00.000Z");
         assert.equal(thread?.status, "running");
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("reads the plans, and tells a missing file from a broken one", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { dir, write } = yield* makePanel;
+        assert.equal((yield* snapshot(dir)).plans?.status, "missing");
+        yield* write("planes.json", { plans: [{ id: "memoria" }] });
+        assert.equal((yield* snapshot(dir)).plans?.status, "invalid");
+        yield* write("planes.json", {
+          plans: [
+            {
+              id: "memoria",
+              name: "Memoria",
+              color: "#0d9488",
+              threads: ["Performance"],
+              steps: [{ label: "Informe", status: "doing" }],
+            },
+          ],
+        });
+        const { plans } = yield* snapshot(dir);
+        assert.equal(plans?.status === "ok" ? plans.data.plans[0]?.name : null, "Memoria");
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
   );

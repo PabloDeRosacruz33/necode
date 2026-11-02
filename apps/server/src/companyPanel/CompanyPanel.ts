@@ -10,6 +10,7 @@ import {
   CompanyPanelDecisionsFile,
   CompanyPanelError,
   CompanyPanelHealthFile,
+  CompanyPanelPlansFile,
   CompanyPanelTestsFile,
   IsoDateTime,
   type CompanyPanelAnswer,
@@ -41,9 +42,12 @@ const ThreadNotesFile = Schema.Struct({
     Schema.Struct({
       name: Schema.String,
       phrase: Schema.optional(Schema.String),
-      detail: Schema.optional(Schema.String),
+      done: Schema.optional(Schema.String),
+      now: Schema.optional(Schema.String),
+      next: Schema.optional(Schema.String),
+      needsYou: Schema.optional(Schema.String),
+      waitingFor: Schema.optional(Schema.String),
       updatedAt: Schema.optional(IsoDateTime),
-      news: Schema.optional(Schema.Array(Schema.Struct({ at: IsoDateTime, text: Schema.String }))),
     }),
   ),
 });
@@ -156,16 +160,14 @@ export const readCompanyPanelSnapshot = (input: {
     for (const thread of Object.values(threadsFile?.trabajo ?? {})) {
       const state = yield* input.threadStatus(thread.threadId);
       if (state === null) continue;
-      const note = notes.find((candidate) => candidate.name === thread.titulo);
+      const { name: _name, ...note } =
+        notes.find((candidate) => candidate.name === thread.titulo) ?? {};
       threads.push({
+        ...note,
         name: thread.titulo,
         status: state.status,
         backgroundCommands: state.backgroundCommands,
         ...(state.lastActivityAt === null ? {} : { lastActivityAt: state.lastActivityAt }),
-        ...(note?.phrase === undefined ? {} : { phrase: note.phrase }),
-        ...(note?.detail === undefined ? {} : { detail: note.detail }),
-        ...(note?.updatedAt === undefined ? {} : { updatedAt: note.updatedAt }),
-        ...(note?.news === undefined ? {} : { news: note.news }),
       });
     }
     return {
@@ -186,6 +188,7 @@ export const readCompanyPanelSnapshot = (input: {
       costs: yield* readSection(CompanyPanelCostsFile, file("costes.json")),
       health: yield* readSection(CompanyPanelHealthFile, file("salud.json")),
       tests: yield* readSection(CompanyPanelTestsFile, file("pruebas.json")),
+      plans: yield* readSection(CompanyPanelPlansFile, file("planes.json")),
       threads,
     } satisfies CompanyPanelSnapshot;
   });

@@ -5,6 +5,7 @@ import {
   type CompanyPanelDecision,
   type CompanyPanelCostsFile,
   type CompanyPanelSnapshot,
+  type CompanyPanelPlan,
   type CompanyPanelTest,
   type CompanyPanelTestResult,
   type CompanyPanelTestsFile,
@@ -83,7 +84,7 @@ export function costTrend(points: ReadonlyArray<CompanyPanelCostPoint>): CostTre
 export const pendingCompanyDecisions = (snapshot: CompanyPanelSnapshot) =>
   snapshot.decisions.status === "ok" ? snapshot.decisions.data.decisions : [];
 
-export type CompanyPanelDataKind = "decisions" | "costs" | "health" | "tests";
+export type CompanyPanelDataKind = "decisions" | "costs" | "health" | "tests" | "plans";
 
 const HOUR_MS = 3_600_000;
 
@@ -97,12 +98,13 @@ export const COMPANY_PANEL_MAX_AGE_MS: Record<CompanyPanelDataKind, number> = {
   costs: 48 * HOUR_MS,
   tests: 48 * HOUR_MS,
   decisions: 72 * HOUR_MS,
+  plans: 72 * HOUR_MS,
 };
 
 /** "Viejo · hace 5 h" when a file stopped being published, so it does not pass for current. */
 export function companyPanelStaleLabel(
   kind: CompanyPanelDataKind,
-  section: CompanyPanelSnapshot["health" | "costs" | "tests" | "decisions"],
+  section: NonNullable<CompanyPanelSnapshot["health" | "costs" | "tests" | "decisions" | "plans"]>,
   nowMs: number,
 ): string | null {
   if (section.status !== "ok") return null;
@@ -390,12 +392,43 @@ export const COMPANY_PANEL_COLORS = {
   decision: "#8b5cf6",
   idle: "#7b8088",
   failed: "#e5484d",
+  /** A thread or test outside every plan. */
+  noPlan: "#475569",
   parts: ["#346bf1", "#2dd4bf", "#fbbf24", "#c084fc", "#fb7185", "#a3e635"],
 } as const;
 
 const SILENT_AFTER_MS = 15 * 60_000;
 
 export type CompanyThreadTone = "working" | "decision" | "idle" | "failed";
+
+/** The band on a thread's tile, in a colour no plan may use, so state and plan never mix up. */
+export const COMPANY_THREAD_TONES: Record<
+  CompanyThreadTone,
+  { readonly color: string; readonly icon: string; readonly label: string }
+> = {
+  working: { color: COMPANY_PANEL_COLORS.working, icon: "▶\uFE0E", label: "Trabajando" },
+  decision: { color: COMPANY_PANEL_COLORS.decision, icon: "?", label: "Tu decisión" },
+  idle: { color: COMPANY_PANEL_COLORS.idle, icon: "Ⅱ", label: "Parado" },
+  failed: { color: COMPANY_PANEL_COLORS.failed, icon: "!", label: "Fallo" },
+};
+
+export const companyPanelPlans = (snapshot: CompanyPanelSnapshot) =>
+  snapshot.plans?.status === "ok" ? snapshot.plans.data.plans : [];
+
+/** A plan's colour, or the no-plan one if the file's is not "#rrggbb". */
+export const companyPlanColor = (color: string) =>
+  /^#[0-9a-f]{6}$/i.test(color) ? color : COMPANY_PANEL_COLORS.noPlan;
+
+/** The plan a thread paints with; threads outside every plan are the system's. */
+export function companyThreadPlan(
+  threadName: string,
+  plans: ReadonlyArray<CompanyPanelPlan>,
+): { readonly name: string; readonly color: string } {
+  const plan = plans.find((candidate) => candidate.threads?.includes(threadName));
+  return plan
+    ? { name: plan.name, color: companyPlanColor(plan.color) }
+    : { name: "Sistema", color: COMPANY_PANEL_COLORS.noPlan };
+}
 
 /**
  * A thread's tile. Its colour only comes from what the server sees, never from the coordinator's
@@ -414,7 +447,7 @@ export function companyThreadTile(
   const view = companyThreadStatusView(thread.status);
   if (view.tone === "bad") return { tone: "failed", state: view.label, caveat: null };
   if (input.decisionThreads.has(thread.name)) {
-    return { tone: "decision", state: "Tiene una decisión", caveat: null };
+    return { tone: "decision", state: "Tu decisión", caveat: null };
   }
   if (view.tone === "active") {
     const last = thread.lastActivityAt ? Date.parse(thread.lastActivityAt) : Number.NaN;
@@ -456,6 +489,7 @@ export interface CompanyTestRow {
   readonly id: string;
   readonly suite: string;
   readonly message: string;
+  readonly plan: string | null;
   /** Its state in the current version; "untested" if it has not run in it. */
   readonly state: CompanyTestState;
   readonly why: string | null;
@@ -506,6 +540,7 @@ export function companyTestsByVersion(file: CompanyPanelTestsFile) {
       id: test.id,
       suite: test.suite,
       message: test.message,
+      plan: test.plan ?? null,
       state: current?.result ?? "untested",
       why: current?.why ?? null,
       previous: previous ? { version: previous.version, result: previous.result } : null,
@@ -541,6 +576,52 @@ export function companyTestsVersionHeading(
   };
 }
 
+/**
+ * One row per plan, with the tests of each. A plan without tests stays, because that is worth
+ * seeing; tests with no plan or an unknown one go in a last row, so that none silently disappears.
+ */
+export function companyTestsByPlan(
+  rows: ReadonlyArray<CompanyTestRow>,
+  plans: ReadonlyArray<CompanyPanelPlan>,
+) {
+  const known = new Set(plans.map((plan) => plan.id));
+  const group = (id: string, name: string, color: string, inGroup: typeof rows) => ({
+    id,
+    name,
+    color,
+    rows: inGroup,
+    tally: tallyOf(inGroup),
+  });
+  const outside = rows.filter((row) => row.plan === null || !known.has(row.plan));
+  return [
+    ...plans.map((plan) =>
+      group(
+        plan.id,
+        plan.name,
+        companyPlanColor(plan.color),
+        rows.filter((row) => row.plan === plan.id),
+      ),
+    ),
+    ...(outside.length > 0 ? [group("", "Sin plan", COMPANY_PANEL_COLORS.noPlan, outside)] : []),
+  ];
+}
+
+/** "2 de Memoria, 1 de DevOps", or null when that day's split is not known. */
+export function companyErrorsByPlanText(
+  day: {
+    readonly byPlan?: ReadonlyArray<{ readonly plan: string; readonly count: number }> | undefined;
+  },
+  plans: ReadonlyArray<CompanyPanelPlan>,
+): string | null {
+  if (day.byPlan === undefined) return null;
+  return day.byPlan
+    .map(
+      (entry) =>
+        `${entry.count} de ${plans.find((plan) => plan.id === entry.plan)?.name ?? entry.plan}`,
+    )
+    .join(", ");
+}
+
 /** Plain words for a test's state in the current version, and for its last run elsewhere. */
 export function companyTestStateLabel(row: CompanyTestRow): string {
   switch (row.state) {
@@ -569,12 +650,8 @@ export function companyTestStateLabel(row: CompanyTestRow): string {
 }
 
 /** The errors of the last 15 days, oldest first, and the newest day that has a figure. */
-export function companyErrorDays(
-  days: ReadonlyArray<{
-    readonly date: string;
-    readonly count: number;
-    readonly detail?: string | undefined;
-  }>,
+export function companyErrorDays<Day extends { readonly date: string; readonly count: number }>(
+  days: ReadonlyArray<Day>,
   nowMs: number,
 ) {
   const recent = days.slice(-15);

@@ -131,6 +131,10 @@ export const CompanyPanelHealthFile = Schema.Struct({
         date: TrimmedNonEmptyString,
         count: Schema.Number,
         detail: Schema.optional(Schema.String),
+        /** How that day's errors split by plan, when it can be known. */
+        byPlan: Schema.optional(
+          Schema.Array(Schema.Struct({ plan: TrimmedNonEmptyString, count: Schema.Number })),
+        ),
       }),
     ),
   ),
@@ -174,6 +178,8 @@ export type CompanyPanelTestResult = typeof CompanyPanelTestResult.Type;
 export const CompanyPanelTest = Schema.Struct({
   id: TrimmedNonEmptyString,
   suite: TrimmedNonEmptyString,
+  /** The `id` of the plan it belongs to, from `planes.json`. */
+  plan: Schema.optional(TrimmedNonEmptyString),
   message: Schema.String,
   /** Every time it ran. Empty means it has to be tested and never was. */
   runs: Schema.Array(
@@ -212,6 +218,33 @@ export const CompanyPanelTestsFile = Schema.Struct({
 });
 export type CompanyPanelTestsFile = typeof CompanyPanelTestsFile.Type;
 
+export const CompanyPanelPlanStepStatus = Schema.Literals(["done", "doing", "todo"]);
+export type CompanyPanelPlanStepStatus = typeof CompanyPanelPlanStepStatus.Type;
+
+export const CompanyPanelPlan = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  /** "#rrggbb". Fixed for the plan's life; never one of the thread states' colours. */
+  color: TrimmedNonEmptyString,
+  /** A few words beside the name, such as "2 de 3 informes". */
+  summary: Schema.optional(Schema.String),
+  /** Names of the threads working on it, as `titulo` in `hilos.json`. */
+  threads: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  steps: Schema.Array(
+    Schema.Struct({
+      /** A word or two, shown under the step's bar. */
+      label: TrimmedNonEmptyString,
+      status: CompanyPanelPlanStepStatus,
+      /** The sentence shown when the plan is opened; without it, the label. */
+      detail: Schema.optional(Schema.String),
+    }),
+  ),
+});
+export type CompanyPanelPlan = typeof CompanyPanelPlan.Type;
+
+export const CompanyPanelPlansFile = Schema.Struct({ plans: Schema.Array(CompanyPanelPlan) });
+export type CompanyPanelPlansFile = typeof CompanyPanelPlansFile.Type;
+
 const section = <S extends Schema.Top>(data: S) =>
   Schema.Union([
     Schema.Struct({ status: Schema.Literal("missing") }),
@@ -236,9 +269,13 @@ export const CompanyPanelThreadActivity = Schema.Struct({
   backgroundCommands: Schema.optional(Schema.Number),
   /** Written by hand by the coordinator, so they carry their time and may be old. */
   phrase: Schema.optional(Schema.String),
-  detail: Schema.optional(Schema.String),
+  done: Schema.optional(Schema.String),
+  now: Schema.optional(Schema.String),
+  next: Schema.optional(Schema.String),
+  /** Only when they apply: what it needs from the reader, and who it waits for. */
+  needsYou: Schema.optional(Schema.String),
+  waitingFor: Schema.optional(Schema.String),
   updatedAt: Schema.optional(IsoDateTime),
-  news: Schema.optional(Schema.Array(Schema.Struct({ at: IsoDateTime, text: Schema.String }))),
 });
 export type CompanyPanelThreadActivity = typeof CompanyPanelThreadActivity.Type;
 
@@ -251,6 +288,8 @@ export const CompanyPanelSnapshot = Schema.Struct({
   costs: section(CompanyPanelCostsFile),
   health: section(CompanyPanelHealthFile),
   tests: section(CompanyPanelTestsFile),
+  /** Optional: a server older than this client does not send it. */
+  plans: Schema.optional(section(CompanyPanelPlansFile)),
   threads: Schema.Array(CompanyPanelThreadActivity),
 });
 export type CompanyPanelSnapshot = typeof CompanyPanelSnapshot.Type;

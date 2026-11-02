@@ -3,6 +3,10 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   companyTestsVersionHeading,
   companyErrorDays,
+  companyErrorsByPlanText,
+  companyPlanColor,
+  companyTestsByPlan,
+  companyThreadPlan,
   companyTestStateLabel,
   companyDatabaseIsStale,
   companyTestsByVersion,
@@ -331,6 +335,7 @@ describe("companyTestStateLabel", () => {
     id: "x",
     suite: "s",
     message: "m",
+    plan: null,
     why: null,
     history: [],
   };
@@ -428,5 +433,60 @@ describe("the decision's seal and matrix", () => {
     });
     expect(matrix.threads[0]?.optionId).toBeNull();
     expect(matrix.columns.every((column) => column.total === 0)).toBe(true);
+  });
+});
+
+describe("plans", () => {
+  const plan = (id: string, name: string, threads: ReadonlyArray<string> = []) => ({
+    id,
+    name,
+    color: "#0d9488",
+    threads,
+    steps: [],
+  });
+  const row = (id: string, planId: string | null, state: "passed" | "failed" | "untested") => ({
+    id,
+    suite: "s",
+    message: id,
+    plan: planId,
+    state,
+    why: null,
+    previous: null,
+    history: [],
+  });
+
+  it("paints a thread with its plan, and outside every plan as the system", () => {
+    const plans = [plan("memoria", "Memoria", ["Performance"])];
+    expect(companyThreadPlan("Performance", plans).name).toBe("Memoria");
+    expect(companyThreadPlan("Coordinador", plans).name).toBe("Sistema");
+  });
+
+  it("does not trust a colour that is not one", () => {
+    expect(companyPlanColor("#0D9488")).toBe("#0D9488");
+    expect(companyPlanColor("red;background:url(x)")).toBe("#475569");
+  });
+
+  it("splits tests by plan without losing any, and keeps a plan that has none", () => {
+    const groups = companyTestsByPlan(
+      [row("a", "memoria", "passed"), row("b", "memoria", "failed"), row("c", null, "untested")],
+      [plan("memoria", "Memoria"), plan("devops", "DevOps")],
+    );
+    expect(groups.map((group) => [group.name, group.rows.length])).toEqual([
+      ["Memoria", 2],
+      ["DevOps", 0],
+      ["Sin plan", 1],
+    ]);
+    expect(groups[0]?.tally.failed).toBe(1);
+    expect(
+      companyTestsByPlan([row("x", "borrado", "passed")], [plan("memoria", "Memoria")])[1]?.name,
+    ).toBe("Sin plan");
+  });
+
+  it("says when the errors' split is unknown instead of inventing one", () => {
+    const plans = [plan("memoria", "Memoria")];
+    expect(companyErrorsByPlanText({}, plans)).toBeNull();
+    expect(companyErrorsByPlanText({ byPlan: [{ plan: "memoria", count: 2 }] }, plans)).toBe(
+      "2 de Memoria",
+    );
   });
 });
