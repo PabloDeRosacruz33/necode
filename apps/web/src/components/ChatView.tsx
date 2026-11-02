@@ -364,6 +364,8 @@ import {
 import { threadEnvironment } from "../state/threads";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
+import { companyPanelEnvironment } from "../state/companyPanel";
+import { CompanyPanel } from "./company/CompanyPanel";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useProjectClone } from "../state/projectClones";
 import { projectCloneDisplayName, projectCloneProgressSummary } from "@t3tools/contracts";
@@ -3776,6 +3778,14 @@ export default function ChatView(props: ChatViewProps) {
     useRightPanelStore.getState().open(activeThreadRef, "git");
   };
   const addGitSurfaceStable = useStableCallback(addGitSurface);
+  const companyPanelSnapshot = useEnvironmentQuery(
+    companyPanelEnvironment.snapshot({ environmentId, input: {} }),
+  );
+  const addCompanySurface = () => {
+    if (!activeThreadRef) return;
+    useRightPanelStore.getState().open(activeThreadRef, "company");
+  };
+  const addCompanySurfaceStable = useStableCallback(addCompanySurface);
   const supportsThreadPullRequests =
     serverConfig?.environment.capabilities.threadPullRequests === true;
   const visiblePullRequests = visibleThreadPullRequests(
@@ -7888,6 +7898,8 @@ export default function ChatView(props: ChatViewProps) {
         cwd={gitStatusCwd}
         onOpenWorkingTreeDiff={addDiffSurfaceStable}
       />
+    ) : renderedRightPanelSurface?.kind === "company" ? (
+      <CompanyPanel environmentId={environmentId} />
     ) : (
       <RightPanelSurfaceContent
         surface={renderedRightPanelSurface}
@@ -8785,6 +8797,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddDiff={addDiffSurfaceStable}
           onAddFiles={addFilesSurfaceStable}
           onAddGit={addGitSurfaceStable}
+          onAddCompany={companyPanelSnapshot.data?.available ? addCompanySurfaceStable : undefined}
           onAddPullRequest={addPullRequestSurfaceStable}
           onAddPullRequests={addPullRequestsSurfaceStable}
           onAddDevice={addDeviceSurfaceStable}
@@ -8841,6 +8854,9 @@ export default function ChatView(props: ChatViewProps) {
             onAddDiff={addDiffSurfaceStable}
             onAddFiles={addFilesSurfaceStable}
             onAddGit={addGitSurfaceStable}
+            onAddCompany={
+              companyPanelSnapshot.data?.available ? addCompanySurfaceStable : undefined
+            }
             onAddPullRequest={addPullRequestSurfaceStable}
             onAddPullRequests={addPullRequestsSurfaceStable}
             onAddDevice={addDeviceSurfaceStable}

@@ -183,6 +183,10 @@
       "types": "./src/state/commandOutput.ts",
       "default": "./src/state/commandOutput.ts"
     },
+    "./state/company-panel": {
+      "types": "./src/state/companyPanel.ts",
+      "default": "./src/state/companyPanel.ts"
+    },
     "./state/item-support": {
       "types": "./src/state/itemSupport.ts",
       "default": "./src/state/itemSupport.ts"

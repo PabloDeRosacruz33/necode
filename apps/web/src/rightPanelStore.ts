@@ -22,6 +22,7 @@ const RIGHT_PANEL_KINDS = [
   "pull-request",
   "pull-requests",
   "git",
+  "company",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -80,7 +81,8 @@ export type RightPanelSurface =
     }
   /** The thread's linked pull requests, one singleton tab beside any number of `pull-request` tabs. */
   | { id: "pull-requests"; kind: "pull-requests" }
-  | { id: "git"; kind: "git" };
+  | { id: "git"; kind: "git" }
+  | { id: "company"; kind: "company" };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 const RIGHT_PANEL_STORAGE_VERSION = 14;
@@ -217,6 +219,8 @@ const singletonSurface = (
       return { id: "pull-requests", kind };
     case "git":
       return { id: "git", kind };
+    case "company":
+      return { id: "company", kind };
     case "device":
       return { id: "device", kind };
   }

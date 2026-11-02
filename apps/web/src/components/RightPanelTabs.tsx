@@ -33,6 +33,7 @@ import {
   FileDiff,
   Files,
   GitGraph,
+  LayoutDashboard,
   Globe2,
   Plus,
   TerminalSquare,
@@ -136,6 +137,8 @@ interface RightPanelTabsProps {
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddGit: () => void;
+  /** Only where this person has a company panel. */
+  onAddCompany?: (() => void) | undefined;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
   onAddDevice: () => void;
@@ -316,6 +319,8 @@ function RightPanelEmptyState(props: {
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddGit: () => void;
+  /** Only where this person has a company panel. */
+  onAddCompany?: (() => void) | undefined;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
   onAddDevice: () => void;
@@ -372,6 +377,20 @@ function RightPanelEmptyState(props: {
       onClick: props.onAddGit,
       badgeCount: 0,
     },
+    ...(props.onAddCompany
+      ? [
+          {
+            label: "Panel",
+            description: "Decisions, costs and health of the company.",
+            icon: LayoutDashboard,
+            shortcut: "E",
+            available: true,
+            disabledReason: "",
+            onClick: props.onAddCompany,
+            badgeCount: 0,
+          },
+        ]
+      : []),
     {
       label: "Pull request",
       icon: PullRequestGlyph.pullRequest,
@@ -581,6 +600,8 @@ function surfaceTitle(
       return "Pull requests";
     case "git":
       return "Git";
+    case "company":
+      return "Panel";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
     case "preview": {
@@ -666,6 +687,8 @@ function SurfaceIcon({
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
     case "git":
       return <GitGraph className="size-3 shrink-0" />;
+    case "company":
+      return <LayoutDashboard className="size-3 shrink-0" />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />
@@ -933,6 +956,18 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       disabledReason: SURFACE_DISABLED_REASONS.git,
       onClick: props.onAddGit,
     },
+    ...(props.onAddCompany
+      ? [
+          {
+            label: "Panel",
+            icon: LayoutDashboard,
+            shortcut: "E",
+            available: true,
+            disabledReason: "",
+            onClick: props.onAddCompany,
+          },
+        ]
+      : []),
     {
       label: "Pull request",
       icon: PullRequestGlyph.pullRequest,
@@ -1410,6 +1445,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
             onAddGit={props.onAddGit}
+            onAddCompany={props.onAddCompany}
             onAddPullRequest={props.onAddPullRequest}
             onAddPullRequests={props.onAddPullRequests}
             onAddDevice={props.onAddDevice}
