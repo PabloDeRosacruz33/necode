@@ -307,30 +307,21 @@ export function companyPanelShortDate(date: string): string {
 }
 
 /** What the cache number means for someone who has never heard of a cache. */
-export function companyCacheView(percent: number): {
-  readonly sentence: string;
-  readonly tone: CompanyPanelTone;
-} {
-  const rounded = Math.round(percent);
-  return {
-    sentence: `De cada 100 palabras que lee el empleado, ${rounded} ya las tenía guardadas. Cuantas más, más barato.`,
-    tone: percent >= 80 ? "good" : percent >= 50 ? "warning" : "bad",
-  };
-}
-
-export const COMPANY_DATABASE_SENTENCE =
-  "Lo que lee la base de datos en un día. Cuanto menos, más rápida va la app y menos cuesta.";
-
 /** Against the level to stay under, when someone has set one; without it there is no verdict. */
 export function companyDatabaseView(database: {
   readonly readGbPerDay: number;
   readonly targetGbPerDay?: number | undefined;
-}): { readonly percent: number; readonly tone: CompanyPanelTone } | null {
+}): {
+  readonly percent: number;
+  readonly percentOfWarning: number;
+  readonly tone: CompanyPanelTone;
+} | null {
   const { readGbPerDay, targetGbPerDay } = database;
   if (targetGbPerDay === undefined || targetGbPerDay <= 0) return null;
   const ratio = readGbPerDay / targetGbPerDay;
   return {
     percent: Math.min(ratio * 100, 100),
+    percentOfWarning: Math.round(ratio * 100),
     tone: ratio <= 0.8 ? "good" : ratio <= 1 ? "warning" : "bad",
   };
 }
@@ -352,33 +343,39 @@ export type CompanyThreadTone = "working" | "decision" | "idle" | "failed";
  * A thread's tile. Its colour only comes from what the server sees, never from the coordinator's
  * note: blue needs a turn in progress that actually produced something lately, because a turn can
  * say running with its process dead, and "finished" says nothing of commands left in the background.
+ * `caveat` is what the colour alone does not tell.
  */
 export function companyThreadTile(
   thread: CompanyPanelThreadActivity,
   input: { readonly nowMs: number; readonly decisionThreads: ReadonlySet<string> },
-): { readonly tone: CompanyThreadTone; readonly state: string } {
+): {
+  readonly tone: CompanyThreadTone;
+  readonly state: string;
+  readonly caveat: string | null;
+} {
   const view = companyThreadStatusView(thread.status);
-  if (view.tone === "bad") return { tone: "failed", state: view.label };
+  if (view.tone === "bad") return { tone: "failed", state: view.label, caveat: null };
   if (input.decisionThreads.has(thread.name)) {
-    return { tone: "decision", state: "Tiene una decisión" };
+    return { tone: "decision", state: "Tiene una decisión", caveat: null };
   }
   if (view.tone === "active") {
     const last = thread.lastActivityAt ? Date.parse(thread.lastActivityAt) : Number.NaN;
     const silentMs = input.nowMs - last;
     if (Number.isFinite(silentMs) && silentMs <= SILENT_AFTER_MS) {
-      return { tone: "working", state: "Trabajando" };
+      return { tone: "working", state: "Trabajando", caveat: null };
     }
-    return {
-      tone: "idle",
-      state: Number.isFinite(silentMs)
-        ? `Dice que trabaja; sin señal hace ${Math.round(silentMs / 60_000)} min`
-        : "Dice que trabaja; sin señal",
-    };
+    const state = Number.isFinite(silentMs)
+      ? `Dice que trabaja; sin señal hace ${Math.round(silentMs / 60_000)} min`
+      : "Dice que trabaja; sin señal";
+    return { tone: "idle", state, caveat: state };
   }
   if ((thread.backgroundCommands ?? 0) > 0) {
-    return { tone: "idle", state: "Terminó su turno; comandos en segundo plano sin confirmar" };
+    const state = "Terminó su turno; comandos en segundo plano sin confirmar";
+    return { tone: "idle", state, caveat: state };
   }
-  return { tone: "idle", state: view.tone === "warning" ? view.label : "Parado" };
+  return view.tone === "warning"
+    ? { tone: "idle", state: view.label, caveat: view.label }
+    : { tone: "idle", state: "Parado", caveat: null };
 }
 
 /** "hace 3 min", for data that is measured every few minutes rather than live. */
@@ -471,10 +468,50 @@ export function companyTestsByVersion(file: CompanyPanelTestsFile) {
   };
 }
 
-/** The errors of the last 15 days, oldest first, and how many today. */
+/** Plain words for a test's state in the current version, and for its last run elsewhere. */
+export function companyTestStateLabel(row: CompanyTestRow): string {
+  switch (row.state) {
+    case "passed":
+      return "Bien";
+    case "failed":
+      return "Falla";
+    case "warning":
+      return "Con aviso";
+    case "pending":
+      return "Pendiente";
+    case "skipped":
+      return "Sin resultado";
+    case "untested": {
+      if (row.previous === null) return "Sin probar nunca";
+      const verdict: Record<CompanyPanelTestResult, string> = {
+        passed: "bien",
+        failed: "falló",
+        warning: "con aviso",
+        pending: "pendiente",
+        skipped: "sin resultado",
+      };
+      return `Sin probar en esta versión · ${verdict[row.previous.result]} en ${row.previous.version}`;
+    }
+  }
+}
+
+/** The errors of the last 15 days, oldest first, and the newest day that has a figure. */
 export function companyErrorDays(
-  days: ReadonlyArray<{ readonly date: string; readonly count: number }>,
+  days: ReadonlyArray<{
+    readonly date: string;
+    readonly count: number;
+    readonly detail?: string | undefined;
+  }>,
+  nowMs: number,
 ) {
   const recent = days.slice(-15);
-  return { days: recent, today: recent.at(-1)?.count ?? 0 };
+  const latest = recent.at(-1) ?? null;
+  // @effect-diagnostics-next-line globalDate:off
+  const now = new Date(nowMs);
+  const today = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+  return { days: recent, latest, latestIsToday: latest?.date === today };
 }

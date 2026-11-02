@@ -3,18 +3,22 @@
  * without asking a thread. Same data as the desktop panel; what has no data says so, never a zero.
  */
 import {
-  COMPANY_DATABASE_SENTENCE,
+  COMPANY_PANEL_COLORS,
   COMPANY_PANEL_JOB_KINDS,
   COMPANY_PANEL_REFRESH_MS,
-  companyCacheView,
+  companyDatabaseIsStale,
   companyDatabaseView,
+  companyErrorDays,
+  companyPanelAgo,
+  companyTestsByVersion,
+  companyTestStateLabel,
+  companyThreadTile,
   companyPanelJobKind,
   companyPanelJobsByUrgency,
   companyPanelJobTally,
   companyPanelShortDate,
   companyPanelShortLabel,
   companyPanelSuites,
-  companyThreadStatusView,
   companyDecisionConsensus,
   companyDecisionOptionIndex,
   companyDecisionOptionLetter,
@@ -31,27 +35,25 @@ import type {
   CompanyPanelJobKind,
   CompanyPanelJobTally,
   CompanyPanelTone,
+  CompanyTestState,
+  CompanyTestTally,
+  CompanyThreadTone,
 } from "@t3tools/client-runtime/state/company-panel";
 import type {
   CompanyPanelAnswer,
   CompanyPanelCostsFile,
   CompanyPanelDecision,
   CompanyPanelHealthFile,
+  CompanyPanelLogTone,
   CompanyPanelSnapshot,
   CompanyPanelSystemStatus,
   CompanyPanelTestsFile,
+  CompanyPanelThreadActivity,
   EnvironmentId,
 } from "@t3tools/contracts";
 import { createContext, use, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import {
-  Animated,
-  Modal,
-  PanResponder,
-  Pressable,
-  ScrollView,
-  TextInput,
-  View,
-} from "react-native";
+import { Animated, PanResponder, Pressable, ScrollView, TextInput, View } from "react-native";
+import Svg, { Circle, Line, Polyline, Text as SvgText } from "react-native-svg";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
@@ -73,13 +75,18 @@ const STATUS_COLOR: Record<CompanyPanelSystemStatus, string> = {
   down: RED,
 };
 
+// Spanish leaves four digits ungrouped and Hermes has no way to ask otherwise: 1345 → 1.345.
+const grouped = (text: string) => text.replace(/\b(\d)(\d{3})\b/, "$1.$2");
+
 const money = (amount: number, currency: string) => {
   try {
-    return new Intl.NumberFormat("es-ES", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 0,
-    }).format(amount);
+    return grouped(
+      new Intl.NumberFormat("es-ES", {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 0,
+      }).format(amount),
+    );
   } catch {
     return `${Math.round(amount)} ${currency}`;
   }
@@ -159,14 +166,6 @@ function SliceBar(props: {
         .map((slice) => (
           <View key={slice.key} style={{ flex: slice.value, backgroundColor: slice.color }} />
         ))}
-    </View>
-  );
-}
-
-function Gauge({ percent, color }: { percent: number; color: string }) {
-  return (
-    <View className="my-1.5 h-2 overflow-hidden rounded-full bg-subtle">
-      <View className="h-full" style={{ width: `${percent}%`, backgroundColor: color }} />
     </View>
   );
 }
@@ -309,30 +308,38 @@ function Simulator({ costs }: { costs: CompanyPanelCostsFile }) {
         onMinus={() => setImageFifths((value) => clamp(value - 1, 1, 5))}
         onPlus={() => setImageFifths((value) => clamp(value + 1, 1, 5))}
       />
-      <Sub>Al mes</Sub>
-      <Text className="text-2xl text-foreground">
-        {money(
-          simulateMonthlyCost(costs.simulator, { people, volume, imageFifths }),
-          costs.currency,
-        )}
-      </Text>
+      <View className="mt-2 flex-row items-baseline justify-between gap-3 border-t border-separator pt-3">
+        <Sub>
+          {money(
+            simulateMonthlyCost(costs.simulator, { people, volume, imageFifths }) / people,
+            costs.currency,
+          )}{" "}
+          por persona
+        </Sub>
+        <Text className="font-t3-medium text-2xl text-foreground">
+          {money(
+            simulateMonthlyCost(costs.simulator, { people, volume, imageFifths }),
+            costs.currency,
+          )}{" "}
+          <Text className="text-xs text-foreground-muted">al mes</Text>
+        </Text>
+      </View>
     </View>
   );
 }
 
 function ErrorHeat({ health }: { health: CompanyPanelHealthFile }) {
-  const days = health.errorsByDay;
-  if (!days) return <NoData what="errores por día" />;
-  const max = Math.max(...days.map((day) => day.count), 1);
+  const fetchedAt = use(FetchedAtContext);
+  if (!health.errorsByDay) return <NoData what="errores por día" />;
+  const { days } = companyErrorDays(health.errorsByDay, fetchedAt);
   return (
-    <View className="mt-2 flex-row flex-wrap gap-0.5">
+    <View className="flex-row gap-0.5">
       {days.map((day) => (
         <View
           key={day.date}
-          className="h-4 w-4 rounded-xs"
+          className="aspect-square flex-1 rounded-xs"
           style={{
-            backgroundColor: day.count === 0 ? GREEN : day.count / max > 0.5 ? RED : AMBER,
-            opacity: day.count === 0 ? 0.35 : 0.5 + (day.count / max) * 0.5,
+            backgroundColor: day.count === 0 ? "#8883" : day.count > 5 ? RED : AMBER,
           }}
         />
       ))}
@@ -501,54 +508,6 @@ function JobsLog({ tests }: { tests: CompanyPanelTestsFile }) {
   );
 }
 
-function ThreadsList({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
-  if (snapshot.threads.length === 0) return <NoData what="hilos" />;
-  return (
-    <>
-      {snapshot.threads.map((thread) => {
-        const view = companyThreadStatusView(thread.status);
-        return (
-          <View key={thread.name} className="mt-1.5 flex-row items-center gap-2">
-            <View
-              className="h-2 w-2 rounded-full"
-              style={{ backgroundColor: TONE_COLOR[view.tone] }}
-            />
-            <Text className="min-w-0 flex-1 text-xs text-foreground" numberOfLines={1}>
-              {thread.name}
-            </Text>
-            <Sub>{view.label}</Sub>
-          </View>
-        );
-      })}
-    </>
-  );
-}
-
-function CacheView({ percent }: { percent: number }) {
-  const view = companyCacheView(percent);
-  return (
-    <>
-      <Big>{Math.round(percent)} %</Big>
-      <Gauge percent={percent} color={TONE_COLOR[view.tone]} />
-      <Sub>{view.sentence}</Sub>
-    </>
-  );
-}
-
-function DatabaseView({ health }: { health: CompanyPanelHealthFile }) {
-  const { database } = health;
-  if (!database) return <NoData />;
-  const view = companyDatabaseView(database);
-  return (
-    <>
-      <Big>{Math.round(database.readGbPerDay)} GB</Big>
-      {view ? <Gauge percent={view.percent} color={TONE_COLOR[view.tone]} /> : null}
-      <Sub>{COMPANY_DATABASE_SENTENCE}</Sub>
-      {view ? null : <NoData what="falta un límite para saber si es mucho" />}
-    </>
-  );
-}
-
 /** The battery at a glance: how much of it is done, as a bar. */
 const TestsLine = ({ tests }: { tests: CompanyPanelTestsFile }) => (
   <>
@@ -683,8 +642,6 @@ function DecisionCard(props: {
   readonly total: number;
   readonly busy: boolean;
   readonly onAnswer: AnswerFn;
-  /** Where the card is small: pressing anywhere that is not a control opens it large. */
-  readonly onOpen?: (() => void) | undefined;
 }) {
   const { decision, onAnswer } = props;
   const [explained, setExplained] = useState(false);
@@ -727,7 +684,7 @@ function DecisionCard(props: {
       style={{ transform: position.getTranslateTransform() }}
       className="rounded-2xl bg-grouped-card"
     >
-      <Pressable accessible={false} className="p-4" disabled={!props.onOpen} onPress={props.onOpen}>
+      <View className="p-4">
         <Sub>
           Decisión {props.position} de {props.total}
           {decision.area ? ` · ${decision.area}` : ""} ·{" "}
@@ -862,7 +819,7 @@ function DecisionCard(props: {
         ) : (
           <Missing>Falta: nadie ha mirado cómo lo hacen otros.</Missing>
         )}
-      </Pressable>
+      </View>
     </Animated.View>
   );
 }
@@ -871,7 +828,6 @@ function PendingDecision(props: {
   readonly snapshot: CompanyPanelSnapshot;
   readonly busy: boolean;
   readonly onAnswer: AnswerFn;
-  readonly onOpen?: (() => void) | undefined;
 }) {
   const section = props.snapshot.decisions;
   if (section.status !== "ok") {
@@ -896,37 +852,726 @@ function PendingDecision(props: {
       total={section.data.decisions.length}
       busy={props.busy}
       onAnswer={props.onAnswer}
-      onOpen={props.onOpen}
     />
   );
 }
 
-/** The decision on its own full screen, opened by pressing its card. */
-function LargeDecision(props: {
+const PURPLE = COMPANY_PANEL_COLORS.decision;
+const THREAD_TONE_COLOR: Record<CompanyThreadTone, string> = {
+  working: COMPANY_PANEL_COLORS.working,
+  decision: COMPANY_PANEL_COLORS.decision,
+  idle: COMPANY_PANEL_COLORS.idle,
+  failed: COMPANY_PANEL_COLORS.failed,
+};
+const THREAD_TONE_LABEL: ReadonlyArray<readonly [CompanyThreadTone, string]> = [
+  ["working", "Trabajando"],
+  ["decision", "Tiene una decisión"],
+  ["idle", "Parado"],
+  ["failed", "Fallo"],
+];
+const LOG_TONE_COLOR: Record<CompanyPanelLogTone, string> = {
+  good: GREEN,
+  warning: AMBER,
+  bad: RED,
+  neutral: "#888",
+};
+const TEST_STATE_COLOR: Record<CompanyTestState, string> = {
+  passed: GREEN,
+  failed: RED,
+  warning: AMBER,
+  pending: "#888",
+  skipped: "#888",
+  untested: "#8886",
+};
+const STATUS_WORD: Record<CompanyPanelSystemStatus, string> = {
+  ok: "bien",
+  warning: "con aviso",
+  down: "caída",
+};
+
+const Dot = ({ color, size = 8 }: { color: string; size?: number }) => (
+  <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color }} />
+);
+
+const SectionTitle = ({ children }: { children: ReactNode }) => (
+  <View className="mt-4 mb-1.5">
+    <Label>{children}</Label>
+  </View>
+);
+
+/** A block of the home. With `detail`, pressing it opens that detail in place. */
+function Block(props: {
+  readonly title: ReactNode;
+  readonly aside?: ReactNode;
+  readonly openHint?: string;
+  readonly detail?: ReactNode;
+  readonly children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const expandable = props.detail !== undefined;
+  const toggle = () => setOpen((current) => !current);
+  return (
+    <Pressable
+      accessible={false}
+      disabled={!expandable}
+      onPress={toggle}
+      className="rounded-2xl bg-grouped-card p-4"
+    >
+      <View className="mb-3 flex-row flex-wrap items-center justify-between gap-2">
+        <Text className="font-t3-medium text-sm text-foreground">{props.title}</Text>
+        <View className="flex-row items-center gap-2">
+          {props.aside}
+          {expandable ? (
+            <Pressable accessibilityRole="button" hitSlop={8} onPress={toggle}>
+              <Sub>{open ? "Cerrar" : (props.openHint ?? "Pulsa")}</Sub>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+      {props.children}
+      {open ? (
+        <Pressable
+          accessible={false}
+          onPress={() => undefined}
+          className="mt-4 border-t border-separator pt-1"
+        >
+          {props.detail}
+        </Pressable>
+      ) : null}
+    </Pressable>
+  );
+}
+
+/** Lines over a shared x axis; a shorter series just stops early, like today against yesterday. */
+function LineChart(props: {
+  readonly series: ReadonlyArray<{
+    readonly key: string;
+    readonly values: ReadonlyArray<number>;
+    readonly color: string;
+  }>;
+  readonly height: number;
+  readonly first: string;
+  readonly last: string;
+}) {
+  const count = Math.max(...props.series.map((line) => line.values.length));
+  if (count < 2) return null;
+  const width = 460;
+  const baseline = props.height - 2;
+  const max = Math.max(...props.series.flatMap((line) => line.values), 1);
+  const x = (index: number) => (index * width) / (count - 1);
+  const y = (value: number) => baseline - (value / max) * (baseline - 6);
+  return (
+    <View className="mt-2.5">
+      <Svg
+        width="100%"
+        height={props.height}
+        viewBox={`0 0 ${width} ${props.height}`}
+        preserveAspectRatio="none"
+      >
+        <Line x1={0} x2={width} y1={baseline} y2={baseline} stroke="#8884" />
+        {props.series.map((line) => (
+          <Polyline
+            key={line.key}
+            points={line.values.map((value, index) => `${x(index)},${y(value)}`).join(" ")}
+            fill="none"
+            stroke={line.color}
+            strokeWidth={2}
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+      </Svg>
+      <View className="mt-1 flex-row justify-between">
+        <Text className="text-2xs text-foreground-muted">{props.first}</Text>
+        <Text className="text-2xs text-foreground-muted">{props.last}</Text>
+      </View>
+    </View>
+  );
+}
+
+function CacheRing({ percent }: { percent: number }) {
+  const circumference = 2 * Math.PI * 32;
+  return (
+    <View className="mt-3 flex-row items-center gap-3 border-t border-separator pt-3">
+      <Svg width={64} height={64} viewBox="0 0 80 80">
+        <Circle cx={40} cy={40} r={32} fill="none" stroke="#8883" strokeWidth={8} />
+        <Circle
+          cx={40}
+          cy={40}
+          r={32}
+          fill="none"
+          stroke={GREEN}
+          strokeWidth={8}
+          strokeLinecap="round"
+          strokeDasharray={`${(percent / 100) * circumference} ${circumference}`}
+          transform="rotate(-90 40 40)"
+        />
+        <SvgText x={40} y={46} textAnchor="middle" fill={GREEN} fontSize={19} fontWeight="700">
+          {Math.round(percent)}%
+        </SvgText>
+      </Svg>
+      <View className="min-w-0 flex-1">
+        <Text className="font-t3-medium text-xs text-foreground">Caché</Text>
+        <Sub>Lo que no pagamos entero</Sub>
+      </View>
+    </View>
+  );
+}
+
+function CostBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
+  const section = snapshot.costs;
+  const title = (
+    <>
+      Coste por persona
+      <Stale kind="costs" section={section} />
+    </>
+  );
+  if (section.status !== "ok") {
+    return (
+      <Block title={title}>
+        <NoData broken={section.status === "invalid"} />
+      </Block>
+    );
+  }
+  const costs = section.data;
+  const latest = costs.perPerson.at(-1);
+  const first = costs.perPerson[0];
+  if (latest === undefined || first === undefined) {
+    return (
+      <Block title={title}>
+        <NoData what="coste por persona" />
+      </Block>
+    );
+  }
+  const euros = (value: number) => money(value, costs.currency);
+  const moved =
+    latest.total === first.total
+      ? `igual desde el ${companyPanelShortDate(first.date)}`
+      : `${latest.total < first.total ? "bajó" : "subió"} desde ${euros(first.total)}`;
+  const partColor = (index: number) =>
+    COMPANY_PANEL_COLORS.parts[index % COMPANY_PANEL_COLORS.parts.length];
+  const chart = (height: number) => (
+    <LineChart
+      series={[
+        {
+          key: "total",
+          values: costs.perPerson.map((point) => point.total),
+          color: COMPANY_PANEL_COLORS.parts[0],
+        },
+      ]}
+      height={height}
+      first={companyPanelShortDate(first.date)}
+      last={companyPanelShortDate(latest.date)}
+    />
+  );
+  return (
+    <Block
+      title={title}
+      detail={
+        <>
+          <SectionTitle>Por qué bajó</SectionTitle>
+          {chart(130)}
+          {costs.drops?.length ? (
+            <View className="mt-2">
+              {costs.drops.map((drop) => (
+                <View
+                  key={drop.reason}
+                  className="flex-row items-baseline gap-2 border-t border-separator py-1.5"
+                >
+                  <Text className="w-14 text-xs text-foreground">
+                    {drop.amount > 0 ? "+" : "−"}
+                    {euros(Math.abs(drop.amount))}
+                  </Text>
+                  <Dot color={drop.amount > 0 ? RED : GREEN} />
+                  <Text className="min-w-0 flex-1 text-xs text-foreground">{drop.reason}</Text>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <NoData what="por qué se ha movido" />
+          )}
+          <SectionTitle>Cómo se calcula</SectionTitle>
+          <Sub>
+            El día más fuerte de Pablo García ×{" "}
+            {String(costs.simulator?.baseVolume ?? 2.5).replace(".", ",")}, imágenes entre 5 y
+            precios de hoy, a {costs.daysPerMonth} días al mes.
+          </Sub>
+        </>
+      }
+    >
+      <Text className="text-4xl font-t3-medium text-foreground">
+        {euros(latest.total)}{" "}
+        <Text className="text-xs text-foreground-muted">al mes · {moved}</Text>
+      </Text>
+      {chart(72)}
+      <View className="mt-3 h-3 flex-row gap-0.5">
+        {latest.parts.map((part, index) => (
+          <View
+            key={part.name}
+            className="rounded-xs"
+            style={{ flex: part.amount, backgroundColor: partColor(index) }}
+          />
+        ))}
+      </View>
+      <View className="mt-2 flex-row flex-wrap gap-x-3 gap-y-1">
+        {latest.parts.map((part, index) => (
+          <View key={part.name} className="flex-row items-center gap-1">
+            <View className="h-2 w-2 rounded-xs" style={{ backgroundColor: partColor(index) }} />
+            <Text className="text-2xs text-foreground-muted">
+              {part.name} {euros(part.amount)}
+            </Text>
+          </View>
+        ))}
+      </View>
+      {costs.cache ? <CacheRing percent={costs.cache.percent} /> : <NoData what="caché" />}
+    </Block>
+  );
+}
+
+function ThreadDetail({ thread, state }: { thread: CompanyPanelThreadActivity; state: string }) {
+  const fetchedAt = use(FetchedAtContext);
+  return (
+    <View className="mt-4 border-t border-separator pt-3">
+      <Text className="text-sm text-foreground">
+        <Text className="font-t3-medium text-sm text-foreground">{thread.name}</Text> · {state}
+      </Text>
+      <SectionTitle>Qué hace</SectionTitle>
+      {thread.phrase ? (
+        <Text className="text-xs text-foreground">
+          {thread.phrase}
+          {thread.updatedAt ? ` · ${companyPanelAgo(thread.updatedAt, fetchedAt)}` : ""}
+        </Text>
+      ) : (
+        <NoData />
+      )}
+      <SectionTitle>Qué espera</SectionTitle>
+      {thread.detail ? (
+        <Text className="text-xs text-foreground">{thread.detail}</Text>
+      ) : (
+        <NoData />
+      )}
+      <SectionTitle>Últimas novedades</SectionTitle>
+      {thread.news?.length ? (
+        thread.news.map((item) => (
+          <Text
+            key={`${item.at}:${item.text}`}
+            className="border-t border-separator py-1.5 text-xs text-foreground"
+          >
+            {companyPanelAgo(item.at, fetchedAt)} · {item.text}
+          </Text>
+        ))
+      ) : (
+        <NoData />
+      )}
+    </View>
+  );
+}
+
+function ThreadsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
+  const fetchedAt = use(FetchedAtContext);
+  const [selected, setSelected] = useState<string | null>(null);
+  const decisionThreads = new Set(
+    pendingCompanyDecisions(snapshot).flatMap((decision) =>
+      decision.thread ? [decision.thread] : [],
+    ),
+  );
+  const tiles = snapshot.threads.map((thread) => ({
+    thread,
+    tile: companyThreadTile(thread, { nowMs: fetchedAt, decisionThreads }),
+  }));
+  const open = tiles.find((entry) => entry.thread.name === selected);
+  return (
+    <Block title="Hilos">
+      <View className="mb-3 flex-row flex-wrap gap-x-3 gap-y-1">
+        {THREAD_TONE_LABEL.map(([tone, label]) => (
+          <View key={tone} className="flex-row items-center gap-1">
+            <View
+              className="h-2 w-2 rounded-xs"
+              style={{ backgroundColor: THREAD_TONE_COLOR[tone] }}
+            />
+            <Text className="text-2xs text-foreground-muted">{label}</Text>
+          </View>
+        ))}
+      </View>
+      {tiles.length === 0 ? (
+        <NoData what="hilos" />
+      ) : (
+        <View className="flex-row flex-wrap gap-2.5">
+          {tiles.map(({ thread, tile }) => (
+            <Pressable
+              key={thread.name}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: selected === thread.name }}
+              onPress={() =>
+                setSelected((current) => (current === thread.name ? null : thread.name))
+              }
+              className="min-h-23 rounded-xl p-3"
+              style={{
+                backgroundColor: THREAD_TONE_COLOR[tile.tone],
+                flexBasis: "47%",
+                flexGrow: 1,
+                opacity: selected !== null && selected !== thread.name ? 0.75 : 1,
+              }}
+            >
+              <Text className="font-t3-medium text-sm text-white">{thread.name}</Text>
+              <Text className="mt-1 text-xs text-white">
+                {thread.phrase ?? tile.state}
+                {thread.phrase && thread.updatedAt
+                  ? ` · ${companyPanelAgo(thread.updatedAt, fetchedAt)}`
+                  : ""}
+              </Text>
+              {tile.caveat && thread.phrase ? (
+                <Text className="mt-1 text-2xs text-white">{tile.caveat}</Text>
+              ) : null}
+            </Pressable>
+          ))}
+        </View>
+      )}
+      {open ? <ThreadDetail thread={open.thread} state={open.tile.state} /> : null}
+    </Block>
+  );
+}
+
+const Figure = ({ value, children }: { value: string | null; children: ReactNode }) => (
+  <View className="py-1">
+    {value === null ? (
+      <Text className="text-sm italic text-foreground-muted">Sin dato</Text>
+    ) : (
+      <Text className="font-t3-medium text-xl text-foreground">{value}</Text>
+    )}
+    <Sub>{children}</Sub>
+  </View>
+);
+
+const gigabytes = (value: number | undefined) =>
+  value === undefined ? null : `${Math.round(value)} GB`;
+
+function DatabaseBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
+  const fetchedAt = use(FetchedAtContext);
+  const section = snapshot.health;
+  const database = section.status === "ok" ? section.data.database : undefined;
+  if (database === undefined) {
+    return (
+      <Block title="Base de datos">
+        <NoData broken={section.status === "invalid"} />
+      </Block>
+    );
+  }
+  const { checkedAt, status, today, yesterday, log } = database;
+  const old = checkedAt !== undefined && companyDatabaseIsStale(checkedAt, fetchedAt);
+  const view = companyDatabaseView(database);
+  const hours = Math.max(today?.length ?? 0, yesterday?.length ?? 0);
+  return (
+    <Block
+      title={
+        <>
+          {status && !old ? <Text style={{ color: STATUS_COLOR[status] }}>● </Text> : null}
+          Base de datos{status && !old ? `: ${STATUS_WORD[status]}` : ""}
+        </>
+      }
+      aside={
+        checkedAt === undefined ? (
+          <Stale kind="health" section={section} />
+        ) : (
+          <Text className="text-xs text-foreground-muted" style={old ? { color: AMBER } : null}>
+            {old ? "viejo · " : ""}
+            {companyPanelAgo(checkedAt, fetchedAt)}
+          </Text>
+        )
+      }
+      detail={
+        <>
+          <SectionTitle>Lo que ha pasado</SectionTitle>
+          {log?.length ? (
+            log.map((entry) => (
+              <View
+                key={`${entry.at}:${entry.text}`}
+                className="flex-row items-baseline gap-2 border-t border-separator py-1.5"
+              >
+                <Text className="w-20 text-xs text-foreground-muted">
+                  {companyDecisionTime(entry.at, fetchedAt)}
+                </Text>
+                <Dot color={LOG_TONE_COLOR[entry.tone]} />
+                <Text className="min-w-0 flex-1 text-xs text-foreground">{entry.text}</Text>
+              </View>
+            ))
+          ) : (
+            <NoData what="registro" />
+          )}
+        </>
+      }
+    >
+      <Figure
+        value={database.callsPerMinute === undefined ? null : String(database.callsPerMinute)}
+      >
+        llamadas por minuto
+      </Figure>
+      <Figure value={gigabytes(database.readGbToday)}>
+        leídos hoy · ayer {gigabytes(database.readGbYesterday) ?? "sin dato"}
+      </Figure>
+      <Figure value={view ? `${view.percentOfWarning} %` : null}>
+        de nuestro aviso
+        {database.targetGbPerDay ? ` (${grouped(String(database.targetGbPerDay))} GB/día)` : ""}
+        {"\n"}Conexiones{" "}
+        {database.connectionsUsed === undefined || database.connectionsLimit === undefined
+          ? "sin dato"
+          : `${database.connectionsUsed} de ${database.connectionsLimit}`}
+      </Figure>
+      {today || yesterday ? (
+        <>
+          <LineChart
+            series={[
+              { key: "ayer", values: yesterday ?? [], color: "#888" },
+              { key: "hoy", values: today ?? [], color: COMPANY_PANEL_COLORS.parts[0] },
+            ]}
+            height={90}
+            first="0:00"
+            last={`${hours - 1}:00`}
+          />
+          <View className="mt-1.5 flex-row gap-3">
+            <View className="flex-row items-center gap-1">
+              <Dot color={COMPANY_PANEL_COLORS.parts[0]} />
+              <Text className="text-2xs text-foreground-muted">Hoy</Text>
+            </View>
+            <View className="flex-row items-center gap-1">
+              <Dot color="#888" />
+              <Text className="text-2xs text-foreground-muted">Ayer</Text>
+            </View>
+          </View>
+        </>
+      ) : (
+        <NoData what="gráfica de hoy contra ayer" />
+      )}
+    </Block>
+  );
+}
+
+function TestTallyBar({ tally, height }: { tally: CompanyTestTally; height: number }) {
+  const slices = [
+    { key: "ok", value: tally.passed, color: GREEN },
+    { key: "ko", value: tally.failed, color: RED },
+    { key: "warn", value: tally.warning, color: AMBER },
+    { key: "no", value: tally.untested, color: "#8884" },
+  ];
+  return (
+    <View className="flex-row gap-0.5" style={{ height }}>
+      {slices
+        .filter((slice) => slice.value > 0)
+        .map((slice) => (
+          <View
+            key={slice.key}
+            className="rounded-xs"
+            style={{ flex: slice.value, backgroundColor: slice.color }}
+          />
+        ))}
+    </View>
+  );
+}
+
+function TestTallyWords(props: { tally: CompanyTestTally; missing: (count: number) => string }) {
+  const { tally, missing } = props;
+  return (
+    <View className="flex-row flex-wrap gap-x-2">
+      {tally.passed > 0 ? (
+        <Text className="text-xs font-t3-medium" style={{ color: GREEN }}>
+          {tally.passed} bien
+        </Text>
+      ) : null}
+      {tally.failed > 0 ? (
+        <Text className="text-xs font-t3-medium" style={{ color: RED }}>
+          {tally.failed} {tally.failed === 1 ? "falla" : "fallan"}
+        </Text>
+      ) : null}
+      {tally.warning > 0 ? (
+        <Text className="text-xs font-t3-medium" style={{ color: AMBER }}>
+          {tally.warning} con aviso
+        </Text>
+      ) : null}
+      {tally.untested > 0 ? (
+        <Text className="text-xs font-t3-medium text-foreground-muted">
+          {tally.untested} {missing(tally.untested)}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function TestsAndErrorsBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
+  const fetchedAt = use(FetchedAtContext);
+  const tests = snapshot.tests.status === "ok" ? snapshot.tests.data : null;
+  const health = snapshot.health.status === "ok" ? snapshot.health.data : null;
+  const byVersion = tests ? companyTestsByVersion(tests) : null;
+  const errors = health?.errorsByDay ? companyErrorDays(health.errorsByDay, fetchedAt) : null;
+  return (
+    <Block
+      title={
+        <>
+          Pruebas reales y errores
+          <Stale kind="tests" section={snapshot.tests} />
+        </>
+      }
+      {...(byVersion
+        ? {
+            detail: byVersion.rows.map((row) => (
+              <View
+                key={row.id}
+                className="flex-row items-baseline gap-2 border-t border-separator py-1.5"
+                style={row.state === "untested" ? { opacity: 0.6 } : null}
+              >
+                <Dot color={TEST_STATE_COLOR[row.state]} />
+                <View className="min-w-0 flex-1">
+                  <Text className="text-xs text-foreground">{row.message}</Text>
+                  <Sub>
+                    {row.suite} · {companyTestStateLabel(row)}
+                    {row.why ? ` · ${row.why}` : ""}
+                  </Sub>
+                </View>
+                <View className="flex-row items-center gap-1">
+                  {row.history.slice(-8).map((result, index) => (
+                    <Dot key={index} color={TEST_STATE_COLOR[result]} />
+                  ))}
+                </View>
+              </View>
+            )),
+          }
+        : {})}
+    >
+      {byVersion ? (
+        <>
+          <Text className="font-t3-medium text-lg text-foreground">
+            Versión {byVersion.version}
+          </Text>
+          <TestTallyWords tally={byVersion.tally} missing={() => "sin probar"} />
+          <View className="mt-2.5 mb-3.5">
+            <TestTallyBar tally={byVersion.tally} height={22} />
+          </View>
+          {byVersion.suites.map((suite) => (
+            <View key={suite.name} className="gap-1 border-t border-separator py-2">
+              <View className="flex-row flex-wrap items-baseline justify-between gap-2">
+                <Text className="text-xs text-foreground">{suite.name}</Text>
+                <TestTallyWords
+                  tally={suite.tally}
+                  missing={(count) => (count === 1 ? "falta" : "faltan")}
+                />
+              </View>
+              <TestTallyBar tally={suite.tally} height={10} />
+            </View>
+          ))}
+        </>
+      ) : (
+        <NoData
+          broken={snapshot.tests.status === "invalid"}
+          what={snapshot.tests.status === "ok" ? "por versión" : "pruebas"}
+        />
+      )}
+      <View className="mt-3.5 border-t-2 border-separator pt-3.5">
+        {health && errors?.latest ? (
+          <View className="flex-row items-center gap-4">
+            <View>
+              <Text className="font-t3-medium text-2xl text-foreground">{errors.latest.count}</Text>
+              <Sub>
+                {errors.latestIsToday
+                  ? "errores hoy"
+                  : `errores el ${companyPanelShortDate(errors.latest.date)}`}
+              </Sub>
+            </View>
+            <View className="min-w-0 flex-1">
+              <ErrorHeat health={health} />
+              <View className="mt-1.5">
+                <Sub>Últimos 15 días, el último a la derecha</Sub>
+              </View>
+            </View>
+          </View>
+        ) : (
+          <NoData what="errores" />
+        )}
+      </View>
+    </Block>
+  );
+}
+
+function SystemStrip({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
+  const section = snapshot.health;
+  const strip = section.status === "ok" ? section.data.strip : undefined;
+  return (
+    <View className="flex-row flex-wrap items-center gap-3 rounded-2xl bg-grouped-card px-4 py-2.5">
+      <Text className="font-t3-medium text-xs text-foreground">
+        Sistema
+        <Stale kind="health" section={section} />
+      </Text>
+      {strip?.length ? (
+        strip.map((item) => (
+          <View key={item.text} className="flex-row items-center gap-1.5">
+            <Dot color={STATUS_COLOR[item.status]} size={10} />
+            <Text className="text-xs text-foreground">{item.text}</Text>
+          </View>
+        ))
+      ) : (
+        <Text className="text-xs italic text-foreground-muted">Sin dato</Text>
+      )}
+    </View>
+  );
+}
+
+function DecisionsBlock(props: {
   readonly snapshot: CompanyPanelSnapshot;
   readonly busy: boolean;
   readonly onAnswer: AnswerFn;
-  readonly onClose: () => void;
 }) {
+  const { snapshot } = props;
+  const [wantsOpen, setWantsOpen] = useState(false);
+  const pending = pendingCompanyDecisions(snapshot);
+  const first = pending[0];
+  // Answering the last one leaves nothing to show large, so it closes on its own.
+  const open = wantsOpen && first !== undefined;
+  const consensus = first ? companyDecisionConsensus(first) : null;
+  const toggle = () => setWantsOpen((current) => !current);
   return (
-    <Modal
-      visible
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={props.onClose}
+    <Pressable
+      accessible={false}
+      disabled={first === undefined || open}
+      onPress={toggle}
+      className="rounded-2xl border-2 bg-grouped-card p-4"
+      style={{ borderColor: PURPLE }}
     >
-      <View className="flex-1 bg-sheet">
-        <View className="flex-row items-center justify-between p-4">
-          <Text className="font-t3-medium text-base text-foreground">Decisión</Text>
-          <Pressable onPress={props.onClose} className="rounded-full bg-subtle px-3 py-1.5">
-            <Text className="text-sm text-foreground">Cerrar</Text>
+      <View className="mb-3 flex-row items-center justify-between gap-2">
+        <Text className="font-t3-medium text-sm text-foreground">
+          Decisiones
+          <Stale kind="decisions" section={snapshot.decisions} />
+        </Text>
+        {first === undefined ? null : (
+          <Pressable accessibilityRole="button" hitSlop={8} onPress={toggle}>
+            <Sub>{open ? "Cerrar" : "Pulsa"}</Sub>
           </Pressable>
-        </View>
-        <ScrollView contentContainerClassName="px-4 pb-16" keyboardShouldPersistTaps="handled">
-          <PendingDecision snapshot={props.snapshot} busy={props.busy} onAnswer={props.onAnswer} />
-        </ScrollView>
+        )}
       </View>
-    </Modal>
+      {snapshot.decisions.status === "ok" ? (
+        <Text className="text-4xl font-t3-medium" style={{ color: PURPLE }}>
+          {pending.length}{" "}
+          <Text className="text-xs text-foreground-muted">
+            {pending.length === 1 ? "pendiente" : "pendientes"}
+          </Text>
+        </Text>
+      ) : null}
+      {open || first === undefined ? (
+        <View className="mt-3">
+          <PendingDecision snapshot={snapshot} busy={props.busy} onAnswer={props.onAnswer} />
+        </View>
+      ) : (
+        <>
+          <Text className="mt-3 font-t3-medium text-sm text-foreground">{first.title}</Text>
+          <View className="mt-1.5">
+            <Sub>
+              {consensus === null
+                ? "Faltan las opiniones de los hilos"
+                : consensus.optionIndex === null
+                  ? "Los hilos no se ponen de acuerdo"
+                  : `${consensus.count} de ${consensus.total} hilos recomiendan ${companyDecisionOptionLetter(consensus.optionIndex)}`}
+            </Sub>
+          </View>
+        </>
+      )}
+    </Pressable>
   );
 }
 
@@ -937,90 +1582,15 @@ function HomeTab(props: {
 }) {
   const { snapshot } = props;
   const costs = snapshot.costs.status === "ok" ? snapshot.costs.data : null;
-  const health = snapshot.health.status === "ok" ? snapshot.health.data : null;
-  const tests = snapshot.tests.status === "ok" ? snapshot.tests.data : null;
-  const [decisionOpen, setDecisionOpen] = useState(false);
   return (
-    <View className="gap-2">
-      {decisionOpen ? (
-        <LargeDecision
-          snapshot={snapshot}
-          busy={props.busy}
-          onAnswer={props.onAnswer}
-          onClose={() => setDecisionOpen(false)}
-        />
-      ) : null}
-      <Label>
-        Decisiones · {pendingCompanyDecisions(snapshot).length}
-        <Stale kind="decisions" section={snapshot.decisions} />
-      </Label>
-      <PendingDecision
-        snapshot={snapshot}
-        busy={props.busy}
-        onAnswer={props.onAnswer}
-        onOpen={() => setDecisionOpen(true)}
-      />
-      <Tile detail={costs ? <CostParts costs={costs} /> : undefined}>
-        <Label>
-          Coste por persona{costs ? ` · ${costs.daysPerMonth} días` : ""}
-          <Stale kind="costs" section={snapshot.costs} />
-        </Label>
-        {costs ? (
-          <>
-            <CostSummary costs={costs} />
-            <CostBars costs={costs} />
-          </>
-        ) : (
-          <NoData broken={snapshot.costs.status === "invalid"} />
-        )}
-      </Tile>
-      <Tile
-        {...(costs?.cache?.detail
-          ? { detail: <Sub>Detalle técnico: {costs.cache.detail}</Sub> }
-          : {})}
-      >
-        <Label>
-          Caché
-          <Stale kind="costs" section={snapshot.costs} />
-        </Label>
-        {costs?.cache ? <CacheView percent={costs.cache.percent} /> : <NoData />}
-      </Tile>
-      <Tile
-        {...(health?.database?.detail
-          ? { detail: <Sub>Detalle técnico: {health.database.detail}</Sub> }
-          : {})}
-      >
-        <Label>
-          Base de datos
-          <Stale kind="health" section={snapshot.health} />
-        </Label>
-        {health ? <DatabaseView health={health} /> : <NoData />}
-      </Tile>
-      <Tile>
-        <Label>Hilos, ahora</Label>
-        <ThreadsList snapshot={snapshot} />
-      </Tile>
-      <Tile detail={health ? <ErrorDays health={health} /> : undefined}>
-        <Label>
-          Errores, último mes
-          <Stale kind="health" section={snapshot.health} />
-        </Label>
-        {health ? <ErrorHeat health={health} /> : <NoData />}
-      </Tile>
-      <Tile detail={tests ? <JobsLog tests={tests} /> : undefined}>
-        <Label>
-          Pruebas reales
-          <Stale kind="tests" section={snapshot.tests} />
-        </Label>
-        {tests ? <TestsLine tests={tests} /> : <NoData />}
-      </Tile>
-      <Tile detail={health ? <SystemDetails health={health} /> : undefined}>
-        <Label>
-          Versiones y salud del sistema
-          <Stale kind="health" section={snapshot.health} />
-        </Label>
-        {health ? <VersionsAndHealth health={health} /> : <NoData />}
-      </Tile>
+    <View className="gap-4">
+      <DecisionsBlock snapshot={snapshot} busy={props.busy} onAnswer={props.onAnswer} />
+      <CostBlock snapshot={snapshot} />
+      <Block title="Simulador de coste">{costs ? <Simulator costs={costs} /> : <NoData />}</Block>
+      <ThreadsBlock snapshot={snapshot} />
+      <DatabaseBlock snapshot={snapshot} />
+      <TestsAndErrorsBlock snapshot={snapshot} />
+      <SystemStrip snapshot={snapshot} />
     </View>
   );
 }

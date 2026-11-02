@@ -1,10 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
 
 import {
+  companyErrorDays,
+  companyTestStateLabel,
   companyDatabaseIsStale,
   companyTestsByVersion,
   companyThreadTile,
-  companyCacheView,
   companyDatabaseView,
   companyPanelJobKind,
   companyPanelJobsByUrgency,
@@ -217,12 +218,6 @@ describe("plain views", () => {
     expect(companyPanelShortDate("ayer")).toBe("ayer");
   });
 
-  it("explains the cache in plain words", () => {
-    expect(companyCacheView(96.2).sentence).toContain("96");
-    expect(companyCacheView(96.2).tone).toBe("good");
-    expect(companyCacheView(30).tone).toBe("bad");
-  });
-
   it("gives no verdict on the database without a level to compare with", () => {
     expect(companyDatabaseView({ readGbPerDay: 455 })).toBeNull();
     expect(companyDatabaseView({ readGbPerDay: 50, targetGbPerDay: 100 })?.tone).toBe("good");
@@ -251,7 +246,7 @@ describe("companyThreadTile", () => {
   it("does not take a finished turn with background commands as work", () => {
     const tileView = tile({ status: "completed", backgroundCommands: 2 });
     expect(tileView.tone).toBe("idle");
-    expect(tileView.state).toContain("sin confirmar");
+    expect(tileView.caveat).toContain("sin confirmar");
   });
 
   it("shows a failure first, then a decision", () => {
@@ -325,5 +320,41 @@ describe("companyDatabaseIsStale", () => {
     const now = Date.parse("2026-11-02T20:30:00.000Z");
     expect(companyDatabaseIsStale("2026-11-02T20:10:00.000Z", now)).toBe(false);
     expect(companyDatabaseIsStale("2026-11-02T20:00:00.000Z", now)).toBe(true);
+  });
+});
+
+describe("companyTestStateLabel", () => {
+  const row = {
+    id: "x",
+    suite: "s",
+    message: "m",
+    why: null,
+    history: [],
+  };
+
+  it("says when a test only ran in another version", () => {
+    expect(
+      companyTestStateLabel({
+        ...row,
+        state: "untested",
+        previous: { version: "2.0.12", result: "passed" },
+      }),
+    ).toBe("Sin probar en esta versión · bien en 2.0.12");
+    expect(companyTestStateLabel({ ...row, state: "untested", previous: null })).toBe(
+      "Sin probar nunca",
+    );
+  });
+});
+
+describe("companyErrorDays", () => {
+  it("keeps 15 days and does not call an old figure today's", () => {
+    const days = Array.from({ length: 20 }, (_, index) => ({
+      date: `2026-10-${String(index + 1).padStart(2, "0")}`,
+      count: index,
+    }));
+    const now = Date.parse("2026-10-20T12:00:00");
+    expect(companyErrorDays(days, now).days).toHaveLength(15);
+    expect(companyErrorDays(days, now).latestIsToday).toBe(true);
+    expect(companyErrorDays(days, Date.parse("2026-10-22T12:00:00")).latestIsToday).toBe(false);
   });
 });
