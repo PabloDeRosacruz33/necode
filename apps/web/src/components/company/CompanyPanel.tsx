@@ -1178,7 +1178,7 @@ function PlansBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
       {plans.length === 0 ? (
         <NoData broken={section.status === "invalid"} what="planes" />
       ) : (
-        <div className="grid grid-cols-1 gap-3 @xl/company:grid-cols-2">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(24rem,100%),1fr))] gap-3">
           {plans.map((plan) => {
             const color = companyPlanColor(plan.color);
             return (
@@ -1201,7 +1201,7 @@ function PlansBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
                     {plan.steps.map((step, index) => (
                       <span
                         key={`${step.label}:${index}`}
-                        className={`min-w-0 flex-1 text-xs leading-tight wrap-anywhere ${step.status === "doing" ? "font-semibold" : ""}`}
+                        className={`min-w-0 flex-auto text-xs leading-tight wrap-break-word ${step.status === "doing" ? "font-semibold" : ""}`}
                       >
                         <span
                           className={`mb-1 block h-2 rounded-full ${step.status === "todo" ? "bg-foreground/12" : ""}`}
@@ -1225,7 +1225,7 @@ function PlansBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
           })}
           {open ? (
             <div
-              className="rounded-xl border bg-background p-4 @xl/company:col-span-2"
+              className="col-span-full rounded-xl border bg-background p-4"
               style={{ borderColor: companyPlanColor(open.color) }}
             >
               <b className="text-sm">{open.name}</b>

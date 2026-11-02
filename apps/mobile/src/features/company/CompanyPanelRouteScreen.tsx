@@ -1258,7 +1258,7 @@ function PlansBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
                 ) : (
                   <View className="mt-2.5 flex-row gap-1">
                     {plan.steps.map((step, index) => (
-                      <View key={`${step.label}:${index}`} className="min-w-0 flex-1">
+                      <View key={`${step.label}:${index}`} className="min-w-0 grow shrink">
                         <View
                           className="mb-1 h-2 rounded-full"
                           style={{
