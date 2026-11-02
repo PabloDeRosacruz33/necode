@@ -7,6 +7,8 @@ import {
   COMPANY_PANEL_COLORS,
   COMPANY_PANEL_JOB_KINDS,
   COMPANY_PANEL_REFRESH_MS,
+  COMPANY_PLAN_SQUARES,
+  companyPlanTurn,
   COMPANY_THREAD_TONES,
   companyErrorsByPlanText,
   companyPanelPlans,
@@ -54,7 +56,7 @@ import type {
   CompanyPanelDecision,
   CompanyPanelHealthFile,
   CompanyPanelLogTone,
-  CompanyPanelPlanStepStatus,
+  CompanyPanelPlan,
   CompanyPanelSnapshot,
   CompanyPanelSystemStatus,
   CompanyPanelTestsFile,
@@ -1150,16 +1152,102 @@ function CostBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
   );
 }
 
-const STEP_WORD: Record<CompanyPanelPlanStepStatus, string> = {
-  done: "Hecho",
-  doing: "Ahora",
-  todo: "Después",
-};
-const STEP_ICON: Record<CompanyPanelPlanStepStatus, string> = {
-  done: "✓",
-  doing: "▶\uFE0E",
-  todo: "·",
-};
+/** Inside a plan: its road, what stands out, and only if it is theirs, what the reader must do. */
+function PlanDetail(props: { readonly plan: CompanyPanelPlan; readonly person: string | null }) {
+  const { plan } = props;
+  const [pressed, setPressed] = useState<number | null>(null);
+  const color = companyPlanColor(plan.color);
+  const turn = companyPlanTurn(plan, props.person);
+  const squares = plan.squares ?? [];
+  const open = pressed === null ? undefined : squares[pressed];
+  return (
+    <div
+      className="col-span-full rounded-2xl border border-t-4 border-border bg-background p-5"
+      style={{ borderTopColor: color }}
+    >
+      <p className="text-2xl font-bold tracking-tight">{plan.name}</p>
+      {plan.steps.length === 0 ? (
+        <NoData what="camino" />
+      ) : (
+        <div className="mt-6 mb-2 flex">
+          {plan.steps.map((step, index) => {
+            const reached = step.status !== "todo";
+            return (
+              <div
+                key={`${step.label}:${index}`}
+                className={`relative min-w-0 flex-1 text-center text-xs leading-snug wrap-break-word ${reached ? "text-foreground" : "text-muted-foreground"} ${step.status === "doing" ? "font-bold" : ""}`}
+              >
+                {index > 0 ? (
+                  <span
+                    className={`absolute top-4 -left-1/2 h-1 w-full ${reached ? "" : "bg-foreground/14"}`}
+                    style={reached ? { background: color } : undefined}
+                  />
+                ) : null}
+                <span
+                  className={`relative z-1 mx-auto mb-1.5 flex size-9 items-center justify-center rounded-full text-sm font-bold ${reached ? "text-white" : "bg-muted text-foreground"}`}
+                  style={
+                    reached
+                      ? {
+                          background: color,
+                          ...(step.status === "doing" ? { boxShadow: `0 0 0 5px ${color}4d` } : {}),
+                        }
+                      : undefined
+                  }
+                >
+                  {step.status === "done" ? "✓" : index + 1}
+                </span>
+                {step.label}
+                {step.who ? (
+                  <span className="block text-2xs font-medium text-muted-foreground">
+                    {step.who}
+                  </span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {squares.length === 0 ? (
+        <NoData what="cuadrados" />
+      ) : (
+        <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2.5">
+          {squares.map((square, index) => {
+            const look = COMPANY_PLAN_SQUARES[square.status];
+            return (
+              <button
+                type="button"
+                key={`${square.text}:${index}`}
+                aria-expanded={pressed === index}
+                aria-label={`${look.label}: ${square.text}`}
+                onClick={() => setPressed((current) => (current === index ? null : index))}
+                style={{ background: look.color }}
+                className={`block min-h-21 w-full rounded-xl p-3.5 text-left text-white -outline-offset-2 hover:outline-2 hover:outline-foreground ${pressed === index ? "outline-2 outline-foreground" : ""}`}
+              >
+                <span aria-hidden className="flex h-6 items-center text-xl leading-none font-bold">
+                  {look.icon}
+                </span>
+                <b className="mt-1 block text-sm leading-snug">{square.text}</b>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {open ? (
+        <div className="mt-2.5 rounded-xl bg-foreground/7 p-3.5 text-sm">
+          {open.why ?? <span className="text-muted-foreground italic">Sin dato</span>}
+        </div>
+      ) : null}
+      {turn ? (
+        <div
+          className="mt-3.5 rounded-xl p-3.5 text-center font-bold text-white"
+          style={{ background: COMPANY_PLAN_SQUARES.decide.color }}
+        >
+          {turn}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function PlansBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -1223,24 +1311,7 @@ function PlansBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
               </button>
             );
           })}
-          {open ? (
-            <div
-              className="col-span-full rounded-xl border bg-background p-4"
-              style={{ borderColor: companyPlanColor(open.color) }}
-            >
-              <b className="text-sm">{open.name}</b>
-              {open.steps.map((step, index) => (
-                <div
-                  key={`${step.label}:${index}`}
-                  className="mt-2 grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-baseline gap-2 border-t border-border pt-2 text-xs"
-                >
-                  <b>{STEP_ICON[step.status]}</b>
-                  <span>{step.detail ?? step.label}</span>
-                  <Sub2>{STEP_WORD[step.status]}</Sub2>
-                </div>
-              ))}
-            </div>
-          ) : null}
+          {open ? <PlanDetail key={open.id} plan={open} person={snapshot.person} /> : null}
         </div>
       )}
     </Block>

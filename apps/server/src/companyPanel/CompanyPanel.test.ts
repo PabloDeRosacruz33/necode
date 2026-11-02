@@ -121,7 +121,9 @@ describe("company panel", () => {
               name: "Memoria",
               color: "#0d9488",
               threads: ["Performance"],
-              steps: [{ label: "Informe", status: "doing" }],
+              steps: [{ label: "Contrastar", status: "doing", who: "Revisor" }],
+              squares: [{ text: "Borrar", status: "bad", why: "Lo borrado sigue saliendo." }],
+              yourTurn: { text: "dime qué no se entiende", people: ["roi"] },
             },
           ],
         });

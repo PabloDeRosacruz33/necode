@@ -6,6 +6,8 @@ import {
   COMPANY_PANEL_COLORS,
   COMPANY_PANEL_JOB_KINDS,
   COMPANY_PANEL_REFRESH_MS,
+  COMPANY_PLAN_SQUARES,
+  companyPlanTurn,
   COMPANY_THREAD_TONES,
   companyErrorsByPlanText,
   companyPanelPlans,
@@ -53,7 +55,7 @@ import type {
   CompanyPanelDecision,
   CompanyPanelHealthFile,
   CompanyPanelLogTone,
-  CompanyPanelPlanStepStatus,
+  CompanyPanelPlan,
   CompanyPanelSnapshot,
   CompanyPanelSystemStatus,
   CompanyPanelTestsFile,
@@ -1209,16 +1211,113 @@ function CostBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
   );
 }
 
-const STEP_WORD: Record<CompanyPanelPlanStepStatus, string> = {
-  done: "Hecho",
-  doing: "Ahora",
-  todo: "Después",
-};
-const STEP_ICON: Record<CompanyPanelPlanStepStatus, string> = {
-  done: "✓",
-  doing: "▶\uFE0E",
-  todo: "·",
-};
+/** Inside a plan: its road, what stands out, and only if it is theirs, what the reader must do. */
+function PlanDetail(props: { readonly plan: CompanyPanelPlan; readonly person: string | null }) {
+  const { plan } = props;
+  const [pressed, setPressed] = useState<number | null>(null);
+  const color = companyPlanColor(plan.color);
+  const turn = companyPlanTurn(plan, props.person);
+  const squares = plan.squares ?? [];
+  const open = pressed === null ? undefined : squares[pressed];
+  return (
+    <View
+      className="mt-2 rounded-2xl bg-subtle p-4"
+      style={{ borderTopWidth: 5, borderTopColor: color }}
+    >
+      <Text className="font-t3-medium text-2xl text-foreground">{plan.name}</Text>
+      {plan.steps.length === 0 ? (
+        <NoData what="camino" />
+      ) : (
+        <View className="mt-5 mb-2 flex-row">
+          {plan.steps.map((step, index) => {
+            const reached = step.status !== "todo";
+            return (
+              <View key={`${step.label}:${index}`} className="min-w-0 flex-1 items-center">
+                {index > 0 ? (
+                  <View
+                    className="absolute h-1"
+                    style={{
+                      top: 14,
+                      left: "-50%",
+                      width: "100%",
+                      backgroundColor: reached ? color : "#8883",
+                    }}
+                  />
+                ) : null}
+                <View
+                  className="mb-1 h-8 w-8 items-center justify-center rounded-full"
+                  style={[
+                    { backgroundColor: reached ? color : "#555b" },
+                    step.status === "doing" ? { borderWidth: 3, borderColor: `${color}66` } : null,
+                  ]}
+                >
+                  <Text className="text-sm font-t3-medium text-white">
+                    {step.status === "done" ? "✓" : index + 1}
+                  </Text>
+                </View>
+                <Text
+                  className={`text-center text-2xs ${reached ? "text-foreground" : "text-foreground-muted"} ${step.status === "doing" ? "font-t3-medium" : ""}`}
+                >
+                  {step.label}
+                </Text>
+                {step.who ? (
+                  <Text className="text-center text-2xs text-foreground-muted">{step.who}</Text>
+                ) : null}
+              </View>
+            );
+          })}
+        </View>
+      )}
+      {squares.length === 0 ? (
+        <NoData what="cuadrados" />
+      ) : (
+        <View className="mt-4 flex-row flex-wrap gap-2.5">
+          {squares.map((square, index) => {
+            const look = COMPANY_PLAN_SQUARES[square.status];
+            return (
+              <Pressable
+                key={`${square.text}:${index}`}
+                accessibilityRole="button"
+                accessibilityLabel={`${look.label}: ${square.text}`}
+                accessibilityState={{ expanded: pressed === index }}
+                onPress={() => setPressed((current) => (current === index ? null : index))}
+                className="min-h-21 rounded-xl p-3"
+                style={{
+                  flexBasis: "47%",
+                  flexGrow: 1,
+                  backgroundColor: look.color,
+                  opacity: pressed !== null && pressed !== index ? 0.75 : 1,
+                }}
+              >
+                <View className="h-6 justify-center">
+                  <Text className="text-xl font-t3-medium text-white">{look.icon}</Text>
+                </View>
+                <Text className="mt-1 text-sm font-t3-medium text-white">{square.text}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+      {open ? (
+        <View className="mt-2.5 rounded-xl bg-grouped-card p-3">
+          {open.why ? (
+            <Text className="text-sm text-foreground">{open.why}</Text>
+          ) : (
+            <Text className="text-sm italic text-foreground-muted">Sin dato</Text>
+          )}
+        </View>
+      ) : null}
+      {turn ? (
+        <View
+          className="mt-3 rounded-xl p-3"
+          style={{ backgroundColor: COMPANY_PLAN_SQUARES.decide.color }}
+        >
+          <Text className="text-center text-sm font-t3-medium text-white">{turn}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 function PlansBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -1241,61 +1340,49 @@ function PlansBlock({ snapshot }: { snapshot: CompanyPanelSnapshot }) {
             const color = companyPlanColor(plan.color);
             const open = selected === plan.id;
             return (
-              <Pressable
-                key={plan.id}
-                accessibilityRole="button"
-                accessibilityState={{ expanded: open }}
-                onPress={() => setSelected((current) => (current === plan.id ? null : plan.id))}
-                className="rounded-xl bg-subtle p-3.5"
-                style={{ borderTopWidth: 4, borderTopColor: color }}
-              >
-                <View className="flex-row items-baseline justify-between gap-2">
-                  <Text className="shrink font-t3-medium text-sm text-foreground">{plan.name}</Text>
-                  {plan.summary ? <Sub>{plan.summary}</Sub> : null}
-                </View>
-                {plan.steps.length === 0 ? (
-                  <NoData what="pasos" />
-                ) : (
-                  <View className="mt-2.5 flex-row gap-1">
-                    {plan.steps.map((step, index) => (
-                      <View key={`${step.label}:${index}`} className="min-w-0 grow shrink">
-                        <View
-                          className="mb-1 h-2 rounded-full"
-                          style={{
-                            backgroundColor:
-                              step.status === "done"
-                                ? color
-                                : step.status === "doing"
-                                  ? `${color}99`
-                                  : "#8883",
-                          }}
-                        />
-                        <Text
-                          className={`text-2xs text-foreground ${step.status === "doing" ? "font-t3-medium" : ""}`}
-                        >
-                          {step.label}
-                        </Text>
-                      </View>
-                    ))}
+              <View key={plan.id}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: open }}
+                  onPress={() => setSelected((current) => (current === plan.id ? null : plan.id))}
+                  className="rounded-xl bg-subtle p-3.5"
+                  style={{ borderTopWidth: 4, borderTopColor: color }}
+                >
+                  <View className="flex-row items-baseline justify-between gap-2">
+                    <Text className="shrink font-t3-medium text-sm text-foreground">
+                      {plan.name}
+                    </Text>
+                    {plan.summary ? <Sub>{plan.summary}</Sub> : null}
                   </View>
-                )}
-                {open
-                  ? plan.steps.map((step, index) => (
-                      <View
-                        key={`${step.label}:${index}`}
-                        className="mt-2 flex-row items-baseline gap-2 border-t border-separator pt-2"
-                      >
-                        <Text className="w-4 text-xs font-t3-medium text-foreground">
-                          {STEP_ICON[step.status]}
-                        </Text>
-                        <Text className="min-w-0 flex-1 text-xs text-foreground">
-                          {step.detail ?? step.label}
-                        </Text>
-                        <Sub>{STEP_WORD[step.status]}</Sub>
-                      </View>
-                    ))
-                  : null}
-              </Pressable>
+                  {plan.steps.length === 0 ? (
+                    <NoData what="pasos" />
+                  ) : (
+                    <View className="mt-2.5 flex-row gap-1">
+                      {plan.steps.map((step, index) => (
+                        <View key={`${step.label}:${index}`} className="min-w-0 grow shrink">
+                          <View
+                            className="mb-1 h-2 rounded-full"
+                            style={{
+                              backgroundColor:
+                                step.status === "done"
+                                  ? color
+                                  : step.status === "doing"
+                                    ? `${color}99`
+                                    : "#8883",
+                            }}
+                          />
+                          <Text
+                            className={`text-2xs text-foreground ${step.status === "doing" ? "font-t3-medium" : ""}`}
+                          >
+                            {step.label}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </Pressable>
+                {open ? <PlanDetail plan={plan} person={snapshot.person} /> : null}
+              </View>
             );
           })}
         </View>

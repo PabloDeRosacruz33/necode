@@ -221,6 +221,9 @@ export type CompanyPanelTestsFile = typeof CompanyPanelTestsFile.Type;
 export const CompanyPanelPlanStepStatus = Schema.Literals(["done", "doing", "todo"]);
 export type CompanyPanelPlanStepStatus = typeof CompanyPanelPlanStepStatus.Type;
 
+export const CompanyPanelPlanSquareStatus = Schema.Literals(["ok", "bad", "decide", "partial"]);
+export type CompanyPanelPlanSquareStatus = typeof CompanyPanelPlanSquareStatus.Type;
+
 export const CompanyPanelPlan = Schema.Struct({
   id: TrimmedNonEmptyString,
   name: TrimmedNonEmptyString,
@@ -232,11 +235,29 @@ export const CompanyPanelPlan = Schema.Struct({
   threads: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   steps: Schema.Array(
     Schema.Struct({
-      /** A word or two, shown under the step's bar. */
+      /** A short verb, such as "Probar"; never a thread's name. */
       label: TrimmedNonEmptyString,
       status: CompanyPanelPlanStepStatus,
-      /** The sentence shown when the plan is opened; without it, the label. */
-      detail: Schema.optional(Schema.String),
+      /** Who it is on, as a small second line: a thread, or "Tú". */
+      who: Schema.optional(Schema.String),
+    }),
+  ),
+  /** What stands out when the plan is opened: two or three words each. */
+  squares: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        text: TrimmedNonEmptyString,
+        status: CompanyPanelPlanSquareStatus,
+        /** The plain sentence shown only when the square is pressed. */
+        why: Schema.optional(Schema.String),
+      }),
+    ),
+  ),
+  /** What a person must do. Shown only to `people`, as in `personas.json`; without it, to anyone. */
+  yourTurn: Schema.optional(
+    Schema.Struct({
+      text: TrimmedNonEmptyString,
+      people: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
     }),
   ),
 });

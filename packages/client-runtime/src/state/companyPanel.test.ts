@@ -5,6 +5,7 @@ import {
   companyErrorDays,
   companyErrorsByPlanText,
   companyPlanColor,
+  companyPlanTurn,
   companyTestsByPlan,
   companyThreadPlan,
   companyTestStateLabel,
@@ -488,5 +489,21 @@ describe("plans", () => {
     expect(companyErrorsByPlanText({ byPlan: [{ plan: "memoria", count: 2 }] }, plans)).toBe(
       "2 de Memoria",
     );
+  });
+});
+
+describe("companyPlanTurn", () => {
+  it("only tells the people it is for", () => {
+    const yourTurn = { text: "dime qué no se entiende", people: ["roi"] };
+    expect(companyPlanTurn({ yourTurn }, "roi")).toBe("Te toca: dime qué no se entiende");
+    expect(companyPlanTurn({ yourTurn }, "pablo")).toBeNull();
+    expect(companyPlanTurn({ yourTurn }, null)).toBeNull();
+  });
+
+  it("tells anyone when it names nobody, and nothing without a turn", () => {
+    expect(companyPlanTurn({ yourTurn: { text: "mira esto" } }, "pablo")).toBe(
+      "Te toca: mira esto",
+    );
+    expect(companyPlanTurn({}, "roi")).toBeNull();
   });
 });

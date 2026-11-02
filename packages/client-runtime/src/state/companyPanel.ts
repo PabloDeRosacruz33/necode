@@ -6,6 +6,7 @@ import {
   type CompanyPanelCostsFile,
   type CompanyPanelSnapshot,
   type CompanyPanelPlan,
+  type CompanyPanelPlanSquareStatus,
   type CompanyPanelTest,
   type CompanyPanelTestResult,
   type CompanyPanelTestsFile,
@@ -418,6 +419,28 @@ export const companyPanelPlans = (snapshot: CompanyPanelSnapshot) =>
 /** A plan's colour, or the no-plan one if the file's is not "#rrggbb". */
 export const companyPlanColor = (color: string) =>
   /^#[0-9a-f]{6}$/i.test(color) ? color : COMPANY_PANEL_COLORS.noPlan;
+
+/** The squares inside a plan: filled colours that read at a glance, with no text to go through. */
+export const COMPANY_PLAN_SQUARES: Record<
+  CompanyPanelPlanSquareStatus,
+  { readonly color: string; readonly icon: string; readonly label: string }
+> = {
+  ok: { color: "#15803d", icon: "✓", label: "Bien" },
+  bad: { color: "#dc2626", icon: "✕", label: "Mal" },
+  decide: { color: "#6d4fc4", icon: "?", label: "Por decidir" },
+  partial: { color: "#64748b", icon: "…", label: "A medias" },
+};
+
+/** A plan's "Te toca" for this person; someone else's turn is not theirs to see. */
+export function companyPlanTurn(
+  plan: Pick<CompanyPanelPlan, "yourTurn">,
+  person: string | null,
+): string | null {
+  const turn = plan.yourTurn;
+  if (turn === undefined) return null;
+  if (turn.people !== undefined && (person === null || !turn.people.includes(person))) return null;
+  return `Te toca: ${turn.text}`;
+}
 
 /** The plan a thread paints with; threads outside every plan are the system's. */
 export function companyThreadPlan(
