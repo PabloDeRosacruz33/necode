@@ -143,6 +143,7 @@ const section = <S extends Schema.Top>(data: S) =>
 
 export const CompanyPanelAnsweredDecision = Schema.Struct({
   decisionId: TrimmedNonEmptyString,
+  title: Schema.optional(TrimmedNonEmptyString),
   answer: TrimmedNonEmptyString,
   person: TrimmedNonEmptyString,
   answeredAt: IsoDateTime,

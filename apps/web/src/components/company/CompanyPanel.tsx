@@ -251,7 +251,7 @@ function ErrorHeat({ health }: { health: CompanyPanelHealthFile }) {
 
 function SystemsGrid({ health }: { health: CompanyPanelHealthFile }) {
   return (
-    <div className="grid grid-cols-2 gap-1.5 @xl/company:grid-cols-3">
+    <div className="grid grid-cols-2 content-start gap-1.5 @xl/company:grid-cols-3">
       {health.systems.map((system) => (
         <Hint
           key={system.name}
@@ -667,7 +667,7 @@ function DecisionsTab(props: {
                 className="flex justify-between gap-3 rounded-lg border border-border bg-card px-2.5 py-1.5"
               >
                 <span>
-                  <b>{answered.decisionId}</b> · {answered.answer}
+                  <b>{answered.title ?? answered.decisionId}</b> · {answered.answer}
                 </span>
                 <span className="flex-none text-muted-foreground">{answered.person}</span>
               </div>

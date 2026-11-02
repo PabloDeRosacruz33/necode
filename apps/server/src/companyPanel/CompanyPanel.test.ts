@@ -94,6 +94,7 @@ describe("company panel", () => {
         );
         assert.equal(result.answered[0]?.answer, "Abrirlo para todos");
         assert.equal(result.answered[0]?.person, "roi");
+        assert.equal(result.answered[0]?.title, "¿Abrimos HubSpot?");
 
         const again = yield* prepareCompanyPanelAnswer({
           dir,

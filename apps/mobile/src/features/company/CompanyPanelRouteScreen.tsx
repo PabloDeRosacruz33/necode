@@ -779,7 +779,7 @@ function EnvironmentPanel({ environmentId }: { environmentId: EnvironmentId }) {
           {snapshot.answered.length > 0 ? <Label>Ya contestadas</Label> : null}
           {[...snapshot.answered].reverse().map((answered) => (
             <Text key={answered.decisionId} className="text-xs text-foreground">
-              {answered.decisionId} · {answered.answer} · {answered.person}
+              {answered.title ?? answered.decisionId} · {answered.answer} · {answered.person}
             </Text>
           ))}
         </View>

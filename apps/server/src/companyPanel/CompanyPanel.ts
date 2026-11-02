@@ -221,6 +221,7 @@ export const prepareCompanyPanelAnswer = (input: {
         const answeredAt = DateTime.formatIso(yield* DateTime.now);
         const line = yield* encodeAnswerLine({
           decisionId: decision.id,
+          title: decision.title,
           answer: label,
           person,
           answeredAt,
