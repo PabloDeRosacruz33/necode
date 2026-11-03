@@ -1396,10 +1396,10 @@ it.effect("starts a new worktree as a Necode task named after the person and the
           import("node:timers/promises").then((timers) => timers.setTimeout(10)),
         );
       }
-      const created = harness.createWorktree.mock.calls.map((call) => ({
-        branch: call[0]?.newRefName,
-        path: call[0]?.path,
-      }));
+      // Two separate launches: which reaches git first is not part of the behavior.
+      const created = harness.createWorktree.mock.calls
+        .map((call) => ({ branch: call[0]?.newRefName, path: call[0]?.path }))
+        .toSorted((left, right) => String(right.branch).localeCompare(String(left.branch)));
       assert.deepEqual(created, [
         { branch: "roi/fabulas-v1", path: `${config.worktreesDir}/repo/fabulas-v1` },
         { branch: "pablo/generated-branch", path: `${config.worktreesDir}/repo/generated-branch` },
