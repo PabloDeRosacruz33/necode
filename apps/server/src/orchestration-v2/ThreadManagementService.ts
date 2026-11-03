@@ -792,6 +792,8 @@ const make = Effect.gen(function* () {
         attachments: input.attachments,
         ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
         dispatchMode,
+        // Decided again under the thread's lock, where it cannot be out of date.
+        ...(input.mode === "auto" ? { deliveryIntent: "auto" as const } : {}),
         createdBy: input.createdBy,
         creationSource: input.creationSource,
       });

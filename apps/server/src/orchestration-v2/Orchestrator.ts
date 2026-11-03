@@ -129,7 +129,7 @@ import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { ProviderSwitchServiceV2 } from "./ProviderSwitchService.ts";
 import {
   isAutomaticCompletionRun,
-  isThreadSentMessage,
+  isUnwatchedMessage,
   queuedRunsInDeliveryOrder,
 } from "./QueuedRunOrder.ts";
 import { RuntimePolicyV2 } from "./RuntimePolicy.ts";
@@ -1273,6 +1273,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ]);
     });
 
+  const usageLimitBlocksThread = (
+    projection: Pick<
+      OrchestrationV2ThreadProjection,
+      "thread" | "providerSessions" | "runs" | "turnItems"
+    >,
+  ) => {
+    const sessionError =
+      projection.providerSessions
+        .filter((session) => session.providerInstanceId === projection.thread.providerInstanceId)
+        .toSorted(
+          (left, right) =>
+            DateTime.toEpochMillis(right.updatedAt) - DateTime.toEpochMillis(left.updatedAt),
+        )[0]?.lastError ?? null;
+    return usageLimitBlockedRun(projection.runs, projection.turnItems, sessionError) !== null;
+  };
+
   const startNextQueuedRun = (
     threadId: ThreadId,
     options?: { readonly failedRunId?: RunId; readonly endedRunId?: RunId },
@@ -1291,14 +1307,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
       // The limit already stopped this thread. Starting the queue would send
       // every waiting message and drop it from the queue as each one fails.
-      const sessionError =
-        projection.providerSessions
-          .filter((session) => session.providerInstanceId === projection.thread.providerInstanceId)
-          .toSorted(
-            (left, right) =>
-              DateTime.toEpochMillis(right.updatedAt) - DateTime.toEpochMillis(left.updatedAt),
-          )[0]?.lastError ?? null;
-      if (usageLimitBlockedRun(projection.runs, projection.turnItems, sessionError) !== null) {
+      if (usageLimitBlocksThread(projection)) {
         return;
       }
       const queuedRun = nextQueuedRun(projection);
@@ -4733,6 +4742,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           dispatchMode = { type: "start_immediately" };
         }
       }
+      // Steering now would overtake what is already waiting. It joins the end of
+      // the queue, and the queue goes into the turn in order once this commits.
+      if (
+        command.deliveryIntent === "auto" &&
+        dispatchMode.type === "steer_active" &&
+        projection.runs.some((run) => run.status === "queued")
+      ) {
+        dispatchMode = { type: "queue_after_active" };
+      }
       if (
         command.notification !== undefined &&
         (command.createdBy !== "agent" ||
@@ -4929,7 +4947,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         projection.thread.worktreePath === null
           ? latestRun
           : undefined;
-      const queueBehindRun = activeRun ?? worktreeMissingRun;
+      // A free thread with messages waiting takes them in order: this one joins
+      // the end instead of overtaking them. These keep starting on their own:
+      // continuing a stopped run, which goes ahead of its queue by design; a limit,
+      // where a new message may reach another account; and a worktree that is gone,
+      // where what waits must not run in the project checkout.
+      const latestRunLostWorktree =
+        (latestRun?.status === "failed" || latestRun?.status === "interrupted") &&
+        latestRun.workspacePreparation?.type === "worktree" &&
+        projection.thread.worktreePath === null;
+      const oldestWaitingRun =
+        activeRun === undefined &&
+        worktreeMissingRun === undefined &&
+        dispatchMode.type === "start_immediately" &&
+        command.restartContinuationOfRunId === undefined &&
+        command.manualContinuationOfRunId === undefined &&
+        !latestRunLostWorktree &&
+        !usageLimitBlocksThread(projection)
+          ? nextQueuedRun(projection)
+          : undefined;
+      const queueBehindRun = activeRun ?? worktreeMissingRun ?? oldestWaitingRun;
       const pendingMergeBackTransfers = pendingMergeBackTransfersForThread(projection);
       const shouldQueue =
         queueBehindRun !== undefined &&
@@ -5044,12 +5081,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           rootNodeId,
           activeAttemptId: attemptId,
           status: "queued",
-          ...(worktreeMissingRun !== undefined ||
-          projection.runs.some(
-            (candidate) => candidate.status === "queued" && candidate.queueHeld === true,
-          )
-            ? { queueHeld: true }
-            : {}),
+          ...(worktreeMissingRun !== undefined ? { queueHeld: true } : {}),
+          ...(command.deliveryIntent === "auto" ? { deliverInNextStep: true } : {}),
           queuePosition:
             Math.max(
               0,
@@ -5125,6 +5158,21 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ...(command.notification === undefined ? {} : { notification: command.notification }),
         };
         const emitEvent = emit(events, command);
+        // Someone new is talking to this thread, so a hold from a stop is over.
+        // Only a missing worktree keeps it: there, what waits has nowhere to run.
+        if (worktreeMissingRun === undefined) {
+          for (const held of projection.runs) {
+            if (held.status !== "queued" || held.queueHeld !== true) continue;
+            yield* emitEvent({
+              type: "run.updated",
+              threadId: command.threadId,
+              runId: held.id,
+              providerInstanceId: held.providerInstanceId,
+              occurredAt: now,
+              payload: { ...held, queueHeld: false },
+            });
+          }
+        }
         if (targetProviderThread === undefined) {
           yield* emitEvent({
             type: "provider-thread.updated",
@@ -8815,9 +8863,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const bufferedMessageIds = new Set(
         queuedMessages.filter(isBufferedProviderNotification).map((message) => message.id),
       );
-      const threadSentMessageIds = new Set(
-        queuedMessages.filter(isThreadSentMessage).map((message) => message.id),
-      );
+      // With anything in the queue that nobody watches, holding it would leave
+      // it stuck behind whatever is held, so the whole queue carries on.
+      const holdsQueue = !queuedMessages.some(isUnwatchedMessage);
       for (const run of runs) {
         // A resumed queue can have a lower ordinal than a pending continuation source.
         // Stop must reach those sources even when interrupting the resumed run succeeds.
@@ -8840,7 +8888,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           );
           continue;
         }
-        if (run.queueHeld === true || threadSentMessageIds.has(run.userMessageId)) continue;
+        if (run.queueHeld === true || !holdsQueue) continue;
         yield* emitEvent({
           type: "run.updated",
           threadId: thread.id,
@@ -11154,6 +11202,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     if (command.type === "queue.resume") {
       yield* mapDispatchError(command)(startNextQueuedRun(command.threadId));
     }
+    if (command.type === "message.dispatch" && command.dispatchMode.type !== "defer_start") {
+      // What this message joined goes on now, whether the thread is free or working.
+      yield* mapDispatchError(command)(startNextQueuedRun(command.threadId));
+      yield* steerQueuedIntoActiveRun(command.threadId);
+    }
     if (command.type === "notification.delivery.accept") {
       yield* mapDispatchError(command)(offerDelegatedCompletionDeliveries(command.threadId));
     }
@@ -11166,6 +11219,42 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       storedEvents: committed.storedEvents,
     } satisfies OrchestratorV2DispatchResult;
   });
+
+  /**
+   * A message that could not enter when it was sent, because the turn was still starting, enters
+   * now instead of waiting for the turn to end. Stops at the first one that cannot, to keep order.
+   */
+  function steerQueuedIntoActiveRun(threadId: ThreadId) {
+    return Effect.gen(function* () {
+      for (;;) {
+        const projection = yield* readCommandProjection(threadId);
+        const next = queuedRunsInDeliveryOrder(projection)[0];
+        if (next === undefined || next.deliverInNextStep !== true || next.queueHeld === true)
+          return;
+        const mode = resolveMessageDispatchIntent(
+          projection,
+          { type: "queue_after_active" },
+          "auto",
+        );
+        if (mode.type !== "steer_active") return;
+        yield* dispatchWithReceiptEffect({
+          type: "queued-message.promote-to-steer",
+          commandId: CommandId.make(`command:system:steer-queued:${next.id}`),
+          threadId,
+          queuedRunId: next.id,
+          targetRunId: mode.targetRunId,
+        });
+      }
+    }).pipe(
+      // It stays queued in its place and goes in when this turn ends.
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Failed to steer a queued message into the active run", {
+          threadId,
+          cause,
+        }),
+      ),
+    );
+  }
 
   const dispatchWithReceipt = (command: OrchestrationV2ServerCommand) =>
     Effect.gen(function* () {
@@ -11258,6 +11347,23 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             stored.event.payload.status === "rolled_back"),
       ),
       Stream.runForEach(handleTerminalRun),
+      Effect.forkDetach,
+    );
+  // The moment a turn can be steered, what was waiting for that goes in.
+  yield* eventSink
+    .stream({ afterSequence: terminalEventsAfterSequence, eventType: "provider-turn.updated" })
+    .pipe(
+      Stream.filter(
+        (stored) =>
+          stored.event.type === "provider-turn.updated" &&
+          stored.event.payload.status === "running",
+      ),
+      Stream.runForEach((stored) =>
+        threadDispatch.withLock(
+          stored.event.threadId,
+          steerQueuedIntoActiveRun(stored.event.threadId),
+        ),
+      ),
       Effect.forkDetach,
     );
 

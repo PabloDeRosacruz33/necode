@@ -127,6 +127,7 @@ const deliveries = [
   "scheduled message",
   "user steering",
   "promoted queued message",
+  "messages that waited for the turn",
 ] as const;
 
 it.effect.each(deliveries)(
@@ -344,6 +345,53 @@ it.effect.each(deliveries)(
                 ),
               ),
             );
+          } else if (delivery === "messages that waited for the turn") {
+            // Queued while the turn could not be steered yet: the first of them
+            // goes ahead of the one sent now, and both enter this same turn.
+            yield* orchestrator.dispatch({
+              type: "message.dispatch",
+              commandId: CommandId.make("waited"),
+              threadId,
+              messageId: MessageId.make("waited"),
+              text: "First in.",
+              attachments: [],
+              dispatchMode: { type: "queue_after_active" },
+              createdBy: "agent",
+              creationSource: "mcp",
+            });
+            const waiting = (yield* orchestrator.getThreadProjection(threadId)).runs[1]!;
+            yield* (yield* EventSink.EventSinkV2).write({
+              events: [
+                {
+                  id: EventId.make("waited-flag"),
+                  type: "run.updated",
+                  threadId,
+                  occurredAt: yield* DateTime.now,
+                  payload: { ...waiting, deliverInNextStep: true },
+                },
+              ],
+            });
+            yield* orchestrator.dispatch({
+              type: "message.dispatch",
+              commandId: CommandId.make("sent-now"),
+              threadId,
+              messageId,
+              text: "Second in.",
+              attachments: [],
+              dispatchMode: { type: "start_immediately" },
+              deliveryIntent: "auto",
+              createdBy: "agent",
+              creationSource: "mcp",
+            });
+            const entered = yield* orchestrator.getThreadProjection(threadId);
+            assert.deepEqual(
+              entered.runs.filter((run) => run.status === "queued"),
+              [],
+            );
+            const steers = entered.turnItems
+              .filter((item) => item.type === "user_message" && item.runId === parent.id)
+              .map((item) => (item.type === "user_message" ? item.text : ""));
+            assert.deepEqual(steers.slice(-2), ["First in.", "Second in."]);
           } else if (delivery === "user steering") {
             yield* orchestrator.dispatch({
               type: "message.dispatch",
@@ -392,9 +440,14 @@ it.effect.each(deliveries)(
           }
           yield* worker.drain();
           const explicitSteer =
-            delivery === "user steering" || delivery === "promoted queued message";
+            delivery === "user steering" ||
+            delivery === "promoted queued message" ||
+            delivery === "messages that waited for the turn";
           assert.equal(batchAbort.signal.aborted, explicitSteer);
-          assert.equal(offers.length, explicitSteer ? 2 : 1);
+          assert.equal(
+            offers.length,
+            delivery === "messages that waited for the turn" ? 3 : explicitSteer ? 2 : 1,
+          );
           const finished = yield* watch(
             (event) =>
               event.type === "run.updated" &&
@@ -441,10 +494,10 @@ it.effect.each(deliveries)(
             assert.equal(read.toolNonExecutionKind, explicitSteer ? "cancelled" : undefined);
             assert.equal(read.type === "dynamic_tool" && read.output === refusal, explicitSteer);
           }
-          assert.equal(offers.length, 2);
+          assert.equal(offers.length, delivery === "messages that waited for the turn" ? 3 : 2);
           assert.equal(
             offers.filter((offer) => offer.priority === "now").length,
-            explicitSteer ? 1 : 0,
+            delivery === "messages that waited for the turn" ? 2 : explicitSteer ? 1 : 0,
           );
           if (!explicitSteer) {
             assert.equal(after.runs.length, 2);
@@ -461,7 +514,7 @@ it.effect.each(deliveries)(
           yield* orchestrator.recoverDelegatedTasks;
           yield* orchestrator.resumeQueuedRuns;
           yield* worker.drain();
-          assert.equal(offers.length, 2);
+          assert.equal(offers.length, delivery === "messages that waited for the turn" ? 3 : 2);
         }).pipe(
           Effect.provide(
             ProviderReplayHarness.layerWithRegistry(

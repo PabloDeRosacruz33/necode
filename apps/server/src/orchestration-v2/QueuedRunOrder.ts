@@ -16,6 +16,21 @@ export function isThreadSentMessage(
   return message.senderThreadId !== undefined && message.createdBy === "agent";
 }
 
+/**
+ * Whether nobody is watching for this message: another thread's, or a scheduled task's. A stop or a
+ * restart must not hold a queue that has one, because no person would come to release it. On
+ * 2026-11-02 a restart held a scheduled message, every later one was born held behind it, and the
+ * Coordinador's queue stayed stuck for a day.
+ */
+export function isUnwatchedMessage(
+  message: Pick<
+    OrchestrationV2ConversationMessage,
+    "senderThreadId" | "createdBy" | "scheduledTaskId"
+  >,
+): boolean {
+  return isThreadSentMessage(message) || message.scheduledTaskId !== undefined;
+}
+
 export function isAutomaticCompletionRun(
   projection: Pick<OrchestrationV2ThreadProjection, "runs" | "messages">,
   run: OrchestrationV2Run,
